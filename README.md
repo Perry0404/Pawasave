@@ -2,6 +2,8 @@
 
 **Get paid in Naira. Save in USDC. Withdraw anytime — your money is never locked, not even for a minute.**
 
+**Live Demo**: [https://frontend-one-psi-50.vercel.app](https://frontend-one-psi-50.vercel.app)
+
 PawaSave is a fintech platform for Nigerian businesses (especially market traders) that provides:
 
 - **Instant Naira Payments → USDC Savings** — Receive payments in Naira, automatically converted and saved in USDC on Base L2
@@ -62,7 +64,7 @@ npm install
 npm run dev
 ```
 
-App runs on `http://localhost:3001` and proxies API calls to the backend.
+App runs on `http://localhost:3001`. The frontend is self-contained — it uses localStorage for state management and works without the backend running. The live demo is deployed on Vercel.
 
 ## Key Flows
 

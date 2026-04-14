@@ -58,24 +58,7 @@ create policy "Users insert own txs" on public.transactions for insert with chec
 
 create index idx_transactions_user on public.transactions(user_id, created_at desc);
 
--- ── Split Rules ──
-create table public.split_rules (
-  id uuid primary key default uuid_generate_v4(),
-  user_id uuid not null references public.profiles(id) on delete cascade,
-  name text not null,
-  vault_percent int not null default 0 check (vault_percent >= 0 and vault_percent <= 100),
-  naira_percent int not null default 100 check (naira_percent >= 0 and naira_percent <= 100),
-  esusu_percent int not null default 0 check (esusu_percent >= 0 and esusu_percent <= 100),
-  esusu_group_id uuid references public.esusu_groups(id),
-  min_amount_kobo bigint not null default 0,
-  active boolean not null default true,
-  created_at timestamptz not null default now()
-);
-
-alter table public.split_rules enable row level security;
-create policy "Users manage own rules" on public.split_rules for all using (auth.uid() = user_id);
-
--- ── Esusu Groups ──
+-- ── Esusu Groups (created BEFORE split_rules and esusu_members) ──
 create table public.esusu_groups (
   id uuid primary key default uuid_generate_v4(),
   name text not null,
@@ -91,13 +74,10 @@ create table public.esusu_groups (
 );
 
 alter table public.esusu_groups enable row level security;
-create policy "Members read groups" on public.esusu_groups for select using (
-  exists (select 1 from public.esusu_members where group_id = esusu_groups.id and user_id = auth.uid())
-  or owner_id = auth.uid()
-);
+-- Owner policy first; member-read policy added AFTER esusu_members table exists
 create policy "Owner manages group" on public.esusu_groups for all using (owner_id = auth.uid());
 
--- ── Esusu Members ──
+-- ── Esusu Members (created BEFORE policies that reference it) ──
 create table public.esusu_members (
   id uuid primary key default uuid_generate_v4(),
   group_id uuid not null references public.esusu_groups(id) on delete cascade,
@@ -112,6 +92,29 @@ create policy "Members read members" on public.esusu_members for select using (
   exists (select 1 from public.esusu_members m where m.group_id = esusu_members.group_id and m.user_id = auth.uid())
 );
 create policy "Users insert self" on public.esusu_members for insert with check (auth.uid() = user_id);
+
+-- NOW add the esusu_groups member-read policy (esusu_members exists now)
+create policy "Members read groups" on public.esusu_groups for select using (
+  exists (select 1 from public.esusu_members where group_id = esusu_groups.id and user_id = auth.uid())
+  or owner_id = auth.uid()
+);
+
+-- ── Split Rules (esusu_groups exists now) ──
+create table public.split_rules (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  name text not null,
+  vault_percent int not null default 0 check (vault_percent >= 0 and vault_percent <= 100),
+  naira_percent int not null default 100 check (naira_percent >= 0 and naira_percent <= 100),
+  esusu_percent int not null default 0 check (esusu_percent >= 0 and esusu_percent <= 100),
+  esusu_group_id uuid references public.esusu_groups(id),
+  min_amount_kobo bigint not null default 0,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+alter table public.split_rules enable row level security;
+create policy "Users manage own rules" on public.split_rules for all using (auth.uid() = user_id);
 
 -- ── Esusu Contributions ──
 create table public.esusu_contributions (

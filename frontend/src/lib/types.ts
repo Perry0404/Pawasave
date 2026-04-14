@@ -1,7 +1,7 @@
 export interface Profile {
   id: string
   phone: string | null
-  business_name: string
+  display_name: string
   created_at: string
 }
 

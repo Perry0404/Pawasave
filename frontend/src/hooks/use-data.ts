@@ -25,11 +25,11 @@ export function useAuth() {
     return () => subscription.unsubscribe()
   }, [])
 
-  const signUp = async (email: string, password: string, businessName: string) => {
+  const signUp = async (email: string, password: string, displayName: string) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { business_name: businessName } },
+      options: { data: { display_name: displayName } },
     })
     if (error) throw error
     return data

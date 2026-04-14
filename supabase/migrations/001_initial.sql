@@ -8,7 +8,7 @@ create extension if not exists "uuid-ossp";
 create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   phone text,
-  business_name text not null default '',
+  display_name text not null default '',
   created_at timestamptz not null default now()
 );
 
@@ -172,8 +172,8 @@ create policy "Members insert votes" on public.emergency_votes for insert with c
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, phone, business_name)
-  values (new.id, new.phone, coalesce(new.raw_user_meta_data->>'business_name', ''));
+  insert into public.profiles (id, phone, display_name)
+  values (new.id, new.phone, coalesce(new.raw_user_meta_data->>'display_name', ''));
   insert into public.wallets (user_id) values (new.id);
   return new;
 end;

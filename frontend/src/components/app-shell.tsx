@@ -36,7 +36,7 @@ export default function AppShell() {
           </div>
           <div>
             <p className="text-white text-sm font-bold tracking-tight">PawaSave</p>
-            <p className="text-slate-500 text-[11px]">{profile?.business_name || user?.email}</p>
+            <p className="text-slate-500 text-[11px]">{profile?.display_name || user?.email}</p>
           </div>
         </div>
         <button

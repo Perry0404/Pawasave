@@ -100,9 +100,9 @@ export default function GroupsView({ user }: Props) {
     const profileIds = m?.map((x) => x.user_id) || []
     const { data: profiles } = await supabase
       .from('profiles')
-      .select('id, business_name')
+      .select('id, display_name')
       .in('id', profileIds)
-    const nameMap = new Map(profiles?.map((p) => [p.id, p.business_name]) || [])
+    const nameMap = new Map(profiles?.map((p) => [p.id, p.display_name]) || [])
     setMembers(
       (m || []).map((x) => ({ ...x, profile_name: nameMap.get(x.user_id) || 'Member' }))
     )

@@ -2,16 +2,17 @@
 
 import { useState } from 'react'
 import { useAuth } from '@/hooks/use-data'
-import { Shield, Mail, Lock, Store, ArrowRight, Loader2 } from 'lucide-react'
+import { Shield, Mail, Lock, User, ArrowRight, Loader2, Eye, EyeOff } from 'lucide-react'
 
 export default function AuthScreen() {
   const { signUp, signIn } = useAuth()
   const [mode, setMode] = useState<'login' | 'register'>('register')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [biz, setBiz] = useState('')
+  const [name, setName] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [showPw, setShowPw] = useState(false)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -23,7 +24,7 @@ export default function AuthScreen() {
     setBusy(true)
     try {
       if (mode === 'register') {
-        await signUp(email, password, biz || email.split('@')[0])
+        await signUp(email, password, name || email.split('@')[0])
       } else {
         await signIn(email, password)
       }
@@ -42,7 +43,7 @@ export default function AuthScreen() {
         </div>
         <h1 className="text-3xl font-bold text-white tracking-tight">PawaSave</h1>
         <p className="text-slate-400 mt-2 text-center text-sm leading-relaxed max-w-xs">
-          Collect naira. Save in dollars.<br />Withdraw anytime.
+          Collect naira. Save in dollars.<br />Withdraw anytime. For everyone.
         </p>
       </div>
 
@@ -75,7 +76,7 @@ export default function AuthScreen() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@business.com"
+                placeholder="you@email.com"
                 className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 autoComplete="email"
               />
@@ -87,26 +88,34 @@ export default function AuthScreen() {
             <div className="relative">
               <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
-                type="password"
+                type={showPw ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Min 6 characters"
-                className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full pl-11 pr-11 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
               />
+              <button
+                type="button"
+                onClick={() => setShowPw(!showPw)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition p-0.5"
+                tabIndex={-1}
+              >
+                {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
           </div>
 
           {mode === 'register' && (
             <div>
-              <label className="text-xs font-medium text-slate-500 mb-1.5 block">Business name</label>
+              <label className="text-xs font-medium text-slate-500 mb-1.5 block">Your name</label>
               <div className="relative">
-                <Store className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input
                   type="text"
-                  value={biz}
-                  onChange={(e) => setBiz(e.target.value)}
-                  placeholder="e.g. Mama Nkechi Store"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Chidi Okafor"
                   className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>

@@ -6,7 +6,8 @@ import HomeView from './home-view'
 import VaultView from './vault-view'
 import GroupsView from './groups-view'
 import ActivityView from './activity-view'
-import { Home, Vault, Users, Activity, LogOut, Shield } from 'lucide-react'
+import Logo from './logo'
+import { Home, Vault, Users, Activity, LogOut } from 'lucide-react'
 
 type Tab = 'home' | 'vault' | 'groups' | 'activity'
 
@@ -31,9 +32,7 @@ export default function AppShell() {
       {/* Header */}
       <header className="bg-slate-900 px-5 pt-4 pb-3 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center">
-            <Shield className="w-4 h-4 text-white" strokeWidth={2.5} />
-          </div>
+          <Logo size={32} />
           <div>
             <p className="text-white text-sm font-bold tracking-tight">PawaSave</p>
             <p className="text-slate-500 text-[11px]">{profile?.display_name || user?.email}</p>

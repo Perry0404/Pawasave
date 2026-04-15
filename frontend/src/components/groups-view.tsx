@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { formatNaira, timeAgo } from '@/lib/format'
-import { Users, Plus, ChevronRight, Loader2, AlertCircle, ArrowLeft, Send } from 'lucide-react'
+import { formatNaira, formatUsdc, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
+import { Users, Plus, ChevronRight, Loader2, AlertCircle, ArrowLeft, Send, Vault } from 'lucide-react'
 import type { EsusuGroup, EsusuMember, EsusuContribution } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -22,6 +22,7 @@ export default function GroupsView({ user }: Props) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
+  const [payWithUsdc, setPayWithUsdc] = useState(false)
 
   // Create form
   const [formName, setFormName] = useState('')
@@ -120,6 +121,24 @@ export default function GroupsView({ user }: Props) {
     const member = members.find((m) => m.user_id === user.id)
     if (!member) { setFeedback('Not a member'); return }
     setBusy(true)
+
+    if (payWithUsdc) {
+      // First withdraw from USDC vault to naira, then contribute
+      const rate = getRate()
+      const usdcMicro = koboToMicroUsdc(selected.contribution_amount_kobo, rate)
+      const { data: vaultOk, error: vaultErr } = await supabase.rpc('withdraw_from_vault', {
+        p_user_id: user.id,
+        p_naira_kobo: selected.contribution_amount_kobo,
+        p_usdc_micro: usdcMicro,
+      })
+      if (vaultErr || !vaultOk) {
+        setFeedback(vaultErr?.message || 'Insufficient USDC vault balance')
+        setBusy(false)
+        setTimeout(() => setFeedback(''), 3000)
+        return
+      }
+    }
+
     const { error } = await supabase.rpc('esusu_contribute', {
       p_user_id: user.id,
       p_group_id: selected.id,
@@ -167,6 +186,24 @@ export default function GroupsView({ user }: Props) {
           ))}
         </div>
 
+        {/* Pay with USDC toggle */}
+        <button
+          onClick={() => setPayWithUsdc(!payWithUsdc)}
+          className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition mb-3 ${
+            payWithUsdc ? 'border-cyan-300 bg-cyan-50' : 'border-slate-200 bg-white'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Vault className={`w-4 h-4 ${payWithUsdc ? 'text-cyan-600' : 'text-slate-400'}`} />
+            <span className={`text-sm font-medium ${payWithUsdc ? 'text-cyan-700' : 'text-slate-600'}`}>
+              Pay from USDC Vault
+            </span>
+          </div>
+          <div className={`w-9 h-5 rounded-full transition-colors flex items-center ${payWithUsdc ? 'bg-cyan-500 justify-end' : 'bg-slate-300 justify-start'}`}>
+            <div className="w-4 h-4 bg-white rounded-full mx-0.5 shadow-sm" />
+          </div>
+        </button>
+
         <button
           onClick={contribute}
           disabled={busy}
@@ -174,6 +211,7 @@ export default function GroupsView({ user }: Props) {
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           Contribute {formatNaira(selected.contribution_amount_kobo)}
+          {payWithUsdc && <span className="text-purple-200 text-xs ml-1">(USDC)</span>}
         </button>
 
         {feedback && (

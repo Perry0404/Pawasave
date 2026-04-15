@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
-import { formatNaira, formatUsdc, formatCompact, microUsdcToKobo, getRate, timeAgo } from '@/lib/format'
-import { openDeposit, openWithdraw, type PaychantStatus } from '@/lib/paychant'
-import { saveToVault, withdrawFromVault, createDepositTx } from '@/hooks/use-data'
-import { ArrowDownLeft, ArrowUpRight, Vault, TrendingUp, Wallet, Plus, Minus, CreditCard, Loader2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { formatNaira, formatUsdc, microUsdcToKobo, getRate, timeAgo } from '@/lib/format'
+import { initiateDeposit, initiateWithdrawal, getBanks, type RampResult, type Bank } from '@/lib/flint'
+import { ArrowUpRight, Vault, TrendingUp, Wallet, Plus, Minus, CreditCard, Loader2, ArrowLeft, Copy, Check, ChevronDown, Building2 } from 'lucide-react'
 import type { Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
+
+type View = 'main' | 'deposit' | 'deposit-info' | 'withdraw'
 
 interface Props {
   wallet: WalletType | null
@@ -16,8 +17,25 @@ interface Props {
 }
 
 export default function HomeView({ wallet, transactions, user, refresh }: Props) {
+  const [view, setView] = useState<View>('main')
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
+  const [amount, setAmount] = useState('')
+  const [depositInfo, setDepositInfo] = useState<RampResult | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  // Withdraw state
+  const [banks, setBanks] = useState<Bank[]>([])
+  const [bankCode, setBankCode] = useState('')
+  const [accountNumber, setAccountNumber] = useState('')
+  const [banksLoading, setBanksLoading] = useState(false)
+
+  useEffect(() => {
+    if (view === 'withdraw' && banks.length === 0) {
+      setBanksLoading(true)
+      getBanks().then(b => { setBanks(b); setBanksLoading(false) }).catch(() => setBanksLoading(false))
+    }
+  }, [view, banks.length])
 
   if (!wallet) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
 
@@ -26,49 +44,227 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
   const totalKobo = wallet.naira_balance_kobo + savingsKobo
   const recentTxs = transactions.slice(0, 6)
 
+  const flash = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(''), 4000) }
+
+  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setAccountNumber(''); setCopied(false) }
+
+  const goBack = () => { resetForm(); setView('main') }
+
   const handleDeposit = async () => {
-    if (!user?.email) return
+    const naira = parseFloat(amount)
+    if (!naira || naira < 100) { flash('Minimum deposit is ₦100'); return }
+    setBusy(true)
     try {
-      openDeposit(
-        user.email,
-        (s: PaychantStatus) => {
-          if (s.reference) {
-            createDepositTx(Math.round((s.amount || 0) * 100), s.reference)
-          }
-          if (s.status === 'completed' || s.status === 'success') {
-            setFeedback('Deposit successful!')
-            refresh()
-            setTimeout(() => setFeedback(''), 3000)
-          }
-        },
-        () => refresh()
-      )
-    } catch {
-      setFeedback('Could not open deposit widget')
-      setTimeout(() => setFeedback(''), 3000)
+      const result = await initiateDeposit(naira)
+      setDepositInfo(result)
+      setView('deposit-info')
+    } catch (e: any) {
+      flash(e.message || 'Deposit failed')
+    } finally {
+      setBusy(false)
     }
   }
 
   const handleWithdraw = async () => {
-    if (!user?.email) return
+    const naira = parseFloat(amount)
+    if (!naira || naira < 100) { flash('Minimum withdrawal is ₦100'); return }
+    if (!bankCode || !accountNumber || accountNumber.length < 10) {
+      flash('Enter valid bank details'); return
+    }
+    setBusy(true)
     try {
-      openWithdraw(
-        user.email,
-        (s: PaychantStatus) => {
-          if (s.status === 'completed' || s.status === 'success') {
-            setFeedback('Withdrawal submitted!')
-            refresh()
-            setTimeout(() => setFeedback(''), 3000)
-          }
-        },
-        () => refresh()
-      )
-    } catch {
-      setFeedback('Could not open withdrawal widget')
-      setTimeout(() => setFeedback(''), 3000)
+      await initiateWithdrawal(naira, bankCode, accountNumber)
+      flash('Withdrawal submitted! You\'ll receive NGN in your bank shortly.')
+      resetForm()
+      setView('main')
+      refresh()
+    } catch (e: any) {
+      flash(e.message || 'Withdrawal failed')
+    } finally {
+      setBusy(false)
     }
   }
 
+  const copyAccount = () => {
+    if (depositInfo?.accountNumber) {
+      navigator.clipboard.writeText(depositInfo.accountNumber)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  // --- Deposit amount form ---
+  if (view === 'deposit') {
+    return (
+      <div className="px-4 pt-5">
+        <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <h2 className="text-lg font-bold text-slate-900 mb-1">Deposit Naira</h2>
+        <p className="text-sm text-slate-400 mb-6">Pay with bank transfer. Your NGN is converted to USDC and saved in your vault.</p>
+
+        <div>
+          <label className="text-xs text-slate-500 block mb-1.5">Amount (₦)</label>
+          <input
+            type="number"
+            inputMode="numeric"
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+            placeholder="e.g. 5000"
+            className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            autoFocus
+          />
+          {amount && parseFloat(amount) >= 100 && (
+            <p className="text-xs text-slate-400 mt-2">≈ ${(parseFloat(amount) / rate).toFixed(2)} USDC at ₦{rate}/USD</p>
+          )}
+        </div>
+
+        {feedback && <div className="mt-3 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>}
+
+        <button
+          onClick={handleDeposit}
+          disabled={busy || !amount}
+          className="w-full mt-6 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-60"
+        >
+          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+          Continue
+        </button>
+      </div>
+    )
+  }
+
+  // --- Deposit bank info (post-API) ---
+  if (view === 'deposit-info' && depositInfo) {
+    return (
+      <div className="px-4 pt-5">
+        <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <h2 className="text-lg font-bold text-slate-900 mb-1">Transfer Naira</h2>
+        <p className="text-sm text-slate-400 mb-5">Send the exact amount below to complete your deposit.</p>
+
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 space-y-4">
+          <div>
+            <p className="text-[11px] text-emerald-600 font-medium">Amount</p>
+            <p className="text-2xl font-bold text-emerald-800">₦{parseInt(amount).toLocaleString()}</p>
+          </div>
+          {depositInfo.bankName && (
+            <div>
+              <p className="text-[11px] text-emerald-600 font-medium">Bank</p>
+              <p className="text-sm font-semibold text-emerald-900">{depositInfo.bankName}</p>
+            </div>
+          )}
+          {depositInfo.accountNumber && (
+            <div>
+              <p className="text-[11px] text-emerald-600 font-medium">Account Number</p>
+              <div className="flex items-center gap-2">
+                <p className="text-lg font-bold text-emerald-900 tracking-wider">{depositInfo.accountNumber}</p>
+                <button onClick={copyAccount} className="text-emerald-600 hover:text-emerald-800 transition p-1">
+                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          )}
+          {depositInfo.accountName && (
+            <div>
+              <p className="text-[11px] text-emerald-600 font-medium">Account Name</p>
+              <p className="text-sm font-semibold text-emerald-900">{depositInfo.accountName}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          <p className="text-xs text-amber-700 leading-relaxed">
+            After transferring, your deposit will be automatically confirmed and your USDC vault credited. This usually takes 1–5 minutes.
+          </p>
+        </div>
+
+        <button
+          onClick={() => { goBack(); refresh() }}
+          className="w-full mt-6 bg-slate-900 hover:bg-slate-800 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98]"
+        >
+          I&apos;ve Sent the Money
+        </button>
+      </div>
+    )
+  }
+
+  // --- Withdraw form ---
+  if (view === 'withdraw') {
+    return (
+      <div className="px-4 pt-5">
+        <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <h2 className="text-lg font-bold text-slate-900 mb-1">Withdraw to Bank</h2>
+        <p className="text-sm text-slate-400 mb-6">Convert USDC from your vault back to naira and send to your bank.</p>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs text-slate-500 block mb-1.5">Amount (₦)</label>
+            <input
+              type="number"
+              inputMode="numeric"
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              placeholder="e.g. 5000"
+              className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              autoFocus
+            />
+            {amount && parseFloat(amount) >= 100 && (
+              <p className="text-xs text-slate-400 mt-1">≈ ${(parseFloat(amount) / rate).toFixed(2)} USDC will be debited</p>
+            )}
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-500 block mb-1.5">Bank</label>
+            {banksLoading ? (
+              <div className="flex items-center gap-2 py-3 text-sm text-slate-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading banks...</div>
+            ) : (
+              <div className="relative">
+                <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                <select
+                  value={bankCode}
+                  onChange={e => setBankCode(e.target.value)}
+                  className="w-full pl-10 pr-8 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="">Select a bank</option>
+                  {banks.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-500 block mb-1.5">Account Number</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={10}
+              value={accountNumber}
+              onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
+              placeholder="0123456789"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+        </div>
+
+        {feedback && <div className="mt-3 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>}
+
+        <button
+          onClick={handleWithdraw}
+          disabled={busy || !amount || !bankCode || accountNumber.length < 10}
+          className="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-60"
+        >
+          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUpRight className="w-4 h-4" />}
+          Withdraw
+        </button>
+      </div>
+    )
+  }
+
+  // --- Main view ---
   return (
     <div className="px-4 pt-5">
       {/* Balance Card */}
@@ -94,7 +290,7 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
       {/* Quick Actions */}
       <div className="grid grid-cols-3 gap-3 mt-5">
         <button
-          onClick={handleDeposit}
+          onClick={() => setView('deposit')}
           className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-slate-200 bg-white active:bg-slate-50 transition"
         >
           <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
@@ -104,7 +300,7 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
         </button>
 
         <button
-          onClick={handleWithdraw}
+          onClick={() => setView('withdraw')}
           className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-slate-200 bg-white active:bg-slate-50 transition"
         >
           <div className="w-10 h-10 rounded-full bg-orange-100 text-orange-500 flex items-center justify-center">

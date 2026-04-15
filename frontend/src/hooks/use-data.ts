@@ -45,7 +45,14 @@ export function useAuth() {
     await supabase.auth.signOut()
   }
 
-  return { user, loading, signUp, signIn, signOut }
+  const resetPassword = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}`,
+    })
+    if (error) throw error
+  }
+
+  return { user, loading, signUp, signIn, signOut, resetPassword }
 }
 
 export function useProfile() {
@@ -183,7 +190,7 @@ export async function createDepositTx(amountKobo: number, reference: string) {
     type: 'deposit',
     direction: 'credit',
     amount_kobo: amountKobo,
-    description: 'Paychant deposit',
+    description: 'Deposit via FlintAPI',
     reference,
     status: 'pending',
   })
@@ -198,7 +205,7 @@ export async function createWithdrawalTx(amountKobo: number, reference: string) 
     type: 'withdrawal',
     direction: 'debit',
     amount_kobo: amountKobo,
-    description: 'Paychant withdrawal',
+    description: 'Withdrawal via FlintAPI',
     reference,
     status: 'pending',
   })

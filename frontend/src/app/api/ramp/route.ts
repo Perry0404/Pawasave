@@ -5,6 +5,7 @@ import crypto from 'crypto'
 
 const FLINT_API_KEY = process.env.FLINT_API_KEY || ''
 const FLINT_BASE = 'https://stables.flintapi.io/v1'
+const CUSTODY_ADDRESS = process.env.FLINT_CUSTODY_ADDRESS || ''
 
 function generateRef() {
   return 'pawa_' + crypto.randomBytes(16).toString('hex')
@@ -41,19 +42,23 @@ export async function POST(request: NextRequest) {
 
     const reference = generateRef()
 
+    // Build the notify URL from the request origin
+    const origin = request.nextUrl.origin || 'https://pawasave.xyz'
+
     // Build FlintAPI request
     const flintBody: any = {
       type: type === 'on' ? 'on' : 'off',
       reference,
       network: 'base',
       amount: Math.round(amount),
-      notifyUrl: `${process.env.NEXT_PUBLIC_SUPABASE_URL ? request.nextUrl.origin : 'https://frontend-one-psi-50.vercel.app'}/api/webhook`,
+      notifyUrl: `${origin}/api/webhook`,
     }
 
     if (type === 'on') {
-      // On-ramp: destination is our custody wallet (or omit if FlintAPI handles it)
-      // For now, just include the user context - FlintAPI will provide bank details
-      flintBody.destination = { address: '0x0000000000000000000000000000000000000000' }
+      // On-ramp: destination is our custody wallet on Base
+      if (CUSTODY_ADDRESS) {
+        flintBody.destination = { address: CUSTODY_ADDRESS }
+      }
     } else {
       // Off-ramp: destination is user's bank account
       flintBody.destination = { bankCode, accountNumber }
@@ -72,10 +77,9 @@ export async function POST(request: NextRequest) {
     const flintData = await flintRes.json()
 
     if (!flintRes.ok || flintData.status === 'error') {
-      return NextResponse.json(
-        { error: flintData.message || 'FlintAPI error' },
-        { status: flintRes.status || 500 }
-      )
+      const msg = flintData.message || flintData.error || 'Service temporarily unavailable'
+      console.error('FlintAPI error:', flintRes.status, JSON.stringify(flintData))
+      return NextResponse.json({ error: msg }, { status: 422 })
     }
 
     // Create pending transaction in Supabase
@@ -84,7 +88,7 @@ export async function POST(request: NextRequest) {
       type: type === 'on' ? 'deposit' : 'withdrawal',
       direction: type === 'on' ? 'credit' : 'debit',
       amount_kobo: Math.round(amount * 100),
-      description: type === 'on' ? 'Deposit via FlintAPI' : 'Withdrawal via FlintAPI',
+      description: type === 'on' ? 'Received via FlintAPI' : 'Sent via FlintAPI',
       reference,
       paychant_tx_id: flintData.data?.transactionId || null,
       status: 'pending',

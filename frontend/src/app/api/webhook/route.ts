@@ -4,11 +4,12 @@ import crypto from 'crypto'
 
 const WEBHOOK_SECRET = process.env.FLINT_WEBHOOK_SECRET || ''
 
-function verifySignature(body: string, signature: string): boolean {
+function verifySignature(bodyObj: any, signature: string): boolean {
   if (!WEBHOOK_SECRET || !signature) return false
+  // FlintAPI docs: HMAC SHA512 of JSON.stringify(body)
   const hash = crypto
     .createHmac('sha512', WEBHOOK_SECRET)
-    .update(body)
+    .update(JSON.stringify(bodyObj))
     .digest('hex')
   return signature === hash
 }
@@ -17,12 +18,26 @@ export async function POST(request: NextRequest) {
   const rawBody = await request.text()
   const signature = request.headers.get('x-flint-signature') || ''
 
-  // Verify webhook signature
-  if (WEBHOOK_SECRET && !verifySignature(rawBody, signature)) {
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+  let body: any
+  try {
+    body = JSON.parse(rawBody)
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const body = JSON.parse(rawBody)
+  // Verify webhook signature (try both stringify and raw approaches)
+  if (WEBHOOK_SECRET) {
+    const valid = verifySignature(body, signature) || (() => {
+      // Fallback: verify against raw body text in case FlintAPI signs raw bytes
+      const hash = crypto.createHmac('sha512', WEBHOOK_SECRET).update(rawBody).digest('hex')
+      return hash === signature
+    })()
+    if (!valid) {
+      console.error('Webhook signature mismatch')
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+    }
+  }
+
   const { event, data } = body
 
   if (!data?.reference) {

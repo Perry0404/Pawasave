@@ -22,7 +22,7 @@ export default function GroupsView({ user }: Props) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
-  const [payWithUsdc, setPayWithUsdc] = useState(false)
+  const [payWithUsdc, setPayWithUsdc] = useState(true)
 
   // Create form
   const [formName, setFormName] = useState('')
@@ -186,7 +186,7 @@ export default function GroupsView({ user }: Props) {
           ))}
         </div>
 
-        {/* Pay with USDC toggle */}
+        {/* Payment method toggle */}
         <button
           onClick={() => setPayWithUsdc(!payWithUsdc)}
           className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition mb-3 ${
@@ -196,7 +196,7 @@ export default function GroupsView({ user }: Props) {
           <div className="flex items-center gap-2">
             <Vault className={`w-4 h-4 ${payWithUsdc ? 'text-cyan-600' : 'text-slate-400'}`} />
             <span className={`text-sm font-medium ${payWithUsdc ? 'text-cyan-700' : 'text-slate-600'}`}>
-              Pay from USDC Vault
+              {payWithUsdc ? 'Paying from USDC Vault' : 'Paying from Naira Wallet'}
             </span>
           </div>
           <div className={`w-9 h-5 rounded-full transition-colors flex items-center ${payWithUsdc ? 'bg-cyan-500 justify-end' : 'bg-slate-300 justify-start'}`}>

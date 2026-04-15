@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { formatNaira, formatUsdc, microUsdcToKobo, getRate, timeAgo } from '@/lib/format'
 import { initiateDeposit, initiateWithdrawal, getBanks, type RampResult, type Bank } from '@/lib/flint'
-import { ArrowUpRight, Vault, TrendingUp, Wallet, Plus, Minus, CreditCard, Loader2, ArrowLeft, Copy, Check, ChevronDown, Building2 } from 'lucide-react'
+import { ArrowUpRight, ArrowDownLeft, Vault, TrendingUp, Wallet, Plus, Minus, CreditCard, Loader2, ArrowLeft, Copy, Check, ChevronDown, Building2 } from 'lucide-react'
 import type { Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -52,7 +52,7 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
 
   const handleDeposit = async () => {
     const naira = parseFloat(amount)
-    if (!naira || naira < 100) { flash('Minimum deposit is ₦100'); return }
+    if (!naira || naira < 100) { flash('Minimum amount is ₦100'); return }
     setBusy(true)
     try {
       const result = await initiateDeposit(naira)
@@ -67,14 +67,14 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
 
   const handleWithdraw = async () => {
     const naira = parseFloat(amount)
-    if (!naira || naira < 100) { flash('Minimum withdrawal is ₦100'); return }
+    if (!naira || naira < 100) { flash('Minimum amount is ₦100'); return }
     if (!bankCode || !accountNumber || accountNumber.length < 10) {
       flash('Enter valid bank details'); return
     }
     setBusy(true)
     try {
       await initiateWithdrawal(naira, bankCode, accountNumber)
-      flash('Withdrawal submitted! You\'ll receive NGN in your bank shortly.')
+      flash('Sent! The recipient will receive NGN in their bank shortly.')
       resetForm()
       setView('main')
       refresh()
@@ -100,8 +100,8 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <h2 className="text-lg font-bold text-slate-900 mb-1">Deposit Naira</h2>
-        <p className="text-sm text-slate-400 mb-6">Pay with bank transfer. Your NGN is converted to USDC and saved in your vault.</p>
+        <h2 className="text-lg font-bold text-slate-900 mb-1">Receive Money</h2>
+        <p className="text-sm text-slate-400 mb-6">Send naira via bank transfer. It auto-converts to USDC and saves in your vault.</p>
 
         <div>
           <label className="text-xs text-slate-500 block mb-1.5">Amount (₦)</label>
@@ -140,8 +140,8 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <h2 className="text-lg font-bold text-slate-900 mb-1">Transfer Naira</h2>
-        <p className="text-sm text-slate-400 mb-5">Send the exact amount below to complete your deposit.</p>
+        <h2 className="text-lg font-bold text-slate-900 mb-1">Complete Transfer</h2>
+        <p className="text-sm text-slate-400 mb-5">Send the exact amount below. Your vault will be credited automatically.</p>
 
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 space-y-4">
           <div>
@@ -196,8 +196,8 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <h2 className="text-lg font-bold text-slate-900 mb-1">Withdraw to Bank</h2>
-        <p className="text-sm text-slate-400 mb-6">Convert USDC from your vault back to naira and send to your bank.</p>
+        <h2 className="text-lg font-bold text-slate-900 mb-1">Send Money</h2>
+        <p className="text-sm text-slate-400 mb-6">Send naira from your USDC vault to any Nigerian bank account.</p>
 
         <div className="space-y-4">
           <div>
@@ -258,7 +258,7 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
           className="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-60"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUpRight className="w-4 h-4" />}
-          Withdraw
+          Send Money
         </button>
       </div>
     )
@@ -294,9 +294,9 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
           className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-slate-200 bg-white active:bg-slate-50 transition"
         >
           <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
-            <CreditCard className="w-5 h-5" />
+            <ArrowDownLeft className="w-5 h-5" />
           </div>
-          <span className="text-xs font-medium text-slate-700">Deposit</span>
+          <span className="text-xs font-medium text-slate-700">Receive</span>
         </button>
 
         <button
@@ -306,7 +306,7 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
           <div className="w-10 h-10 rounded-full bg-orange-100 text-orange-500 flex items-center justify-center">
             <ArrowUpRight className="w-5 h-5" />
           </div>
-          <span className="text-xs font-medium text-slate-700">Withdraw</span>
+          <span className="text-xs font-medium text-slate-700">Send</span>
         </button>
 
         <button

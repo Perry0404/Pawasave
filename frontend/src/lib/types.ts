@@ -99,3 +99,64 @@ export interface EmergencyVote {
   approve: boolean
   voted_at: string
 }
+
+export interface SavingsLock {
+  id: string
+  user_id: string
+  amount_usdc_micro: number
+  amount_kobo: number
+  apy_percent: number
+  duration_days: number
+  projected_interest_micro: number
+  locked_at: string
+  unlocks_at: string
+  status: 'active' | 'matured' | 'withdrawn' | 'early_withdrawn'
+  matured_at: string | null
+  withdrawn_at: string | null
+  created_at: string
+}
+
+export interface PlatformFee {
+  id: string
+  user_id: string
+  transaction_ref: string
+  fee_type: 'ramp_onramp' | 'ramp_offramp' | 'vault_lock_penalty'
+  gross_amount_kobo: number
+  fee_amount_kobo: number
+  fee_percent: number
+  created_at: string
+}
+
+export interface PlatformSetting {
+  key: string
+  value: string
+  description: string | null
+  updated_at: string
+}
+
+export interface AdminFeeSummary {
+  total_fees_kobo: number
+  total_onramp_fees: number
+  total_offramp_fees: number
+  total_penalty_fees: number
+  fee_count: number
+  today_fees_kobo: number
+  this_month_fees_kobo: number
+}
+
+export interface AdminUserStats {
+  total_users: number
+  total_wallets: number
+  total_naira_kobo: number
+  total_usdc_micro: number
+  total_locked_usdc_micro: number
+  active_locks: number
+}
+
+export interface AdminTxVolume {
+  total_deposits_kobo: number
+  total_withdrawals_kobo: number
+  total_vault_saves_kobo: number
+  total_tx_count: number
+  pending_count: number
+}

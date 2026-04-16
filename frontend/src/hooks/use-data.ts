@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import type { User } from '@supabase/supabase-js'
-import type { Profile, Wallet, Transaction } from '@/lib/types'
+import type { Profile, Wallet, Transaction, SavingsLock, PlatformSetting, AdminFeeSummary, AdminUserStats, AdminTxVolume, PlatformFee } from '@/lib/types'
 
 const supabase = createClient()
 
@@ -209,4 +209,108 @@ export async function createWithdrawalTx(amountKobo: number, reference: string) 
     reference,
     status: 'pending',
   })
+}
+
+// ── Savings Locks ──
+
+export function useSavingsLocks() {
+  const [locks, setLocks] = useState<SavingsLock[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const refresh = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase
+      .from('savings_locks')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+    if (data) setLocks(data)
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { refresh() }, [refresh])
+
+  return { locks, loading, refresh }
+}
+
+export async function lockSavings(usdcMicro: number, kobo: number, durationDays: number, apy: number) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  const { data, error } = await supabase.rpc('lock_savings', {
+    p_user_id: user.id,
+    p_usdc_micro: usdcMicro,
+    p_kobo: kobo,
+    p_duration_days: durationDays,
+    p_apy: apy,
+  })
+  if (error) throw error
+  return data
+}
+
+export async function withdrawLock(lockId: string, early: boolean = false) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  const { data: ok, error } = await supabase.rpc('withdraw_lock', {
+    p_user_id: user.id,
+    p_lock_id: lockId,
+    p_early: early,
+  })
+  if (error) throw error
+  if (!ok) throw new Error('Lock not found or already withdrawn')
+}
+
+export async function getPlatformSettings(): Promise<PlatformSetting[]> {
+  const { data } = await supabase.from('platform_settings').select('*')
+  return data || []
+}
+
+export async function getMorphoApy(): Promise<number> {
+  const { data } = await supabase
+    .from('platform_settings')
+    .select('value')
+    .eq('key', 'morpho_apy_percent')
+    .single()
+  return data ? parseFloat(data.value) : 4.0
+}
+
+// ── Admin (uses service role via API) ──
+
+export async function getAdminFeeSummary(): Promise<AdminFeeSummary | null> {
+  const { data, error } = await supabase.rpc('admin_fee_summary')
+  if (error || !data || data.length === 0) return null
+  return data[0]
+}
+
+export async function getAdminUserStats(): Promise<AdminUserStats | null> {
+  const { data, error } = await supabase.rpc('admin_user_stats')
+  if (error || !data || data.length === 0) return null
+  return data[0]
+}
+
+export async function getAdminTxVolume(): Promise<AdminTxVolume | null> {
+  const { data, error } = await supabase.rpc('admin_tx_volume')
+  if (error || !data || data.length === 0) return null
+  return data[0]
+}
+
+export async function getAdminRecentFees(limit = 50): Promise<PlatformFee[]> {
+  const { data, error } = await supabase.rpc('admin_recent_fees', { p_limit: limit })
+  if (error) return []
+  return data || []
+}
+
+export async function isAdmin(): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user?.email) return false
+  const { data } = await supabase
+    .from('platform_settings')
+    .select('value')
+    .eq('key', 'admin_emails')
+    .single()
+  if (!data?.value) return false
+  const emails = data.value.split(',').map((e: string) => e.trim().toLowerCase())
+  return emails.includes(user.email.toLowerCase())
 }

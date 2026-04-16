@@ -6,9 +6,19 @@ import crypto from 'crypto'
 const FLINT_API_KEY = process.env.FLINT_API_KEY || ''
 const FLINT_BASE = 'https://stables.flintapi.io/v1'
 const CUSTODY_ADDRESS = process.env.FLINT_CUSTODY_ADDRESS || ''
+const DEFAULT_FEE_PERCENT = 1.5 // PawaSave service fee %
 
 function generateRef() {
   return 'pawa_' + crypto.randomBytes(16).toString('hex')
+}
+
+async function getFeePercent(supabase: any): Promise<number> {
+  const { data } = await supabase
+    .from('platform_settings')
+    .select('value')
+    .eq('key', 'ramp_fee_percent')
+    .single()
+  return data ? parseFloat(data.value) : DEFAULT_FEE_PERCENT
 }
 
 async function getSupabaseUser() {
@@ -41,16 +51,19 @@ export async function POST(request: NextRequest) {
     }
 
     const reference = generateRef()
+    const feePercent = await getFeePercent(supabase)
+    const feeAmountNaira = Math.round(amount * feePercent / 100)
+    const netAmount = amount - feeAmountNaira // Amount sent to FlintAPI after fee deduction
 
     // Build the notify URL from the request origin
     const origin = request.nextUrl.origin || 'https://pawasave.xyz'
 
-    // Build FlintAPI request
+    // Build FlintAPI request (send net amount after PawaSave fee)
     const flintBody: any = {
       type: type === 'on' ? 'on' : 'off',
       reference,
       network: 'base',
-      amount: Math.round(amount),
+      amount: Math.round(netAmount),
       notifyUrl: `${origin}/api/webhook`,
     }
 
@@ -96,6 +109,18 @@ export async function POST(request: NextRequest) {
 
     await supabase.from('transactions').insert(txData)
 
+    // Record platform fee
+    if (feeAmountNaira > 0) {
+      await supabase.rpc('record_platform_fee', {
+        p_user_id: user.id,
+        p_reference: reference,
+        p_fee_type: type === 'on' ? 'ramp_onramp' : 'ramp_offramp',
+        p_gross_kobo: Math.round(amount * 100),
+        p_fee_kobo: Math.round(feeAmountNaira * 100),
+        p_fee_percent: feePercent,
+      })
+    }
+
     // For off-ramp, debit user's balance upfront (refund on failure via webhook)
     if (type === 'off') {
       const rate = 1550
@@ -122,6 +147,9 @@ export async function POST(request: NextRequest) {
       accountName: flintData.data?.accountName,
       depositAddress: flintData.data?.depositAddress,
       amount: Math.round(amount),
+      feeAmount: feeAmountNaira,
+      feePercent: feePercent,
+      netAmount: Math.round(netAmount),
     })
   } catch (err: any) {
     console.error('Ramp API error:', err)

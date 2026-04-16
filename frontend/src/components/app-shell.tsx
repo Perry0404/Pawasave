@@ -6,18 +6,16 @@ import HomeView from './home-view'
 import VaultView from './vault-view'
 import GroupsView from './groups-view'
 import ActivityView from './activity-view'
-import AdminView from './admin-view'
 import Logo from './logo'
-import { Home, Vault, Users, Activity, LogOut, Shield } from 'lucide-react'
+import { Home, Vault, Users, Activity, LogOut } from 'lucide-react'
 
-type Tab = 'home' | 'vault' | 'groups' | 'activity' | 'admin'
+type Tab = 'home' | 'vault' | 'groups' | 'activity'
 
 const tabs: { id: Tab; label: string; Icon: React.FC<any> }[] = [
   { id: 'home', label: 'Home', Icon: Home },
   { id: 'vault', label: 'Vault', Icon: Vault },
   { id: 'groups', label: 'Groups', Icon: Users },
   { id: 'activity', label: 'Activity', Icon: Activity },
-  { id: 'admin', label: 'Admin', Icon: Shield },
 ]
 
 export default function AppShell() {
@@ -55,7 +53,6 @@ export default function AppShell() {
           {tab === 'vault' && <VaultView wallet={wallet} refresh={refresh} />}
           {tab === 'groups' && <GroupsView user={user} />}
           {tab === 'activity' && <ActivityView transactions={transactions} />}
-          {tab === 'admin' && <AdminView />}
         </div>
       </main>
 

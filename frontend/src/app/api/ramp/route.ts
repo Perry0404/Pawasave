@@ -12,6 +12,21 @@ function generateRef() {
   return 'pawa_' + crypto.randomBytes(16).toString('hex')
 }
 
+/**
+ * Calculate FlintAPI's own fees so user sees the full cost breakdown.
+ * Off-ramp: 0.1% (cap ₦200) + ₦55 base + stamp duty ₦50 (>₦10k) + 7.5% VAT on fees
+ * On-ramp:  0.1% (cap ₦200) + ₦55 base + gas (~₦150)
+ */
+function calcFlintFees(amountNaira: number, type: 'on' | 'off') {
+  const platformFee = Math.min(amountNaira * 0.001, 200)
+  const baseFee = amountNaira < 50000 ? 55 : 0
+  const stampDuty = (type === 'off' && amountNaira > 10000) ? 50 : 0
+  const subtotal = platformFee + baseFee + stampDuty
+  const vat = type === 'off' ? subtotal * 0.075 : 0
+  const gasFee = type === 'on' ? 150 : 0 // ~$0.1 at ₦1550/USD
+  return Math.ceil(subtotal + vat + gasFee)
+}
+
 async function getFeePercent(supabase: any): Promise<number> {
   const { data } = await supabase
     .from('platform_settings')
@@ -52,18 +67,20 @@ export async function POST(request: NextRequest) {
 
     const reference = generateRef()
     const feePercent = await getFeePercent(supabase)
-    const feeAmountNaira = Math.round(amount * feePercent / 100)
-    const netAmount = amount - feeAmountNaira // Amount sent to FlintAPI after fee deduction
+    const pawaFeeNaira = Math.round(amount * feePercent / 100)
+    const flintFeeNaira = calcFlintFees(amount, type === 'on' ? 'on' : 'off')
+    const totalFeeNaira = pawaFeeNaira + flintFeeNaira
+    const netAmount = amount // Send full amount to FlintAPI (they deduct their fees internally)
 
     // Build the notify URL from the request origin
     const origin = request.nextUrl.origin || 'https://pawasave.xyz'
 
-    // Build FlintAPI request (send net amount after PawaSave fee)
+    // Build FlintAPI request (FlintAPI deducts their own fees internally)
     const flintBody: any = {
       type: type === 'on' ? 'on' : 'off',
       reference,
       network: 'base',
-      amount: Math.round(netAmount),
+      amount: Math.round(amount),
       notifyUrl: `${origin}/api/webhook`,
     }
 
@@ -109,14 +126,14 @@ export async function POST(request: NextRequest) {
 
     await supabase.from('transactions').insert(txData)
 
-    // Record platform fee
-    if (feeAmountNaira > 0) {
+    // Record PawaSave platform fee (our revenue, separate from FlintAPI fees)
+    if (pawaFeeNaira > 0) {
       await supabase.rpc('record_platform_fee', {
         p_user_id: user.id,
         p_reference: reference,
         p_fee_type: type === 'on' ? 'ramp_onramp' : 'ramp_offramp',
         p_gross_kobo: Math.round(amount * 100),
-        p_fee_kobo: Math.round(feeAmountNaira * 100),
+        p_fee_kobo: Math.round(pawaFeeNaira * 100),
         p_fee_percent: feePercent,
       })
     }
@@ -137,7 +154,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Return FlintAPI response data + our reference
+    // Return FlintAPI response data + our reference + fee breakdown
     return NextResponse.json({
       transactionId: flintData.data?.transactionId,
       reference,
@@ -147,9 +164,10 @@ export async function POST(request: NextRequest) {
       accountName: flintData.data?.accountName,
       depositAddress: flintData.data?.depositAddress,
       amount: Math.round(amount),
-      feeAmount: feeAmountNaira,
+      pawaFee: pawaFeeNaira,
+      flintFee: flintFeeNaira,
+      totalFee: totalFeeNaira,
       feePercent: feePercent,
-      netAmount: Math.round(netAmount),
     })
   } catch (err: any) {
     console.error('Ramp API error:', err)

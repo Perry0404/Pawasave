@@ -4,25 +4,39 @@ import { useState, useEffect } from 'react'
 import { formatNaira, formatUsdc } from '@/lib/format'
 import {
   getAdminFeeSummary, getAdminUserStats, getAdminTxVolume,
-  getAdminRecentFees, isAdmin
+  getAdminRecentFees
 } from '@/hooks/use-data'
 import type { AdminFeeSummary, AdminUserStats, AdminTxVolume, PlatformFee } from '@/lib/types'
-import { Shield, DollarSign, Users, Activity, TrendingUp, Loader2, Lock, AlertTriangle, ArrowUpRight, ArrowDownLeft } from 'lucide-react'
+import { Shield, DollarSign, Users, Activity, TrendingUp, Loader2, Lock, AlertTriangle, ArrowUpRight, ArrowDownLeft, Eye, EyeOff, LogOut } from 'lucide-react'
+
+const ADMIN_STORAGE_KEY = 'pawa_admin_auth'
 
 export default function AdminView() {
-  const [authorized, setAuthorized] = useState<boolean | null>(null)
+  const [authed, setAuthed] = useState(false)
+  const [password, setPassword] = useState('')
+  const [showPw, setShowPw] = useState(false)
+  const [authError, setAuthError] = useState('')
   const [fees, setFees] = useState<AdminFeeSummary | null>(null)
   const [users, setUsers] = useState<AdminUserStats | null>(null)
   const [volume, setVolume] = useState<AdminTxVolume | null>(null)
   const [recentFees, setRecentFees] = useState<PlatformFee[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Check session storage for existing auth
   useEffect(() => {
-    const load = async () => {
-      const admin = await isAdmin()
-      setAuthorized(admin)
-      if (!admin) { setLoading(false); return }
+    const stored = sessionStorage.getItem(ADMIN_STORAGE_KEY)
+    if (stored === 'true') {
+      setAuthed(true)
+    } else {
+      setLoading(false)
+    }
+  }, [])
 
+  // Load data once authed
+  useEffect(() => {
+    if (!authed) return
+    const load = async () => {
+      setLoading(true)
       const [f, u, v, rf] = await Promise.all([
         getAdminFeeSummary(),
         getAdminUserStats(),
@@ -36,7 +50,30 @@ export default function AdminView() {
       setLoading(false)
     }
     load()
-  }, [])
+  }, [authed])
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAuthError('')
+    // Verify via API route
+    const res = await fetch('/api/admin/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    })
+    if (res.ok) {
+      sessionStorage.setItem(ADMIN_STORAGE_KEY, 'true')
+      setAuthed(true)
+      setPassword('')
+    } else {
+      setAuthError('Invalid admin password')
+    }
+  }
+
+  const handleLogout = () => {
+    sessionStorage.removeItem(ADMIN_STORAGE_KEY)
+    setAuthed(false)
+  }
 
   if (loading) {
     return (
@@ -46,24 +83,57 @@ export default function AdminView() {
     )
   }
 
-  if (!authorized) {
+  // Login screen
+  if (!authed) {
     return (
-      <div className="px-4 pt-10 text-center">
-        <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto mb-3" />
-        <p className="text-lg font-semibold text-slate-800">Access Denied</p>
-        <p className="text-sm text-slate-500 mt-1">Your email is not in the admin list.</p>
-        <p className="text-xs text-slate-400 mt-3">
-          Add your email to the <code className="bg-slate-100 px-1 rounded">admin_emails</code> setting in Supabase.
-        </p>
+      <div className="min-h-[60vh] flex items-center justify-center px-4">
+        <form onSubmit={handleLogin} className="w-full max-w-sm">
+          <div className="text-center mb-6">
+            <Shield className="w-12 h-12 text-emerald-600 mx-auto mb-3" />
+            <h1 className="text-xl font-bold text-slate-900">Admin Access</h1>
+            <p className="text-sm text-slate-500 mt-1">Enter admin password to continue</p>
+          </div>
+          <div className="relative mb-4">
+            <input
+              type={showPw ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Admin password"
+              className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 pr-12"
+              autoFocus
+            />
+            <button
+              type="button"
+              onClick={() => setShowPw(!showPw)}
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400"
+            >
+              {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+          {authError && (
+            <p className="text-sm text-red-600 mb-3 text-center">{authError}</p>
+          )}
+          <button
+            type="submit"
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3.5 rounded-xl transition"
+          >
+            Access Dashboard
+          </button>
+        </form>
       </div>
     )
   }
 
   return (
     <div className="px-4 pt-5 pb-6">
-      <div className="flex items-center gap-2 mb-5">
-        <Shield className="w-5 h-5 text-emerald-600" />
-        <h1 className="text-lg font-bold text-slate-900">Admin Dashboard</h1>
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-2">
+          <Shield className="w-5 h-5 text-emerald-600" />
+          <h1 className="text-lg font-bold text-slate-900">Admin Dashboard</h1>
+        </div>
+        <button onClick={handleLogout} className="text-slate-400 hover:text-slate-600 p-2 transition">
+          <LogOut className="w-4 h-4" />
+        </button>
       </div>
 
       {/* Revenue Card */}

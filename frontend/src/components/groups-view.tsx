@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { formatNaira, formatUsdc, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
-import { Users, Plus, ChevronRight, Loader2, AlertCircle, ArrowLeft, Send, Vault } from 'lucide-react'
+import { Users, Plus, ChevronRight, Loader2, AlertCircle, ArrowLeft, Send, Vault, Wallet, Copy, Check } from 'lucide-react'
 import type { EsusuGroup, EsusuMember, EsusuContribution } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -22,7 +22,10 @@ export default function GroupsView({ user }: Props) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
-  const [payWithUsdc, setPayWithUsdc] = useState(true)
+  const [paymentMethod, setPaymentMethod] = useState<'usdc' | 'naira' | 'crypto'>('usdc')
+  const [cryptoWallet, setCryptoWallet] = useState('')
+  const [depositAddress, setDepositAddress] = useState('')
+  const [copied, setCopied] = useState(false)
 
   // Create form
   const [formName, setFormName] = useState('')
@@ -114,6 +117,14 @@ export default function GroupsView({ user }: Props) {
       .order('created_at', { ascending: false })
       .limit(30)
     setContributions(c || [])
+
+    // Fetch platform deposit address for crypto deposits
+    const { data: addrSetting } = await supabase
+      .from('platform_settings')
+      .select('value')
+      .eq('key', 'deposit_wallet_address')
+      .single()
+    if (addrSetting?.value) setDepositAddress(addrSetting.value)
   }
 
   const contribute = async () => {
@@ -122,7 +133,35 @@ export default function GroupsView({ user }: Props) {
     if (!member) { setFeedback('Not a member'); return }
     setBusy(true)
 
-    if (payWithUsdc) {
+    if (paymentMethod === 'crypto') {
+      // Crypto wallet deposit
+      if (!cryptoWallet || cryptoWallet.length < 10) {
+        setFeedback('Enter a valid wallet address')
+        setBusy(false)
+        setTimeout(() => setFeedback(''), 3000)
+        return
+      }
+      const rate = getRate()
+      const cngnMicro = Math.round(selected.contribution_amount_kobo / 100 * 1_000_000) // 1 cNGN = 1 NGN
+      const { error } = await supabase.rpc('esusu_contribute_crypto', {
+        p_user_id: user.id,
+        p_group_id: selected.id,
+        p_member_id: member.id,
+        p_amount_cngn_micro: cngnMicro,
+        p_cycle: selected.current_cycle,
+        p_wallet_address: cryptoWallet,
+      })
+      if (error) { setFeedback(error.message) } else {
+        setFeedback('Crypto contribution recorded!')
+        setCryptoWallet('')
+        openGroup(selected)
+      }
+      setBusy(false)
+      setTimeout(() => setFeedback(''), 3000)
+      return
+    }
+
+    if (paymentMethod === 'usdc') {
       // First withdraw from USDC vault to naira, then contribute
       const rate = getRate()
       const usdcMicro = koboToMicroUsdc(selected.contribution_amount_kobo, rate)
@@ -186,23 +225,74 @@ export default function GroupsView({ user }: Props) {
           ))}
         </div>
 
-        {/* Payment method toggle */}
-        <button
-          onClick={() => setPayWithUsdc(!payWithUsdc)}
-          className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition mb-3 ${
-            payWithUsdc ? 'border-cyan-300 bg-cyan-50' : 'border-slate-200 bg-white'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <Vault className={`w-4 h-4 ${payWithUsdc ? 'text-cyan-600' : 'text-slate-400'}`} />
-            <span className={`text-sm font-medium ${payWithUsdc ? 'text-cyan-700' : 'text-slate-600'}`}>
-              {payWithUsdc ? 'Paying from USDC Vault' : 'Paying from Naira Wallet'}
-            </span>
+        {/* Payment method selector */}
+        <div className="mb-3">
+          <p className="text-xs font-medium text-slate-500 mb-2">Payment Method</p>
+          <div className="flex bg-slate-100 rounded-xl p-1">
+            <button
+              onClick={() => setPaymentMethod('usdc')}
+              className={`flex-1 py-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 transition ${
+                paymentMethod === 'usdc' ? 'bg-white text-cyan-700 shadow-sm' : 'text-slate-500'
+              }`}
+            >
+              <Vault className="w-3 h-3" /> USDC
+            </button>
+            <button
+              onClick={() => setPaymentMethod('naira')}
+              className={`flex-1 py-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 transition ${
+                paymentMethod === 'naira' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
+              }`}
+            >
+              ₦ Naira
+            </button>
+            <button
+              onClick={() => setPaymentMethod('crypto')}
+              className={`flex-1 py-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 transition ${
+                paymentMethod === 'crypto' ? 'bg-white text-purple-700 shadow-sm' : 'text-slate-500'
+              }`}
+            >
+              <Wallet className="w-3 h-3" /> Crypto
+            </button>
           </div>
-          <div className={`w-9 h-5 rounded-full transition-colors flex items-center ${payWithUsdc ? 'bg-cyan-500 justify-end' : 'bg-slate-300 justify-start'}`}>
-            <div className="w-4 h-4 bg-white rounded-full mx-0.5 shadow-sm" />
+        </div>
+
+        {/* Crypto deposit details */}
+        {paymentMethod === 'crypto' && (
+          <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 mb-3 space-y-3">
+            {depositAddress ? (
+              <div>
+                <p className="text-[11px] text-purple-600 font-medium mb-1">Send cNGN on Base to:</p>
+                <div className="flex items-center gap-2 bg-white rounded-lg px-3 py-2 border border-purple-200">
+                  <code className="text-xs text-purple-900 flex-1 break-all">{depositAddress}</code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(depositAddress)
+                      setCopied(true)
+                      setTimeout(() => setCopied(false), 2000)
+                    }}
+                    className="text-purple-600 hover:text-purple-800 p-1 flex-shrink-0"
+                  >
+                    {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-purple-600">Deposit address not configured yet. Contact admin.</p>
+            )}
+            <div>
+              <label className="text-[11px] text-purple-600 font-medium mb-1 block">Your Wallet Address</label>
+              <input
+                value={cryptoWallet}
+                onChange={(e) => setCryptoWallet(e.target.value.trim())}
+                placeholder="0x..."
+                className="w-full px-3 py-2 bg-white border border-purple-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-400"
+              />
+            </div>
+            <p className="text-[10px] text-purple-500">
+              Send exactly {formatNaira(selected.contribution_amount_kobo)} worth of cNGN on Base network. Your contribution will be recorded automatically.
+            </p>
           </div>
-        </button>
+        )}
 
         <button
           onClick={contribute}
@@ -211,7 +301,8 @@ export default function GroupsView({ user }: Props) {
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           Contribute {formatNaira(selected.contribution_amount_kobo)}
-          {payWithUsdc && <span className="text-purple-200 text-xs ml-1">(USDC)</span>}
+          {paymentMethod === 'usdc' && <span className="text-purple-200 text-xs ml-1">(USDC)</span>}
+          {paymentMethod === 'crypto' && <span className="text-purple-200 text-xs ml-1">(cNGN)</span>}
         </button>
 
         {feedback && (

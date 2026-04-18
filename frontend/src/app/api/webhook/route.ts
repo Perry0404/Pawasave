@@ -90,6 +90,12 @@ export async function POST(request: NextRequest) {
         .from('transactions')
         .update({ amount_usdc_micro: usdcMicro })
         .eq('id', tx.id)
+
+      // Auto-allocate 90% to cNGN yield pool
+      await supabase.rpc('allocate_cngn_pool', {
+        p_user_id: tx.user_id,
+        p_usdc_micro: usdcMicro,
+      })
     }
     // For withdrawal: balance was already debited upfront, nothing more needed
   } else if (isFailed) {

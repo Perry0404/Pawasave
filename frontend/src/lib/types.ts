@@ -2,6 +2,10 @@ export interface Profile {
   id: string
   phone: string | null
   display_name: string
+  kyc_status: 'pending' | 'submitted' | 'verified' | 'rejected'
+  kyc_type: 'bvn' | 'nin' | null
+  kyc_submitted_at: string | null
+  kyc_verified_at: string | null
   created_at: string
 }
 
@@ -10,6 +14,8 @@ export interface Wallet {
   user_id: string
   naira_balance_kobo: number
   usdc_balance_micro: number
+  cngn_pool_micro: number
+  cngn_yield_earned_micro: number
   total_saved_kobo: number
   total_withdrawn_kobo: number
   updated_at: string
@@ -159,4 +165,16 @@ export interface AdminTxVolume {
   total_vault_saves_kobo: number
   total_tx_count: number
   pending_count: number
+}
+
+export interface EsusuCryptoDeposit {
+  id: string
+  group_id: string
+  member_id: string
+  user_id: string
+  wallet_address: string
+  amount_cngn_micro: number
+  tx_hash: string | null
+  status: 'pending' | 'confirmed' | 'failed'
+  created_at: string
 }

@@ -41,7 +41,8 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
 
   const rate = getRate()
   const savingsKobo = microUsdcToKobo(wallet.usdc_balance_micro, rate)
-  const totalKobo = wallet.naira_balance_kobo + savingsKobo
+  const cngnKobo = microUsdcToKobo(wallet.cngn_pool_micro || 0, rate)
+  const totalKobo = wallet.naira_balance_kobo + savingsKobo + cngnKobo
   const recentTxs = transactions.slice(0, 6)
 
   const flash = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(''), 4000) }
@@ -280,6 +281,12 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
             <p className="text-emerald-300 text-[11px]">USDC Vault</p>
             <p className="font-semibold">{formatUsdc(wallet.usdc_balance_micro)}</p>
           </div>
+          {(wallet.cngn_pool_micro || 0) > 0 && (
+            <div>
+              <p className="text-emerald-300 text-[11px]">cNGN Pool</p>
+              <p className="font-semibold">{formatNaira(cngnKobo)}</p>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-1.5 mt-3 text-emerald-300 text-[11px]">
           <TrendingUp className="w-3 h-3" />

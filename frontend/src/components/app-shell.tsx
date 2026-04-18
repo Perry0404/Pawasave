@@ -6,6 +6,7 @@ import HomeView from './home-view'
 import VaultView from './vault-view'
 import GroupsView from './groups-view'
 import ActivityView from './activity-view'
+import KycGate from './kyc-gate'
 import Logo from './logo'
 import { Home, Vault, Users, Activity, LogOut } from 'lucide-react'
 
@@ -20,12 +21,23 @@ const tabs: { id: Tab; label: string; Icon: React.FC<any> }[] = [
 
 export default function AppShell() {
   const { user, signOut } = useAuth()
-  const { profile } = useProfile()
+  const { profile, refresh: refreshProfile } = useProfile()
   const { wallet, refresh: refreshWallet } = useWallet()
   const { transactions, refresh: refreshTx } = useTransactions()
   const [tab, setTab] = useState<Tab>('home')
 
   const refresh = () => { refreshWallet(); refreshTx() }
+
+  // KYC gate — block access until verified
+  if (profile && profile.kyc_status !== 'verified') {
+    return (
+      <KycGate
+        userId={user?.id || ''}
+        kycStatus={profile.kyc_status || 'pending'}
+        onRefresh={refreshProfile}
+      />
+    )
+  }
 
   return (
     <div className="min-h-dvh bg-slate-50 flex flex-col safe-top">

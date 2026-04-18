@@ -150,10 +150,10 @@ export default function VaultView({ wallet, refresh }: Props) {
           </div>
           <div>
             <p className="text-amber-200">APY</p>
-            <p className="font-semibold mt-0.5">8.0%</p>
+            <p className="font-semibold mt-0.5">21%</p>
           </div>
         </div>
-        <p className="text-[10px] text-amber-200 mt-2">90% of deposits auto-allocated · Earning yield on cNGN</p>
+        <p className="text-[10px] text-amber-200 mt-2">90% of deposits auto-allocated · Xend Asset Chain cNGN Yield</p>
       </div>
 
       {/* Mode Toggle */}

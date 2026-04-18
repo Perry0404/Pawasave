@@ -4,16 +4,17 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { formatNaira, formatUsdc, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
 import { Users, Plus, ChevronRight, Loader2, AlertCircle, ArrowLeft, Send, Vault, Wallet, Copy, Check } from 'lucide-react'
-import type { EsusuGroup, EsusuMember, EsusuContribution } from '@/lib/types'
+import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
 const supabase = createClient()
 
 interface Props {
   user: User | null
+  wallet: WalletType | null
 }
 
-export default function GroupsView({ user }: Props) {
+export default function GroupsView({ user, wallet }: Props) {
   const [groups, setGroups] = useState<(EsusuGroup & { member_count: number })[]>([])
   const [selected, setSelected] = useState<EsusuGroup | null>(null)
   const [members, setMembers] = useState<(EsusuMember & { profile_name?: string })[]>([])
@@ -23,8 +24,6 @@ export default function GroupsView({ user }: Props) {
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'usdc' | 'naira' | 'crypto'>('usdc')
-  const [cryptoWallet, setCryptoWallet] = useState('')
-  const [depositAddress, setDepositAddress] = useState('')
   const [copied, setCopied] = useState(false)
 
   // Create form
@@ -117,14 +116,6 @@ export default function GroupsView({ user }: Props) {
       .order('created_at', { ascending: false })
       .limit(30)
     setContributions(c || [])
-
-    // Fetch platform deposit address for crypto deposits
-    const { data: addrSetting } = await supabase
-      .from('platform_settings')
-      .select('value')
-      .eq('key', 'deposit_wallet_address')
-      .single()
-    if (addrSetting?.value) setDepositAddress(addrSetting.value)
   }
 
   const contribute = async () => {
@@ -134,14 +125,13 @@ export default function GroupsView({ user }: Props) {
     setBusy(true)
 
     if (paymentMethod === 'crypto') {
-      // Crypto wallet deposit
-      if (!cryptoWallet || cryptoWallet.length < 10) {
-        setFeedback('Enter a valid wallet address')
+      // Crypto wallet deposit from user's personal deposit address
+      if (!wallet?.deposit_address) {
+        setFeedback('No deposit address found. Please contact support.')
         setBusy(false)
         setTimeout(() => setFeedback(''), 3000)
         return
       }
-      const rate = getRate()
       const cngnMicro = Math.round(selected.contribution_amount_kobo / 100 * 1_000_000) // 1 cNGN = 1 NGN
       const { error } = await supabase.rpc('esusu_contribute_crypto', {
         p_user_id: user.id,
@@ -149,11 +139,10 @@ export default function GroupsView({ user }: Props) {
         p_member_id: member.id,
         p_amount_cngn_micro: cngnMicro,
         p_cycle: selected.current_cycle,
-        p_wallet_address: cryptoWallet,
+        p_wallet_address: wallet.deposit_address,
       })
       if (error) { setFeedback(error.message) } else {
         setFeedback('Crypto contribution recorded!')
-        setCryptoWallet('')
         openGroup(selected)
       }
       setBusy(false)
@@ -259,14 +248,14 @@ export default function GroupsView({ user }: Props) {
         {/* Crypto deposit details */}
         {paymentMethod === 'crypto' && (
           <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 mb-3 space-y-3">
-            {depositAddress ? (
-              <div>
-                <p className="text-[11px] text-purple-600 font-medium mb-1">Send cNGN on Base to:</p>
+            <div>
+              <p className="text-[11px] text-purple-600 font-medium mb-1">Your Deposit Address (Base L2)</p>
+              {wallet?.deposit_address ? (
                 <div className="flex items-center gap-2 bg-white rounded-lg px-3 py-2 border border-purple-200">
-                  <code className="text-xs text-purple-900 flex-1 break-all">{depositAddress}</code>
+                  <code className="text-xs text-purple-900 flex-1 break-all">{wallet.deposit_address}</code>
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(depositAddress)
+                      navigator.clipboard.writeText(wallet.deposit_address!)
                       setCopied(true)
                       setTimeout(() => setCopied(false), 2000)
                     }}
@@ -275,21 +264,12 @@ export default function GroupsView({ user }: Props) {
                     {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                   </button>
                 </div>
-              </div>
-            ) : (
-              <p className="text-xs text-purple-600">Deposit address not configured yet. Contact admin.</p>
-            )}
-            <div>
-              <label className="text-[11px] text-purple-600 font-medium mb-1 block">Your Wallet Address</label>
-              <input
-                value={cryptoWallet}
-                onChange={(e) => setCryptoWallet(e.target.value.trim())}
-                placeholder="0x..."
-                className="w-full px-3 py-2 bg-white border border-purple-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-400"
-              />
+              ) : (
+                <p className="text-xs text-purple-600">Address generating... refresh in a moment.</p>
+              )}
             </div>
             <p className="text-[10px] text-purple-500">
-              Send exactly {formatNaira(selected.contribution_amount_kobo)} worth of cNGN on Base network. Your contribution will be recorded automatically.
+              Send exactly {formatNaira(selected.contribution_amount_kobo)} worth of cNGN to your personal address above. Funds are non-custodial — only you control this address.
             </p>
           </div>
         )}

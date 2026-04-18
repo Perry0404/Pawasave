@@ -12,6 +12,7 @@ export interface Profile {
 export interface Wallet {
   id: string
   user_id: string
+  deposit_address: string | null
   naira_balance_kobo: number
   usdc_balance_micro: number
   cngn_pool_micro: number

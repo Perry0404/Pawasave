@@ -63,7 +63,7 @@ export default function AppShell() {
         <div className="max-w-lg mx-auto">
           {tab === 'home' && <HomeView wallet={wallet} transactions={transactions} user={user} refresh={refresh} />}
           {tab === 'vault' && <VaultView wallet={wallet} refresh={refresh} />}
-          {tab === 'groups' && <GroupsView user={user} />}
+          {tab === 'groups' && <GroupsView user={user} wallet={wallet} />}
           {tab === 'activity' && <ActivityView transactions={transactions} />}
         </div>
       </main>

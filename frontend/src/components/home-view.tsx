@@ -23,6 +23,7 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
   const [amount, setAmount] = useState('')
   const [depositInfo, setDepositInfo] = useState<RampResult | null>(null)
   const [copied, setCopied] = useState(false)
+  const [addrCopied, setAddrCopied] = useState(false)
 
   // Withdraw state
   const [banks, setBanks] = useState<Bank[]>([])
@@ -293,6 +294,26 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
           <span>Rate: ₦{rate.toLocaleString()}/USD</span>
         </div>
       </div>
+
+      {/* Personal Deposit Address */}
+      {wallet.deposit_address && (
+        <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 mt-3">
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-[11px] text-slate-500 font-medium">Your Deposit Address (Base L2)</p>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(wallet.deposit_address!)
+                setAddrCopied(true)
+                setTimeout(() => setAddrCopied(false), 2000)
+              }}
+              className="text-emerald-600 hover:text-emerald-700 transition p-0.5"
+            >
+              {addrCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+          <code className="text-xs text-slate-700 break-all leading-relaxed">{wallet.deposit_address}</code>
+        </div>
+      )}
 
       {/* Quick Actions */}
       <div className="grid grid-cols-3 gap-3 mt-5">

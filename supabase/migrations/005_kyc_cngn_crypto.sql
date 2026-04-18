@@ -1,5 +1,6 @@
 -- ============================================================
--- Migration 005: KYC, cNGN Yield Pool, Crypto Esusu Deposits
+-- Migration 005: KYC, cNGN Yield Pool (Xend Asset Chain 21%),
+--                Non-Custodial Deposit Addresses, Crypto Esusu
 -- Run this ENTIRE script in Supabase SQL Editor
 -- ============================================================
 
@@ -16,15 +17,56 @@ ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS kyc_verified_at timestamptz;
 
 -- ────────────────────────────────────────────────────────────
--- PART B: cNGN Pool balance on wallets
+-- PART B: Personal deposit address + cNGN pool on wallets
+-- Each user gets their own non-custodial deposit address
 -- ────────────────────────────────────────────────────────────
 
 ALTER TABLE public.wallets
+  ADD COLUMN IF NOT EXISTS deposit_address text UNIQUE,
   ADD COLUMN IF NOT EXISTS cngn_pool_micro bigint NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS cngn_yield_earned_micro bigint NOT NULL DEFAULT 0;
 
 -- ────────────────────────────────────────────────────────────
--- PART C: Esusu Crypto Deposits table
+-- PART C: Generate deposit address for new users
+-- Uses deterministic keccak-style from user id (placeholder;
+-- in production call an external wallet API for real keys)
+-- ────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.generate_deposit_address(p_user_id uuid)
+RETURNS text AS $$
+DECLARE
+  v_addr text;
+BEGIN
+  -- Generate a deterministic hex address from user UUID
+  -- Format: 0x + first 40 hex chars of sha256(user_id)
+  -- NOTE: In production, replace this with actual HD wallet
+  -- derivation via an external API call to your key management service
+  v_addr := '0x' || substring(encode(digest(p_user_id::text, 'sha256'), 'hex') from 1 for 40);
+  RETURN v_addr;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+-- Generate addresses for all existing wallets that don't have one
+UPDATE public.wallets
+SET deposit_address = generate_deposit_address(user_id)
+WHERE deposit_address IS NULL;
+
+-- Update the handle_new_user trigger to also set deposit_address
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.profiles (id, phone, display_name)
+  VALUES (new.id, new.phone, coalesce(new.raw_user_meta_data->>'display_name', ''));
+
+  INSERT INTO public.wallets (user_id, deposit_address)
+  VALUES (new.id, generate_deposit_address(new.id));
+
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ────────────────────────────────────────────────────────────
+-- PART D: Esusu Crypto Deposits table
 -- ────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS public.esusu_crypto_deposits (
@@ -46,7 +88,7 @@ CREATE POLICY "Users insert own crypto deposits" ON public.esusu_crypto_deposits
   FOR INSERT WITH CHECK (user_id = auth.uid());
 
 -- ────────────────────────────────────────────────────────────
--- PART D: Update transaction type constraint for new types
+-- PART E: Update transaction type constraint for new types
 -- ────────────────────────────────────────────────────────────
 
 ALTER TABLE public.transactions
@@ -61,17 +103,17 @@ ALTER TABLE public.transactions
   ));
 
 -- ────────────────────────────────────────────────────────────
--- PART E: New platform settings
+-- PART F: Platform settings
 -- ────────────────────────────────────────────────────────────
 
 INSERT INTO public.platform_settings (key, value, description) VALUES
-  ('deposit_wallet_address', '', 'Base L2 wallet address for receiving crypto deposits'),
-  ('cngn_pool_apy_percent', '8.0', 'cNGN yield pool APY (%)'),
+  ('cngn_pool_apy_percent', '21.0', 'cNGN yield pool APY via Xend Asset Chain (%)'),
+  ('cngn_pool_provider', 'Xend Asset Chain', 'Yield pool provider for cNGN'),
   ('kyc_required', 'true', 'Whether KYC is required to use the platform')
 ON CONFLICT (key) DO NOTHING;
 
 -- ────────────────────────────────────────────────────────────
--- PART F: KYC submission function (auto-verify for demo)
+-- PART G: KYC submission function (auto-verify for demo)
 -- ────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.submit_kyc(
@@ -91,7 +133,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ────────────────────────────────────────────────────────────
--- PART G: Admin KYC management (for future use)
+-- PART H: Admin KYC management
 -- ────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.admin_verify_kyc(
@@ -107,7 +149,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ────────────────────────────────────────────────────────────
--- PART H: cNGN Pool allocation (90% of deposits)
+-- PART I: cNGN Pool allocation (90% of deposits → Xend 21%)
 -- ────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.allocate_cngn_pool(
@@ -117,6 +159,7 @@ CREATE OR REPLACE FUNCTION public.allocate_cngn_pool(
 DECLARE
   v_cngn_portion bigint;
 BEGIN
+  -- 90% of deposit auto-allocated to cNGN yield pool (Xend Asset Chain)
   v_cngn_portion := floor(p_usdc_micro * 0.90);
 
   UPDATE public.wallets
@@ -129,7 +172,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ────────────────────────────────────────────────────────────
--- PART I: Withdraw from cNGN pool
+-- PART J: Withdraw from cNGN pool back to USDC
 -- ────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.withdraw_cngn_pool(
@@ -156,7 +199,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ────────────────────────────────────────────────────────────
--- PART J: Esusu crypto contribution function
+-- PART K: Esusu crypto contribution function
 -- ────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.esusu_contribute_crypto(
@@ -196,10 +239,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ────────────────────────────────────────────────────────────
--- PART K: Auto-verify existing users for smooth transition
+-- PART L: Auto-verify existing users for smooth transition
 -- ────────────────────────────────────────────────────────────
 
--- Existing users who registered before KYC was added get auto-verified
 UPDATE public.profiles
 SET kyc_status = 'verified', kyc_verified_at = now()
 WHERE kyc_status = 'pending'

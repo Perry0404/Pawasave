@@ -1,14 +1,21 @@
-// Client-side helpers to call our secure API routes (FlintAPI key stays server-side)
+// Client-side helpers to call our secure API routes (API keys stay server-side)
+
+export type RampProvider = 'flint' | 'xend'
 
 export interface RampResult {
+  provider?: RampProvider
   transactionId: string
   reference: string
-  // on-ramp: bank details to pay into
+  // on-ramp: bank details to pay into (FlintAPI)
   bankName?: string
   bankCode?: string
   accountNumber?: string
   accountName?: string
   amount?: number
+  // on-ramp / off-ramp: wallet address (Xend)
+  walletAddress?: string
+  currency?: string
+  network?: string
   // off-ramp: deposit address for stablecoin
   depositAddress?: string
 }
@@ -18,11 +25,11 @@ export interface Bank {
   code: string
 }
 
-export async function initiateDeposit(amountNaira: number): Promise<RampResult> {
+export async function initiateDeposit(amountNaira: number, provider: RampProvider = 'flint'): Promise<RampResult> {
   const res = await fetch('/api/ramp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: 'on', amount: amountNaira }),
+    body: JSON.stringify({ type: 'on', amount: amountNaira, provider }),
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error || 'Deposit failed')
@@ -32,12 +39,13 @@ export async function initiateDeposit(amountNaira: number): Promise<RampResult> 
 export async function initiateWithdrawal(
   amountNaira: number,
   bankCode: string,
-  accountNumber: string
+  accountNumber: string,
+  provider: RampProvider = 'flint'
 ): Promise<RampResult> {
   const res = await fetch('/api/ramp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: 'off', amount: amountNaira, bankCode, accountNumber }),
+    body: JSON.stringify({ type: 'off', amount: amountNaira, bankCode, accountNumber, provider }),
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error || 'Withdrawal failed')

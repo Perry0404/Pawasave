@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useAuth } from '@/hooks/use-data'
 import Logo from '@/components/logo'
+import Link from 'next/link'
 import { Mail, Lock, User, ArrowRight, Loader2, Eye, EyeOff, ArrowLeft } from 'lucide-react'
 
 export default function AuthScreen() {
@@ -212,6 +213,11 @@ export default function AuthScreen() {
         <p className="text-center text-xs text-slate-400 mt-6">
           Powered by Supabase &middot; FlintAPI &middot; Base L2
         </p>
+        <div className="flex items-center justify-center gap-4 mt-3 text-xs">
+          <Link href="/about" className="text-emerald-600 hover:text-emerald-700 font-medium transition">About PawaSave</Link>
+          <span className="text-slate-300">&middot;</span>
+          <Link href="/privacy" className="text-emerald-600 hover:text-emerald-700 font-medium transition">Privacy Policy</Link>
+        </div>
       </div>
     </div>
   )

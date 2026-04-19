@@ -6,6 +6,7 @@ export interface Profile {
   kyc_type: 'bvn' | 'nin' | null
   kyc_submitted_at: string | null
   kyc_verified_at: string | null
+  xend_member_id: string | null
   created_at: string
 }
 

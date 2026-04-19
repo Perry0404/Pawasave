@@ -2,11 +2,13 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
+import { validatePosInvoice, processPosInvoice } from '@/lib/xend'
 
 const FLINT_API_KEY = process.env.FLINT_API_KEY || ''
 const FLINT_BASE = 'https://stables.flintapi.io/v1'
 const CUSTODY_ADDRESS = process.env.FLINT_CUSTODY_ADDRESS || ''
 const DEFAULT_FEE_PERCENT = 1.5 // PawaSave service fee %
+const XEND_CONFIGURED = !!(process.env.XEND_MERCHANT_ID && process.env.XEND_API_KEY && process.env.XEND_PRIVATE_KEY)
 
 function generateRef() {
   return 'pawa_' + crypto.randomBytes(16).toString('hex')
@@ -55,15 +57,89 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { type, amount, bankCode, accountNumber } = body
+    const { type, amount, bankCode, accountNumber, provider = 'flint' } = body
 
     if (!type || !amount || amount < 100) {
       return NextResponse.json({ error: 'Amount must be at least ₦100' }, { status: 400 })
     }
 
-    if (type === 'off' && (!bankCode || !accountNumber)) {
+    if (type === 'off' && (!bankCode || !accountNumber) && provider === 'flint') {
       return NextResponse.json({ error: 'Bank details required for withdrawal' }, { status: 400 })
     }
+
+    // ---- Xend provider path ----
+    if (provider === 'xend') {
+      if (!XEND_CONFIGURED) {
+        return NextResponse.json({ error: 'Xend Finance not configured' }, { status: 503 })
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('xend_member_id')
+        .eq('id', user.id)
+        .single()
+
+      if (!profile?.xend_member_id) {
+        return NextResponse.json({ error: 'Register with Xend first (go to Settings)' }, { status: 400 })
+      }
+
+      const currency = 'USDC'
+      await validatePosInvoice(profile.xend_member_id, {
+        amount: 0,
+        currency,
+        fiatAmount: amount,
+        fiatCurrency: 'NGN',
+      })
+
+      const invoice = await processPosInvoice(profile.xend_member_id, {
+        amount: 0,
+        currency,
+        fiatAmount: amount,
+        fiatCurrency: 'NGN',
+      })
+
+      const reference = generateRef()
+      const feePercent = await getFeePercent(supabase)
+      const pawaFeeNaira = Math.round(amount * feePercent / 100)
+
+      await supabase.from('transactions').insert({
+        user_id: user.id,
+        type: type === 'on' ? 'deposit' : 'withdrawal',
+        direction: type === 'on' ? 'credit' : 'debit',
+        amount_kobo: Math.round(amount * 100),
+        description: type === 'on' ? 'Received via Xend Finance' : 'Sent via Xend Finance',
+        reference,
+        paychant_tx_id: invoice.data.invoiceId,
+        status: 'pending',
+      })
+
+      if (pawaFeeNaira > 0) {
+        await supabase.rpc('record_platform_fee', {
+          p_user_id: user.id,
+          p_reference: reference,
+          p_fee_type: type === 'on' ? 'ramp_onramp' : 'ramp_offramp',
+          p_gross_kobo: Math.round(amount * 100),
+          p_fee_kobo: Math.round(pawaFeeNaira * 100),
+          p_fee_percent: feePercent,
+        })
+      }
+
+      return NextResponse.json({
+        provider: 'xend',
+        transactionId: invoice.data.invoiceId,
+        reference,
+        walletAddress: invoice.data.walletAddress,
+        depositAddress: invoice.data.walletAddress,
+        amount: Math.round(amount),
+        currency: invoice.data.currency,
+        network: invoice.data.network,
+        pawaFee: pawaFeeNaira,
+        totalFee: pawaFeeNaira,
+        feePercent,
+      })
+    }
+
+    // ---- FlintAPI provider path (default) ----
 
     const reference = generateRef()
     const feePercent = await getFeePercent(supabase)
@@ -156,6 +232,7 @@ export async function POST(request: NextRequest) {
 
     // Return FlintAPI response data + our reference + fee breakdown
     return NextResponse.json({
+      provider: 'flint',
       transactionId: flintData.data?.transactionId,
       reference,
       bankName: flintData.data?.bankName,

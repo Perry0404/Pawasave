@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { formatNaira, formatUsdc, koboToMicroUsdc, microUsdcToKobo, getRate } from '@/lib/format'
 import { saveToVault, withdrawFromVault, lockSavings, withdrawLock, useSavingsLocks, getMorphoApy } from '@/hooks/use-data'
-import { Shield, ArrowDown, ArrowUp, Info, Loader2, Lock, Unlock, TrendingUp, Clock, AlertTriangle, Coins } from 'lucide-react'
+import { Shield, ArrowDown, ArrowUp, Info, Loader2, Lock, Unlock, TrendingUp, Clock, AlertTriangle } from 'lucide-react'
 import type { Wallet, SavingsLock } from '@/lib/types'
 
 interface Props {
@@ -35,12 +35,8 @@ export default function VaultView({ wallet, refresh }: Props) {
 
   const rate = getRate()
   const savingsKobo = microUsdcToKobo(wallet.usdc_balance_micro, rate)
-  const cngnPoolMicro = wallet.cngn_pool_micro || 0
-  const cngnYieldMicro = wallet.cngn_yield_earned_micro || 0
-  const cngnKobo = microUsdcToKobo(cngnPoolMicro, rate)
   const activeLocks = locks.filter(l => l.status === 'active')
   const totalLockedMicro = activeLocks.reduce((s, l) => s + l.amount_usdc_micro, 0)
-  const totalInterestMicro = activeLocks.reduce((s, l) => s + l.projected_interest_micro, 0)
 
   // Interest projection for lock form
   const lockAmount = parseFloat(amount) || 0
@@ -129,31 +125,6 @@ export default function VaultView({ wallet, refresh }: Props) {
           <p className="text-xs font-semibold text-emerald-800">Gauntlet USDC Prime · Morpho Vault</p>
           <p className="text-xs text-emerald-600">{morphoApy}% APY — Lock your savings to earn interest</p>
         </div>
-      </div>
-
-      {/* cNGN Yield Pool */}
-      <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl p-5 text-white mt-4">
-        <div className="flex items-center gap-2 mb-2">
-          <Coins className="w-4 h-4 text-amber-200" />
-          <p className="text-amber-100 text-xs font-medium uppercase tracking-wider">cNGN Yield Pool</p>
-        </div>
-        <p className="text-2xl font-bold tracking-tight">{formatNaira(cngnKobo)}</p>
-        <p className="text-amber-200 text-sm mt-0.5">{formatUsdc(cngnPoolMicro)} USDC equivalent</p>
-        <div className="flex items-center gap-4 mt-3 pt-3 border-t border-white/15 text-xs">
-          <div>
-            <p className="text-amber-200">Pool Balance</p>
-            <p className="font-semibold mt-0.5">{formatUsdc(cngnPoolMicro)}</p>
-          </div>
-          <div>
-            <p className="text-amber-200">Yield Earned</p>
-            <p className="font-semibold mt-0.5 text-emerald-300">+{formatUsdc(cngnYieldMicro)}</p>
-          </div>
-          <div>
-            <p className="text-amber-200">APY</p>
-            <p className="font-semibold mt-0.5">21%</p>
-          </div>
-        </div>
-        <p className="text-[10px] text-amber-200 mt-2">90% of deposits auto-allocated · Xend Asset Chain cNGN Yield</p>
       </div>
 
       {/* Mode Toggle */}

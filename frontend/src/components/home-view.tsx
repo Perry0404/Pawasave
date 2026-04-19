@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { formatNaira, formatUsdc, microUsdcToKobo, getRate, timeAgo } from '@/lib/format'
-import { initiateDeposit, initiateWithdrawal, getBanks, type RampResult, type Bank } from '@/lib/flint'
+import { initiateDeposit, initiateWithdrawal, getBanks, type RampResult, type Bank, type RampProvider } from '@/lib/flint'
 import { ArrowUpRight, ArrowDownLeft, Vault, TrendingUp, Wallet, Plus, Minus, CreditCard, Loader2, ArrowLeft, Copy, Check, ChevronDown, Building2 } from 'lucide-react'
 import type { Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
@@ -30,6 +30,7 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
   const [bankCode, setBankCode] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
   const [banksLoading, setBanksLoading] = useState(false)
+  const [provider, setProvider] = useState<RampProvider>('flint')
 
   useEffect(() => {
     if (view === 'withdraw' && banks.length === 0) {
@@ -48,7 +49,7 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
 
   const flash = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(''), 4000) }
 
-  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setAccountNumber(''); setCopied(false) }
+  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setAccountNumber(''); setCopied(false); setProvider('flint') }
 
   const goBack = () => { resetForm(); setView('main') }
 
@@ -57,7 +58,7 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
     if (!naira || naira < 100) { flash('Minimum amount is ₦100'); return }
     setBusy(true)
     try {
-      const result = await initiateDeposit(naira)
+      const result = await initiateDeposit(naira, provider)
       setDepositInfo(result)
       setView('deposit-info')
     } catch (e: any) {
@@ -75,7 +76,7 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
     }
     setBusy(true)
     try {
-      await initiateWithdrawal(naira, bankCode, accountNumber)
+      await initiateWithdrawal(naira, bankCode, accountNumber, provider)
       flash('Sent! The recipient will receive NGN in their bank shortly.')
       resetForm()
       setView('main')
@@ -103,7 +104,23 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <h2 className="text-lg font-bold text-slate-900 mb-1">Receive Money</h2>
-        <p className="text-sm text-slate-400 mb-6">Send naira via bank transfer. It auto-converts to USDC and saves in your vault.</p>
+        <p className="text-sm text-slate-400 mb-4">Send naira via bank transfer. It auto-converts to USDC and saves in your vault.</p>
+
+        {/* Provider Toggle */}
+        <div className="flex bg-slate-100 rounded-xl p-1 mb-5">
+          <button
+            onClick={() => setProvider('flint')}
+            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${provider === 'flint' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'}`}
+          >
+            FlintAPI
+          </button>
+          <button
+            onClick={() => setProvider('xend')}
+            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${provider === 'xend' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}
+          >
+            Xend Finance
+          </button>
+        </div>
 
         <div>
           <label className="text-xs text-slate-500 block mb-1.5">Amount (₦)</label>
@@ -143,13 +160,40 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <h2 className="text-lg font-bold text-slate-900 mb-1">Complete Transfer</h2>
-        <p className="text-sm text-slate-400 mb-5">Send the exact amount below. Your vault will be credited automatically.</p>
+        <p className="text-sm text-slate-400 mb-5">
+          {depositInfo.provider === 'xend'
+            ? 'Send crypto to the wallet address below. Your vault will be credited automatically.'
+            : 'Send the exact amount below. Your vault will be credited automatically.'}
+        </p>
 
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 space-y-4">
           <div>
             <p className="text-[11px] text-emerald-600 font-medium">Amount</p>
             <p className="text-2xl font-bold text-emerald-800">₦{parseInt(amount).toLocaleString()}</p>
           </div>
+          {/* Xend: show wallet address */}
+          {depositInfo.walletAddress && (
+            <div>
+              <p className="text-[11px] text-emerald-600 font-medium">Wallet Address ({depositInfo.network || 'Base'})</p>
+              <div className="flex items-center gap-2">
+                <code className="text-xs font-bold text-emerald-900 break-all">{depositInfo.walletAddress}</code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(depositInfo.walletAddress!)
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  }}
+                  className="text-emerald-600 hover:text-emerald-800 transition p-1 flex-shrink-0"
+                >
+                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                </button>
+              </div>
+              {depositInfo.currency && (
+                <p className="text-[11px] text-emerald-500 mt-1">Currency: {depositInfo.currency}</p>
+              )}
+            </div>
+          )}
+          {/* FlintAPI: show bank details */}
           {depositInfo.bankName && (
             <div>
               <p className="text-[11px] text-emerald-600 font-medium">Bank</p>
@@ -199,7 +243,23 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <h2 className="text-lg font-bold text-slate-900 mb-1">Send Money</h2>
-        <p className="text-sm text-slate-400 mb-6">Send naira from your USDC vault to any Nigerian bank account.</p>
+        <p className="text-sm text-slate-400 mb-4">Send naira from your USDC vault to any Nigerian bank account.</p>
+
+        {/* Provider Toggle */}
+        <div className="flex bg-slate-100 rounded-xl p-1 mb-5">
+          <button
+            onClick={() => setProvider('flint')}
+            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${provider === 'flint' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500'}`}
+          >
+            FlintAPI
+          </button>
+          <button
+            onClick={() => setProvider('xend')}
+            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${provider === 'xend' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}
+          >
+            Xend Finance
+          </button>
+        </div>
 
         <div className="space-y-4">
           <div>

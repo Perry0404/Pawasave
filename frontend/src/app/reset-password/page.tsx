@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import Logo from '@/components/logo'
 import { Lock, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react'
@@ -12,8 +12,19 @@ export default function ResetPasswordPage() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [done, setDone] = useState(false)
+  const [sessionReady, setSessionReady] = useState(false)
+  const [checkingSession, setCheckingSession] = useState(true)
 
   const supabase = createClient()
+
+  useEffect(() => {
+    const check = async () => {
+      const { data } = await supabase.auth.getSession()
+      setSessionReady(!!data.session)
+      setCheckingSession(false)
+    }
+    check()
+  }, [supabase.auth])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -31,6 +42,36 @@ export default function ResetPasswordPage() {
     } else {
       setDone(true)
     }
+  }
+
+  if (checkingSession) {
+    return (
+      <div className="min-h-dvh bg-slate-950 flex items-center justify-center px-6">
+        <div className="text-center">
+          <Logo size={44} className="mx-auto mb-4" />
+          <Loader2 className="w-5 h-5 animate-spin text-emerald-500 mx-auto" />
+          <p className="text-slate-400 text-sm mt-3">Validating reset link...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!sessionReady) {
+    return (
+      <div className="min-h-dvh bg-slate-950 flex flex-col items-center justify-center px-6">
+        <Logo size={48} className="mb-5" />
+        <h1 className="text-xl font-bold text-white mb-2">Reset Link Invalid or Expired</h1>
+        <p className="text-slate-400 text-sm text-center max-w-xs mb-6">
+          Request another reset email from the login screen and open the latest link.
+        </p>
+        <a
+          href="/"
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-6 py-3 rounded-xl transition"
+        >
+          Back to Sign In
+        </a>
+      </div>
+    )
   }
 
   if (done) {
@@ -99,7 +140,7 @@ export default function ResetPasswordPage() {
 
         <button
           type="submit"
-          disabled={busy}
+          disabled={busy || !sessionReady}
           className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Update Password'}

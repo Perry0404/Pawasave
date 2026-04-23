@@ -3,20 +3,20 @@
 import { useState } from 'react'
 import { useAuth, useProfile, useWallet, useTransactions } from '@/hooks/use-data'
 import HomeView from './home-view'
-import VaultView from './vault-view'
 import GroupsView from './groups-view'
 import ActivityView from './activity-view'
 import KycGate from './kyc-gate'
 import Logo from './logo'
-import { Home, Vault, Users, Activity, LogOut } from 'lucide-react'
+import { Home, Users, Activity, LifeBuoy, Settings, LogOut, ShieldCheck, X } from 'lucide-react'
 
-type Tab = 'home' | 'vault' | 'groups' | 'activity'
+type Tab = 'home' | 'groups' | 'activity' | 'support' | 'settings'
 
 const tabs: { id: Tab; label: string; Icon: React.FC<any> }[] = [
   { id: 'home', label: 'Home', Icon: Home },
-  { id: 'vault', label: 'Vault', Icon: Vault },
   { id: 'groups', label: 'Groups', Icon: Users },
   { id: 'activity', label: 'Activity', Icon: Activity },
+  { id: 'support', label: 'Support', Icon: LifeBuoy },
+  { id: 'settings', label: 'Settings', Icon: Settings },
 ]
 
 export default function AppShell() {
@@ -25,51 +25,237 @@ export default function AppShell() {
   const { wallet, refresh: refreshWallet } = useWallet()
   const { transactions, refresh: refreshTx } = useTransactions()
   const [tab, setTab] = useState<Tab>('home')
+  const [showKycReminder, setShowKycReminder] = useState(true)
+  const [showKycGate, setShowKycGate] = useState(false)
+
+  const [theme, setTheme] = useState<'mint' | 'ocean' | 'sunset'>('mint')
+  const [supportMessage, setSupportMessage] = useState('')
+  const [supportAiMode, setSupportAiMode] = useState(true)
+  const [requestHuman, setRequestHuman] = useState(false)
+  const [pin, setPin] = useState('')
+  const [pinConfirm, setPinConfirm] = useState('')
+  const [settingsFeedback, setSettingsFeedback] = useState('')
 
   const refresh = () => { refreshWallet(); refreshTx() }
 
-  // KYC gate — block access until verified
-  if (profile && profile.kyc_status !== 'verified') {
+  const gradients = {
+    mint: 'from-emerald-600 via-teal-700 to-slate-900',
+    ocean: 'from-cyan-600 via-blue-700 to-slate-900',
+    sunset: 'from-orange-500 via-rose-600 to-slate-900',
+  }
+
+  if (showKycGate && profile) {
     return (
       <KycGate
         userId={user?.id || ''}
         kycStatus={profile.kyc_status || 'pending'}
-        onRefresh={refreshProfile}
+        onRefresh={() => {
+          refreshProfile()
+          setShowKycGate(false)
+          setShowKycReminder(false)
+        }}
       />
     )
   }
 
+  const answerFaq = (q: string) => {
+    const text = q.toLowerCase()
+    if (text.includes('withdraw') && profile?.kyc_status !== 'verified') {
+      return 'KYC is required before withdrawal. Open KYC from Home or Settings to continue.'
+    }
+    if (text.includes('deposit') || text.includes('receive')) {
+      return 'Use Receive on Home, transfer using the instructions shown, then balance updates automatically.'
+    }
+    if (text.includes('pin')) {
+      return 'Your 4-digit transaction PIN is required for withdrawals. You can update it in Settings.'
+    }
+    return 'I can help with deposits, withdrawals, KYC, and PIN security. If needed, request a human support handoff.'
+  }
+
+  const savePin = async () => {
+    if (!/^\d{4}$/.test(pin)) {
+      setSettingsFeedback('PIN must be exactly 4 digits')
+      return
+    }
+    if (pin !== pinConfirm) {
+      setSettingsFeedback('PINs do not match')
+      return
+    }
+    try {
+      const { updateTransactionPin } = await import('@/hooks/use-data')
+      await updateTransactionPin(user?.id || '', pin)
+      await refreshProfile()
+      setPin('')
+      setPinConfirm('')
+      setSettingsFeedback('Transaction PIN updated successfully')
+    } catch (e: any) {
+      setSettingsFeedback(e?.message || 'Failed to update PIN')
+    }
+  }
+
   return (
-    <div className="min-h-dvh bg-slate-50 flex flex-col safe-top">
+    <div className={`min-h-dvh bg-gradient-to-br ${gradients[theme]} flex flex-col safe-top`}>
       {/* Header */}
-      <header className="bg-slate-900 px-5 pt-4 pb-3 flex items-center justify-between sticky top-0 z-50">
+      <header className="bg-black/30 backdrop-blur px-5 pt-4 pb-3 flex items-center justify-between sticky top-0 z-50 border-b border-white/10">
         <div className="flex items-center gap-2.5">
           <Logo size={32} />
           <div>
             <p className="text-white text-sm font-bold tracking-tight">PawaSave</p>
-            <p className="text-slate-500 text-[11px]">{profile?.display_name || user?.email}</p>
+            <p className="text-slate-300 text-[11px]">{profile?.display_name || user?.email}</p>
           </div>
         </div>
         <button
           onClick={() => { if (confirm('Log out?')) signOut() }}
-          className="text-slate-500 hover:text-slate-300 transition p-2"
+          className="text-slate-300 hover:text-white transition p-2"
         >
           <LogOut className="w-4 h-4" />
         </button>
       </header>
 
+      {profile && profile.kyc_status !== 'verified' && showKycReminder && (
+        <div className="mx-4 mt-4 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-amber-900">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold flex items-center gap-1.5"><ShieldCheck className="w-4 h-4" />Verify your account</p>
+              <p className="text-xs mt-1">You can skip for now, but KYC is mandatory before any withdrawal.</p>
+              <button
+                onClick={() => setShowKycGate(true)}
+                className="mt-2 text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg transition"
+              >
+                Start KYC
+              </button>
+            </div>
+            <button onClick={() => setShowKycReminder(false)} className="text-amber-700 hover:text-amber-900">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Content */}
       <main className="flex-1 overflow-y-auto pb-24">
         <div className="max-w-lg mx-auto">
-          {tab === 'home' && <HomeView wallet={wallet} transactions={transactions} user={user} refresh={refresh} />}
-          {tab === 'vault' && <VaultView wallet={wallet} refresh={refresh} />}
+          {tab === 'home' && <HomeView wallet={wallet} transactions={transactions} user={user} refresh={refresh} profile={profile} onStartKyc={() => setShowKycGate(true)} />}
           {tab === 'groups' && <GroupsView user={user} wallet={wallet} />}
           {tab === 'activity' && <ActivityView transactions={transactions} />}
+          {tab === 'support' && (
+            <div className="px-4 pt-5 pb-6">
+              <div className="bg-white/95 rounded-2xl p-5 border border-white/60">
+                <h2 className="text-lg font-bold text-slate-900">Support</h2>
+                <p className="text-xs text-slate-500 mt-1">Toggle AI FAQ support, and escalate to a human if needed.</p>
+
+                <div className="mt-4 flex items-center justify-between bg-slate-100 rounded-xl px-3 py-2">
+                  <span className="text-sm font-medium text-slate-700">AI FAQ Assistant</span>
+                  <button
+                    onClick={() => setSupportAiMode(!supportAiMode)}
+                    className={`w-12 h-7 rounded-full transition ${supportAiMode ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                  >
+                    <span className={`block w-5 h-5 bg-white rounded-full transition-transform ${supportAiMode ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                <textarea
+                  value={supportMessage}
+                  onChange={(e) => setSupportMessage(e.target.value)}
+                  rows={4}
+                  placeholder="Ask a question about deposits, withdrawals, KYC, or PIN"
+                  className="w-full mt-4 px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+
+                {supportAiMode && supportMessage.trim() && (
+                  <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-900">
+                    {answerFaq(supportMessage)}
+                  </div>
+                )}
+
+                <div className="mt-4 flex items-center justify-between bg-slate-100 rounded-xl px-3 py-2">
+                  <span className="text-sm font-medium text-slate-700">Connect me to support agent</span>
+                  <button
+                    onClick={() => setRequestHuman(!requestHuman)}
+                    className={`w-12 h-7 rounded-full transition ${requestHuman ? 'bg-blue-500' : 'bg-slate-300'}`}
+                  >
+                    <span className={`block w-5 h-5 bg-white rounded-full transition-transform ${requestHuman ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                {requestHuman && (
+                  <p className="text-xs text-blue-700 mt-3 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
+                    Escalation received. A human support rep will reach out via your account email.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          {tab === 'settings' && (
+            <div className="px-4 pt-5 pb-6 space-y-4">
+              <div className="bg-white/95 rounded-2xl p-5 border border-white/60">
+                <h2 className="text-lg font-bold text-slate-900">Settings</h2>
+                <p className="text-xs text-slate-500 mt-1">Balance info, payment security, and personalization.</p>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div className="bg-slate-100 rounded-xl px-3 py-2.5">
+                    <p className="text-[11px] text-slate-500">USDC Vault</p>
+                    <p className="text-sm font-semibold text-slate-900">{wallet ? (wallet.usdc_balance_micro / 1_000_000).toFixed(2) : '0.00'} USDC</p>
+                  </div>
+                  <div className="bg-slate-100 rounded-xl px-3 py-2.5">
+                    <p className="text-[11px] text-slate-500">cNGN Pool</p>
+                    <p className="text-sm font-semibold text-slate-900">{wallet ? (wallet.cngn_pool_micro / 1_000_000).toFixed(2) : '0.00'} cNGN</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white/95 rounded-2xl p-5 border border-white/60">
+                <h3 className="text-sm font-semibold text-slate-900">Payment Security</h3>
+                <p className="text-xs text-slate-500 mt-1">Set or change your 4-digit withdrawal PIN.</p>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+                    placeholder="New PIN"
+                    className="px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={pinConfirm}
+                    onChange={(e) => setPinConfirm(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Repeat PIN"
+                    className="px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <button
+                  onClick={savePin}
+                  className="mt-3 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition"
+                >
+                  Save PIN
+                </button>
+                {settingsFeedback && <p className="text-xs mt-2 text-slate-600">{settingsFeedback}</p>}
+              </div>
+
+              <div className="bg-white/95 rounded-2xl p-5 border border-white/60">
+                <h3 className="text-sm font-semibold text-slate-900">Theme</h3>
+                <div className="mt-3 flex gap-2">
+                  {(['mint', 'ocean', 'sunset'] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setTheme(t)}
+                      className={`px-3 py-2 rounded-xl text-xs font-semibold transition ${theme === t ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </main>
 
       {/* Bottom Nav */}
-      <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-slate-100 z-50 safe-bottom">
+      <nav className="fixed bottom-0 inset-x-0 bg-white/90 backdrop-blur border-t border-slate-200 z-50 safe-bottom">
         <div className="max-w-lg mx-auto flex">
           {tabs.map(({ id, label, Icon }) => (
             <button

@@ -7,6 +7,15 @@ import type { Profile, Wallet, Transaction, SavingsLock, PlatformSetting, AdminF
 
 const supabase = createClient()
 
+export async function hashValue(raw: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(raw)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
@@ -25,11 +34,16 @@ export function useAuth() {
     return () => subscription.unsubscribe()
   }, [])
 
-  const signUp = async (email: string, password: string, displayName: string) => {
+  const signUp = async (email: string, password: string, displayName: string, transactionPinHash: string) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { display_name: displayName } },
+      options: {
+        data: {
+          display_name: displayName,
+          transaction_pin_hash: transactionPinHash,
+        },
+      },
     })
     if (error) throw error
     return data
@@ -313,4 +327,14 @@ export async function isAdmin(): Promise<boolean> {
   if (!data?.value) return false
   const emails = data.value.split(',').map((e: string) => e.trim().toLowerCase())
   return emails.includes(user.email.toLowerCase())
+}
+
+export async function updateTransactionPin(userId: string, pin: string) {
+  if (!/^\d{4}$/.test(pin)) throw new Error('PIN must be exactly 4 digits')
+  const pinHash = await hashValue(pin)
+  const { error } = await supabase
+    .from('profiles')
+    .update({ transaction_pin_hash: pinHash, pin_set_at: new Date().toISOString() })
+    .eq('id', userId)
+  if (error) throw error
 }

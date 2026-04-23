@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useAuth } from '@/hooks/use-data'
+import { hashValue, useAuth } from '@/hooks/use-data'
 import Logo from '@/components/logo'
 import Link from 'next/link'
 import { Mail, Lock, User, ArrowRight, Loader2, Eye, EyeOff, ArrowLeft } from 'lucide-react'
@@ -12,6 +12,8 @@ export default function AuthScreen() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
+  const [pin, setPin] = useState('')
+  const [confirmPin, setConfirmPin] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [showPw, setShowPw] = useState(false)
@@ -38,15 +40,26 @@ export default function AuthScreen() {
 
     if (password.length < 6) { setErr('Password must be at least 6 characters'); return }
 
+    if (mode === 'register') {
+      if (!/^\d{4}$/.test(pin)) { setErr('Transaction PIN must be exactly 4 digits'); return }
+      if (pin !== confirmPin) { setErr('PINs do not match'); return }
+    }
+
     setBusy(true)
     try {
       if (mode === 'register') {
-        await signUp(email, password, name || email.split('@')[0])
+        const pinHash = await hashValue(pin)
+        await signUp(email, password, name || email.split('@')[0], pinHash)
       } else {
         await signIn(email, password)
       }
     } catch (e: any) {
-      setErr(e.message || 'Something went wrong')
+      const msg = e?.message || 'Something went wrong'
+      if (/Database error saving new user/i.test(msg)) {
+        setErr('Signup is temporarily unavailable. Please ask support to run the latest Supabase migration and try again.')
+      } else {
+        setErr(msg)
+      }
     } finally {
       setBusy(false)
     }
@@ -190,6 +203,44 @@ export default function AuthScreen() {
                     />
                   </div>
                 </div>
+              )}
+
+              {mode === 'register' && (
+                <>
+                  <div>
+                    <label className="text-xs font-medium text-slate-500 mb-1.5 block">4-digit transaction PIN</label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                      <input
+                        type="password"
+                        inputMode="numeric"
+                        maxLength={4}
+                        value={pin}
+                        onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+                        placeholder="****"
+                        className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm tracking-[0.35em] focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        autoComplete="off"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-medium text-slate-500 mb-1.5 block">Repeat transaction PIN</label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                      <input
+                        type="password"
+                        inputMode="numeric"
+                        maxLength={4}
+                        value={confirmPin}
+                        onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ''))}
+                        placeholder="****"
+                        className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm tracking-[0.35em] focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        autoComplete="off"
+                      />
+                    </div>
+                  </div>
+                </>
               )}
 
               {err && <p className="text-red-600 text-xs bg-red-50 px-3 py-2 rounded-lg">{err}</p>}

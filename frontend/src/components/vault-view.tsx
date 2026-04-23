@@ -35,6 +35,7 @@ export default function VaultView({ wallet, refresh }: Props) {
 
   const rate = getRate()
   const savingsKobo = microUsdcToKobo(wallet.usdc_balance_micro, rate)
+  const cngnPoolKobo = microUsdcToKobo(wallet.cngn_pool_micro || 0, rate)
   const activeLocks = locks.filter(l => l.status === 'active')
   const totalLockedMicro = activeLocks.reduce((s, l) => s + l.amount_usdc_micro, 0)
 
@@ -94,26 +95,26 @@ export default function VaultView({ wallet, refresh }: Props) {
 
   return (
     <div className="px-4 pt-5 pb-6">
-      {/* Vault Card */}
-      <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-5 text-white">
+      {/* cNGN Vault Card */}
+      <div className="bg-gradient-to-br from-amber-500 via-orange-600 to-rose-700 rounded-2xl p-5 text-white">
         <div className="flex items-center gap-2 mb-3">
-          <Shield className="w-4 h-4 text-blue-200" />
-          <p className="text-blue-200 text-xs font-medium uppercase tracking-wider">USDC Vault</p>
+          <Shield className="w-4 h-4 text-amber-100" />
+          <p className="text-amber-100 text-xs font-medium uppercase tracking-wider">cNGN Yield Vault</p>
         </div>
-        <p className="text-3xl font-bold tracking-tight">{formatUsdc(wallet.usdc_balance_micro)}</p>
-        <p className="text-blue-300 text-sm mt-1">&asymp; {formatNaira(savingsKobo)}</p>
+        <p className="text-3xl font-bold tracking-tight">{formatNaira(cngnPoolKobo)}</p>
+        <p className="text-amber-100 text-sm mt-1">{(wallet.cngn_pool_micro / 1_000_000).toFixed(2)} cNGN</p>
         <div className="flex items-center gap-4 mt-4 pt-3 border-t border-white/10 text-xs">
           <div>
-            <p className="text-blue-300">Available</p>
-            <p className="font-semibold mt-0.5">{formatUsdc(wallet.usdc_balance_micro)}</p>
+            <p className="text-amber-100">Yield Earned</p>
+            <p className="font-semibold mt-0.5">{formatUsdc(wallet.cngn_yield_earned_micro || 0)}</p>
           </div>
           <div>
-            <p className="text-blue-300">Locked</p>
+            <p className="text-amber-100">USDC Locked</p>
             <p className="font-semibold mt-0.5">{formatUsdc(totalLockedMicro)}</p>
           </div>
           <div>
-            <p className="text-blue-300">Rate</p>
-            <p className="font-semibold mt-0.5">₦{rate}/USD</p>
+            <p className="text-amber-100">Pool APY</p>
+            <p className="font-semibold mt-0.5">21%</p>
           </div>
         </div>
       </div>

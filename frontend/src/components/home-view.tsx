@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react'
 import { formatNaira, formatUsdc, microUsdcToKobo, getRate, timeAgo } from '@/lib/format'
 import { initiateDeposit, initiateWithdrawal, getBanks, type RampResult, type Bank, type RampProvider } from '@/lib/flint'
 import { ArrowUpRight, ArrowDownLeft, Vault, TrendingUp, Wallet, Plus, Minus, CreditCard, Loader2, ArrowLeft, Copy, Check, ChevronDown, Building2 } from 'lucide-react'
-import type { Wallet as WalletType, Transaction } from '@/lib/types'
+import { hashValue } from '@/hooks/use-data'
+import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
 type View = 'main' | 'deposit' | 'deposit-info' | 'withdraw'
@@ -14,9 +15,11 @@ interface Props {
   transactions: Transaction[]
   user: User | null
   refresh: () => void
+  profile: Profile | null
+  onStartKyc: () => void
 }
 
-export default function HomeView({ wallet, transactions, user, refresh }: Props) {
+export default function HomeView({ wallet, transactions, user, refresh, profile, onStartKyc }: Props) {
   const [view, setView] = useState<View>('main')
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
@@ -31,6 +34,7 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
   const [accountNumber, setAccountNumber] = useState('')
   const [banksLoading, setBanksLoading] = useState(false)
   const [provider, setProvider] = useState<RampProvider>('flint')
+  const [transactionPin, setTransactionPin] = useState('')
 
   useEffect(() => {
     if (view === 'withdraw' && banks.length === 0) {
@@ -69,16 +73,33 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
   }
 
   const handleWithdraw = async () => {
+    if (profile?.kyc_status !== 'verified') {
+      flash('KYC is required before withdrawal')
+      onStartKyc()
+      return
+    }
     const naira = parseFloat(amount)
     if (!naira || naira < 100) { flash('Minimum amount is ₦100'); return }
     if (!bankCode || !accountNumber || accountNumber.length < 10) {
       flash('Enter valid bank details'); return
     }
+    if (!/^\d{4}$/.test(transactionPin)) {
+      flash('Enter your 4-digit PIN to withdraw'); return
+    }
+    if (!profile?.transaction_pin_hash) {
+      flash('Set your transaction PIN in Settings first'); return
+    }
     setBusy(true)
     try {
+      const pinHash = await hashValue(transactionPin)
+      if (pinHash !== profile.transaction_pin_hash) {
+        flash('Incorrect transaction PIN')
+        return
+      }
       await initiateWithdrawal(naira, bankCode, accountNumber, provider)
       flash('Sent! The recipient will receive NGN in their bank shortly.')
       resetForm()
+      setTransactionPin('')
       setView('main')
       refresh()
     } catch (e: any) {
@@ -245,6 +266,19 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
         <h2 className="text-lg font-bold text-slate-900 mb-1">Send Money</h2>
         <p className="text-sm text-slate-400 mb-4">Send naira from your USDC vault to any Nigerian bank account.</p>
 
+        {profile?.kyc_status !== 'verified' && (
+          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+            <p className="text-xs text-amber-800 font-medium">KYC Required for Withdrawal</p>
+            <p className="text-xs text-amber-700 mt-1">Complete KYC before sending money.</p>
+            <button
+              onClick={onStartKyc}
+              className="mt-2 text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg transition"
+            >
+              Complete KYC
+            </button>
+          </div>
+        )}
+
         {/* Provider Toggle */}
         <div className="flex bg-slate-100 rounded-xl p-1 mb-5">
           <button
@@ -310,13 +344,26 @@ export default function HomeView({ wallet, transactions, user, refresh }: Props)
               className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
+
+          <div>
+            <label className="text-xs text-slate-500 block mb-1.5">Transaction PIN</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={transactionPin}
+              onChange={e => setTransactionPin(e.target.value.replace(/\D/g, ''))}
+              placeholder="****"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm tracking-[0.35em] focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
         </div>
 
         {feedback && <div className="mt-3 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>}
 
         <button
           onClick={handleWithdraw}
-          disabled={busy || !amount || !bankCode || accountNumber.length < 10}
+          disabled={busy || !amount || !bankCode || accountNumber.length < 10 || transactionPin.length < 4}
           className="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-60"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUpRight className="w-4 h-4" />}

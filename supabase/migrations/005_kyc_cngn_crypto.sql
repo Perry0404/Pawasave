@@ -15,7 +15,9 @@ ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS kyc_id_hash text,
   ADD COLUMN IF NOT EXISTS kyc_submitted_at timestamptz,
   ADD COLUMN IF NOT EXISTS kyc_verified_at timestamptz,
-  ADD COLUMN IF NOT EXISTS xend_member_id text;
+  ADD COLUMN IF NOT EXISTS xend_member_id text,
+  ADD COLUMN IF NOT EXISTS transaction_pin_hash text,
+  ADD COLUMN IF NOT EXISTS pin_set_at timestamptz;
 
 -- ────────────────────────────────────────────────────────────
 -- PART B: Personal deposit address + cNGN pool on wallets

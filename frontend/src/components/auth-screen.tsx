@@ -264,8 +264,11 @@ export default function AuthScreen() {
         <p className="text-center text-xs text-slate-400 mt-6">
           Powered by Supabase &middot; FlintAPI &middot; Base L2
         </p>
-        <div className="flex items-center justify-center gap-4 mt-3 text-xs">
+        <div className="flex items-center justify-center gap-3 mt-3 text-xs flex-wrap">
           <Link href="/about" className="text-emerald-600 hover:text-emerald-700 font-medium transition">About PawaSave</Link>
+          <a href="https://orynth.dev/projects/pawasave" target="_blank" rel="noopener noreferrer" className="inline-flex items-center">
+            <img src="https://orynth.dev/api/badge/pawasave?theme=light&style=default" alt="Featured on Orynth" width={120} height={37} />
+          </a>
           <span className="text-slate-300">&middot;</span>
           <Link href="/privacy" className="text-emerald-600 hover:text-emerald-700 font-medium transition">Privacy Policy</Link>
         </div>

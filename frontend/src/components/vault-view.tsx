@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { formatNaira, formatUsdc, koboToMicroUsdc, microUsdcToKobo, getRate } from '@/lib/format'
-import { saveToVault, withdrawFromVault, lockSavings, withdrawLock, useSavingsLocks, getMorphoApy } from '@/hooks/use-data'
+import { saveToVault, withdrawFromVault, lockSavings, withdrawLock, useSavingsLocks } from '@/hooks/use-data'
 import { Shield, ArrowDown, ArrowUp, Info, Loader2, Lock, Unlock, TrendingUp, AlertTriangle, Zap, ChevronRight } from 'lucide-react'
 import type { Wallet, SavingsLock } from '@/lib/types'
 
@@ -22,6 +22,7 @@ const LOCK_DURATIONS = [
 type SavingsPlan = null | 'flexible' | 'fixed'
 // Within a plan, which action is active
 type FlexAction = 'save' | 'withdraw'
+const CNGN_APY = 21
 
 export default function VaultView({ wallet, refresh }: Props) {
   const [plan, setPlan] = useState<SavingsPlan>(null)
@@ -30,13 +31,8 @@ export default function VaultView({ wallet, refresh }: Props) {
   const [feedback, setFeedback] = useState('')
   const [busy, setBusy] = useState(false)
   const [lockDuration, setLockDuration] = useState(90)
-  const [morphoApy, setMorphoApy] = useState(4.0)
   const [liveRate, setLiveRate] = useState<number>(getRate())
   const { locks, loading: locksLoading, refresh: refreshLocks } = useSavingsLocks()
-
-  useEffect(() => {
-    getMorphoApy().then(setMorphoApy)
-  }, [])
 
   useEffect(() => {
     fetch('/api/ramp/rate')
@@ -56,11 +52,12 @@ export default function VaultView({ wallet, refresh }: Props) {
   const cngnPoolKobo = microUsdcToKobo(wallet.cngn_pool_micro || 0, rate)
   const activeLocks = locks.filter(l => l.status === 'active')
   const totalLockedMicro = activeLocks.reduce((s, l) => s + l.amount_usdc_micro, 0)
+  const lockedKobo = microUsdcToKobo(totalLockedMicro, rate)
 
   const lockAmount = parseFloat(amount) || 0
   const lockKobo = Math.round(lockAmount * 100)
   const lockUsdc = koboToMicroUsdc(lockKobo, rate)
-  const projectedInterest = Math.floor(lockUsdc * (morphoApy / 100) * (lockDuration / 365))
+  const projectedInterest = Math.floor(lockUsdc * (CNGN_APY / 100) * (lockDuration / 365))
 
   const flash = (msg: string) => {
     setFeedback(msg)
@@ -97,8 +94,8 @@ export default function VaultView({ wallet, refresh }: Props) {
     const usdc = koboToMicroUsdc(kobo, rate)
     setBusy(true)
     try {
-      await lockSavings(usdc, kobo, lockDuration, morphoApy)
-      flash(`Locked ${formatUsdc(usdc)} for ${lockDuration} days at ${morphoApy}% APY`)
+      await lockSavings(usdc, kobo, lockDuration, CNGN_APY)
+      flash(`Locked ${formatUsdc(usdc)} in cNGN for ${lockDuration} days at ${CNGN_APY}% APY`)
       refreshLocks()
       setAmount('')
       refresh()
@@ -145,8 +142,8 @@ export default function VaultView({ wallet, refresh }: Props) {
           <p className="font-semibold mt-0.5">{formatUsdc(wallet.usdc_balance_micro)}</p>
         </div>
         <div>
-          <p className="text-amber-100">USDC Locked</p>
-          <p className="font-semibold mt-0.5">{formatUsdc(totalLockedMicro)}</p>
+          <p className="text-amber-100">cNGN Locked</p>
+          <p className="font-semibold mt-0.5">{formatNaira(lockedKobo)}</p>
         </div>
       </div>
     </div>
@@ -242,10 +239,10 @@ export default function VaultView({ wallet, refresh }: Props) {
                 <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-purple-500 transition" />
               </div>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Lock your USDC for 30–365 days and earn higher interest via Morpho vaults. Best returns for money you won't need soon.
+                Time-lock your cNGN pool balance for 30–365 days. Same cNGN engine, but locked until maturity for disciplined savings.
               </p>
               <div className="flex items-center gap-3 mt-3">
-                <span className="text-xs font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">{morphoApy}% APY</span>
+                <span className="text-xs font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">{CNGN_APY}% APY</span>
                 <span className="text-xs text-slate-400">30 – 365 day lock</span>
               </div>
             </div>
@@ -314,7 +311,7 @@ export default function VaultView({ wallet, refresh }: Props) {
             sub={
               flexAction === 'save'
                 ? `Available naira: ${formatNaira(wallet.naira_balance_kobo)}`
-                : `In vault: ${formatUsdc(wallet.usdc_balance_micro)} (≈ ${formatNaira(savingsKobo)})`
+                : `In cNGN vault: ${formatNaira(cngnPoolKobo + savingsKobo)} total`
             }
           />
           <QuickAmounts />
@@ -366,12 +363,12 @@ export default function VaultView({ wallet, refresh }: Props) {
       <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-4">
         <div className="flex items-center gap-2 mb-4 bg-purple-50 border border-purple-200 rounded-xl px-3 py-2">
           <TrendingUp className="w-3.5 h-3.5 text-purple-600 flex-shrink-0" />
-          <p className="text-xs text-purple-700 font-medium">{morphoApy}% APY · Gauntlet USDC Prime via Morpho</p>
+          <p className="text-xs text-purple-700 font-medium">{CNGN_APY}% APY · Locked cNGN balance</p>
         </div>
 
         <AmountInput
           label="Amount to lock (₦)"
-          sub={`Available in vault: ${formatUsdc(wallet.usdc_balance_micro)} (≈ ${formatNaira(savingsKobo)})`}
+          sub={`Available in cNGN pool: ${formatNaira(cngnPoolKobo)}`}
         />
         <QuickAmounts />
 
@@ -403,7 +400,7 @@ export default function VaultView({ wallet, refresh }: Props) {
             <div className="grid grid-cols-3 gap-2 text-center">
               <div>
                 <p className="text-[10px] text-purple-400 mb-0.5">You Lock</p>
-                <p className="text-sm font-bold text-purple-900">{formatUsdc(lockUsdc)}</p>
+                <p className="text-sm font-bold text-purple-900">{formatNaira(lockKobo)}</p>
               </div>
               <div>
                 <p className="text-[10px] text-purple-400 mb-0.5">Interest</p>
@@ -415,7 +412,7 @@ export default function VaultView({ wallet, refresh }: Props) {
               </div>
             </div>
             <p className="text-[10px] text-purple-400 mt-2 text-center">
-              {morphoApy}% APY · {lockDuration} days · Powered by Morpho
+              {CNGN_APY}% APY · {lockDuration} days · Locked inside cNGN strategy
             </p>
           </div>
         )}

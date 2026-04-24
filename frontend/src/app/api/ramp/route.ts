@@ -10,8 +10,11 @@ const FLINT_BASE = 'https://stables.flintapi.io/v1'
 const CUSTODY_ADDRESS = process.env.FLINT_CUSTODY_ADDRESS || ''
 const DEFAULT_FEE_PERCENT = 1.5
 const DEFAULT_XEND_ESTIMATED_FEE = 120
+const XEND_ACTIVE = process.env.XEND_ACTIVE === 'true'
 const FLINT_CONFIGURED = Boolean(FLINT_API_KEY)
-const XEND_CONFIGURED = Boolean(process.env.XEND_MERCHANT_ID && process.env.XEND_API_KEY && process.env.XEND_PRIVATE_KEY)
+const XEND_CONFIGURED = Boolean(
+  XEND_ACTIVE && process.env.XEND_MERCHANT_ID && process.env.XEND_API_KEY && process.env.XEND_PRIVATE_KEY,
+)
 
 type RampType = 'on' | 'off'
 type Provider = 'flint' | 'xend'
@@ -345,11 +348,23 @@ export async function POST(request: NextRequest) {
 
     const feePercent = await getNumberSetting(supabase, 'ramp_fee_percent', DEFAULT_FEE_PERCENT)
     const pawaFee = Math.round((amount * feePercent) / 100)
+    const availableProviders: Provider[] = []
+
+    if (FLINT_CONFIGURED) availableProviders.push('flint')
+    if (XEND_CONFIGURED) availableProviders.push('xend')
+
+    if (availableProviders.length === 0) {
+      return NextResponse.json({ error: 'No ramp provider is currently configured' }, { status: 503 })
+    }
+
     const estimatedFlint = pawaFee + calcFlintFees(amount, type)
     const estimatedXend = pawaFee + await getNumberSetting(supabase, 'xend_estimated_fee_naira', DEFAULT_XEND_ESTIMATED_FEE)
 
-    const preferred: Provider = estimatedXend < estimatedFlint ? 'xend' : 'flint'
-    const fallback: Provider = preferred === 'flint' ? 'xend' : 'flint'
+    const orderedProviders = [...availableProviders].sort((a, b) => {
+      const feeA = a === 'flint' ? estimatedFlint : estimatedXend
+      const feeB = b === 'flint' ? estimatedFlint : estimatedXend
+      return feeA - feeB
+    })
 
     const run = async (provider: Provider) => {
       if (provider === 'flint') return runFlint(request, supabase, user.id, type, amount, bankCode, accountNumber)
@@ -357,15 +372,22 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const result = await run(preferred)
+      const result = await run(orderedProviders[0])
       return NextResponse.json({ ...result, selectedBy: 'best_rate' })
     } catch (primaryErr: any) {
+      const fallbackProvider = orderedProviders[1]
+      if (!fallbackProvider) {
+        const errMsg = primaryErr?.message || 'Service temporarily unavailable'
+        console.error('Ramp provider failure', { provider: orderedProviders[0], primaryErr })
+        return NextResponse.json({ error: errMsg }, { status: 422 })
+      }
+
       try {
-        const result = await run(fallback)
+        const result = await run(fallbackProvider)
         return NextResponse.json({ ...result, selectedBy: 'fallback' })
       } catch (fallbackErr: any) {
         const errMsg = primaryErr?.message || fallbackErr?.message || 'Service temporarily unavailable'
-        console.error('Ramp provider failure', { preferred, primaryErr, fallbackErr })
+        console.error('Ramp provider failure', { providers: orderedProviders, primaryErr, fallbackErr })
         return NextResponse.json({ error: errMsg }, { status: 422 })
       }
     }

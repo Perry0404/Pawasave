@@ -20,6 +20,7 @@ type ProviderResult = {
   provider: Provider
   transactionId?: string
   reference: string
+  amount?: number
   bankName?: string
   bankCode?: string
   accountNumber?: string

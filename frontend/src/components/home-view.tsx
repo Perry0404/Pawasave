@@ -2,9 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { formatNaira, formatUsdc, microUsdcToKobo, getRate, timeAgo } from '@/lib/format'
-import { initiateDeposit, initiateWithdrawal, getBanks, type RampResult, type Bank, type RampProvider } from '@/lib/flint'
+import { initiateDeposit, initiateWithdrawal, getBanks, type RampResult, type Bank } from '@/lib/flint'
 import { ArrowUpRight, ArrowDownLeft, Vault, TrendingUp, Wallet, Plus, Minus, CreditCard, Loader2, ArrowLeft, Copy, Check, ChevronDown, Building2 } from 'lucide-react'
-import { hashValue } from '@/hooks/use-data'
 import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -17,9 +16,10 @@ interface Props {
   refresh: () => void
   profile: Profile | null
   onStartKyc: () => void
+  onNavigateVault?: () => void
 }
 
-export default function HomeView({ wallet, transactions, user, refresh, profile, onStartKyc }: Props) {
+export default function HomeView({ wallet, transactions, user, refresh, profile, onStartKyc, onNavigateVault }: Props) {
   const [view, setView] = useState<View>('main')
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
@@ -27,13 +27,13 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   const [depositInfo, setDepositInfo] = useState<RampResult | null>(null)
   const [copied, setCopied] = useState(false)
   const [addrCopied, setAddrCopied] = useState(false)
+  const [liveRate, setLiveRate] = useState<number>(getRate())
 
   // Withdraw state
   const [banks, setBanks] = useState<Bank[]>([])
   const [bankCode, setBankCode] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
   const [banksLoading, setBanksLoading] = useState(false)
-  const [provider, setProvider] = useState<RampProvider>('flint')
   const [transactionPin, setTransactionPin] = useState('')
 
   useEffect(() => {
@@ -43,9 +43,20 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     }
   }, [view, banks.length])
 
+  useEffect(() => {
+    fetch('/api/ramp/rate')
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (data?.rate && Number.isFinite(Number(data.rate))) {
+          setLiveRate(Number(data.rate))
+        }
+      })
+      .catch(() => undefined)
+  }, [])
+
   if (!wallet) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
 
-  const rate = getRate()
+  const rate = liveRate
   const savingsKobo = microUsdcToKobo(wallet.usdc_balance_micro, rate)
   const cngnKobo = microUsdcToKobo(wallet.cngn_pool_micro || 0, rate)
   const totalKobo = wallet.naira_balance_kobo + savingsKobo + cngnKobo
@@ -53,7 +64,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
 
   const flash = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(''), 4000) }
 
-  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setAccountNumber(''); setCopied(false); setProvider('flint') }
+  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setAccountNumber(''); setCopied(false) }
 
   const goBack = () => { resetForm(); setView('main') }
 
@@ -62,7 +73,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     if (!naira || naira < 100) { flash('Minimum amount is ₦100'); return }
     setBusy(true)
     try {
-      const result = await initiateDeposit(naira, provider)
+      const result = await initiateDeposit(naira)
       setDepositInfo(result)
       setView('deposit-info')
     } catch (e: any) {
@@ -91,12 +102,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     }
     setBusy(true)
     try {
-      const pinHash = await hashValue(transactionPin)
-      if (pinHash !== profile.transaction_pin_hash) {
-        flash('Incorrect transaction PIN')
-        return
-      }
-      await initiateWithdrawal(naira, bankCode, accountNumber, provider)
+      await initiateWithdrawal(naira, bankCode, accountNumber, transactionPin)
       flash('Sent! The recipient will receive NGN in their bank shortly.')
       resetForm()
       setTransactionPin('')
@@ -127,20 +133,8 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
         <h2 className="text-lg font-bold text-slate-900 mb-1">Receive Money</h2>
         <p className="text-sm text-slate-400 mb-4">Send naira via bank transfer. It auto-converts to USDC and saves in your vault.</p>
 
-        {/* Provider Toggle */}
-        <div className="flex bg-slate-100 rounded-xl p-1 mb-5">
-          <button
-            onClick={() => setProvider('flint')}
-            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${provider === 'flint' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'}`}
-          >
-            FlintAPI
-          </button>
-          <button
-            onClick={() => setProvider('xend')}
-            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${provider === 'xend' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}
-          >
-            Xend Finance
-          </button>
+        <div className="mb-5 bg-slate-100 rounded-xl px-3 py-2.5">
+          <p className="text-xs text-slate-600">Provider is selected automatically for best effective rate and uptime.</p>
         </div>
 
         <div>
@@ -279,20 +273,8 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           </div>
         )}
 
-        {/* Provider Toggle */}
-        <div className="flex bg-slate-100 rounded-xl p-1 mb-5">
-          <button
-            onClick={() => setProvider('flint')}
-            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${provider === 'flint' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500'}`}
-          >
-            FlintAPI
-          </button>
-          <button
-            onClick={() => setProvider('xend')}
-            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${provider === 'xend' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}
-          >
-            Xend Finance
-          </button>
+        <div className="mb-5 bg-slate-100 rounded-xl px-3 py-2.5">
+          <p className="text-xs text-slate-600">Provider is selected automatically for best effective rate and uptime.</p>
         </div>
 
         <div className="space-y-4">
@@ -445,7 +427,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
         </button>
 
         <button
-          onClick={() => {/* Handled in vault tab */}}
+          onClick={() => onNavigateVault?.()}
           className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-slate-200 bg-white active:bg-slate-50 transition"
         >
           <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">

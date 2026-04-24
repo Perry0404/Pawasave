@@ -5,14 +5,16 @@ import { useAuth, useProfile, useWallet, useTransactions } from '@/hooks/use-dat
 import HomeView from './home-view'
 import GroupsView from './groups-view'
 import ActivityView from './activity-view'
+import VaultView from './vault-view'
 import KycGate from './kyc-gate'
 import Logo from './logo'
-import { Home, Users, Activity, LifeBuoy, Settings, LogOut, ShieldCheck, X } from 'lucide-react'
+import { Home, Users, Activity, LifeBuoy, Settings, LogOut, ShieldCheck, X, Vault } from 'lucide-react'
 
-type Tab = 'home' | 'groups' | 'activity' | 'support' | 'settings'
+type Tab = 'home' | 'vault' | 'groups' | 'activity' | 'support' | 'settings'
 
 const tabs: { id: Tab; label: string; Icon: React.FC<any> }[] = [
   { id: 'home', label: 'Home', Icon: Home },
+  { id: 'vault', label: 'Save', Icon: Vault },
   { id: 'groups', label: 'Groups', Icon: Users },
   { id: 'activity', label: 'Activity', Icon: Activity },
   { id: 'support', label: 'Support', Icon: LifeBuoy },
@@ -135,7 +137,8 @@ export default function AppShell() {
       {/* Content */}
       <main className="flex-1 overflow-y-auto pb-24">
         <div className="max-w-lg mx-auto">
-          {tab === 'home' && <HomeView wallet={wallet} transactions={transactions} user={user} refresh={refresh} profile={profile} onStartKyc={() => setShowKycGate(true)} />}
+          {tab === 'home' && <HomeView wallet={wallet} transactions={transactions} user={user} refresh={refresh} profile={profile} onStartKyc={() => setShowKycGate(true)} onNavigateVault={() => setTab('vault')} />}
+          {tab === 'vault' && <VaultView wallet={wallet} refresh={refresh} />}
           {tab === 'groups' && <GroupsView user={user} wallet={wallet} />}
           {tab === 'activity' && <ActivityView transactions={transactions} />}
           {tab === 'support' && (
@@ -179,9 +182,17 @@ export default function AppShell() {
                 </div>
 
                 {requestHuman && (
-                  <p className="text-xs text-blue-700 mt-3 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
-                    Escalation received. A human support rep will reach out via your account email.
-                  </p>
+                  <div className="mt-3 bg-blue-50 border border-blue-200 rounded-xl px-3 py-3">
+                    <p className="text-xs text-blue-700 mb-2">
+                      Our support team is ready to help. Tap the button below to open an email — it will pre-fill your account details.
+                    </p>
+                    <a
+                      href={`mailto:support@pawasave.xyz?subject=Support Request&body=Account: ${user?.email || ''}`}
+                      className="inline-flex items-center gap-1.5 bg-blue-600 text-white text-xs font-semibold px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+                    >
+                      Email Support →
+                    </a>
+                  </div>
                 )}
               </div>
             </div>

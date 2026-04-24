@@ -6,6 +6,7 @@ export interface RampResult {
   provider?: RampProvider
   transactionId: string
   reference: string
+  selectedBy?: 'best_rate' | 'fallback'
   // on-ramp: bank details to pay into (FlintAPI)
   bankName?: string
   bankCode?: string
@@ -25,11 +26,11 @@ export interface Bank {
   code: string
 }
 
-export async function initiateDeposit(amountNaira: number, provider: RampProvider = 'flint'): Promise<RampResult> {
+export async function initiateDeposit(amountNaira: number): Promise<RampResult> {
   const res = await fetch('/api/ramp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: 'on', amount: amountNaira, provider }),
+    body: JSON.stringify({ type: 'on', amount: amountNaira }),
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error || 'Deposit failed')
@@ -40,12 +41,12 @@ export async function initiateWithdrawal(
   amountNaira: number,
   bankCode: string,
   accountNumber: string,
-  provider: RampProvider = 'flint'
+  transactionPin: string,
 ): Promise<RampResult> {
   const res = await fetch('/api/ramp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: 'off', amount: amountNaira, bankCode, accountNumber, provider }),
+    body: JSON.stringify({ type: 'off', amount: amountNaira, bankCode, accountNumber, transactionPin }),
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error || 'Withdrawal failed')

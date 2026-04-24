@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { verifyXendWebhook } from '@/lib/xend'
+import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
 
 /**
  * POST /api/xend-webhook
@@ -28,9 +29,13 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return NextResponse.json({ error: 'Webhook service key not configured' }, { status: 503 })
+  }
+
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
     { auth: { persistSession: false } },
   )
 
@@ -57,7 +62,7 @@ export async function POST(request: NextRequest) {
         .single()
 
       if (profile) {
-        const rate = 1550
+        const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
         const usdcMicro = Math.floor((amount / rate) * 1_000_000)
 
         // Credit the user's USDC vault
@@ -96,7 +101,7 @@ export async function POST(request: NextRequest) {
         .single()
 
       if (profile && amount > 0) {
-        const rate = 1550
+        const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
         const usdcMicro = Math.floor((amount / rate) * 1_000_000)
 
         await supabase.rpc('credit_wallet', {

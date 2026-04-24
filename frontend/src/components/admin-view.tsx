@@ -2,12 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { formatNaira, formatUsdc } from '@/lib/format'
-import {
-  getAdminFeeSummary, getAdminUserStats, getAdminTxVolume,
-  getAdminRecentFees
-} from '@/hooks/use-data'
 import type { AdminFeeSummary, AdminUserStats, AdminTxVolume, PlatformFee } from '@/lib/types'
-import { Shield, DollarSign, Users, Activity, TrendingUp, Loader2, Lock, AlertTriangle, ArrowUpRight, ArrowDownLeft, Eye, EyeOff, LogOut } from 'lucide-react'
+import { Shield, DollarSign, Users, Activity, TrendingUp, Loader2, Lock, AlertTriangle, ArrowUpRight, ArrowDownLeft, Eye, EyeOff, LogOut, Banknote, ChevronDown } from 'lucide-react'
 
 const ADMIN_STORAGE_KEY = 'pawa_admin_auth'
 
@@ -21,13 +17,23 @@ export default function AdminView() {
   const [volume, setVolume] = useState<AdminTxVolume | null>(null)
   const [recentFees, setRecentFees] = useState<PlatformFee[]>([])
   const [loading, setLoading] = useState(true)
+  const [revenueKobo, setRevenueKobo] = useState(0)
+  const [showWithdrawRevenue, setShowWithdrawRevenue] = useState(false)
+  const [withdrawAmount, setWithdrawAmount] = useState('')
+  const [withdrawBankCode, setWithdrawBankCode] = useState('')
+  const [withdrawAccount, setWithdrawAccount] = useState('')
+  const [withdrawBusy, setWithdrawBusy] = useState(false)
+  const [withdrawFeedback, setWithdrawFeedback] = useState('')
 
   // Check session storage for existing auth
   useEffect(() => {
     const stored = sessionStorage.getItem(ADMIN_STORAGE_KEY)
-    if (stored === 'true') {
+    const storedPw = sessionStorage.getItem('pawa_admin_pw')
+    if (stored === 'true' && storedPw) {
       setAuthed(true)
     } else {
+      sessionStorage.removeItem(ADMIN_STORAGE_KEY)
+      sessionStorage.removeItem('pawa_admin_pw')
       setLoading(false)
     }
   }, [])
@@ -37,20 +43,66 @@ export default function AdminView() {
     if (!authed) return
     const load = async () => {
       setLoading(true)
-      const [f, u, v, rf] = await Promise.all([
-        getAdminFeeSummary(),
-        getAdminUserStats(),
-        getAdminTxVolume(),
-        getAdminRecentFees(30),
-      ])
-      setFees(f)
-      setUsers(u)
-      setVolume(v)
-      setRecentFees(rf)
+      const storedPw = sessionStorage.getItem('pawa_admin_pw') || ''
+      try {
+        const res = await fetch('/api/admin/dashboard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: storedPw, recentFeeLimit: 30 }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to load admin dashboard')
+        }
+        setFees(data.fees)
+        setUsers(data.users)
+        setVolume(data.volume)
+        setRecentFees(data.recentFees || [])
+        setRevenueKobo(data.revenueKobo || 0)
+      } catch {
+        sessionStorage.removeItem(ADMIN_STORAGE_KEY)
+        sessionStorage.removeItem('pawa_admin_pw')
+        setAuthed(false)
+      }
+
       setLoading(false)
     }
     load()
   }, [authed])
+
+  const handleWithdrawRevenue = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const amount = parseFloat(withdrawAmount)
+    if (!amount || amount < 1000) { setWithdrawFeedback('Minimum ₦1,000'); return }
+    if (!withdrawBankCode || !withdrawAccount) { setWithdrawFeedback('Fill in bank details'); return }
+    setWithdrawBusy(true)
+    setWithdrawFeedback('')
+    try {
+      const storedPw = sessionStorage.getItem('pawa_admin_pw') || password
+      const res = await fetch('/api/admin/revenue-withdraw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password: storedPw,
+          amountNaira: amount,
+          bankCode: withdrawBankCode,
+          accountNumber: withdrawAccount,
+        }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setWithdrawFeedback(`✓ Withdrawal initiated! Ref: ${data.reference}`)
+        setWithdrawAmount('')
+        setRevenueKobo(prev => Math.max(0, prev - Math.round(amount * 100)))
+      } else {
+        setWithdrawFeedback(data.error || 'Withdrawal failed')
+      }
+    } catch {
+      setWithdrawFeedback('Network error — try again')
+    } finally {
+      setWithdrawBusy(false)
+    }
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -63,6 +115,7 @@ export default function AdminView() {
     })
     if (res.ok) {
       sessionStorage.setItem(ADMIN_STORAGE_KEY, 'true')
+      sessionStorage.setItem('pawa_admin_pw', password)
       setAuthed(true)
       setPassword('')
     } else {
@@ -72,6 +125,7 @@ export default function AdminView() {
 
   const handleLogout = () => {
     sessionStorage.removeItem(ADMIN_STORAGE_KEY)
+    sessionStorage.removeItem('pawa_admin_pw')
     setAuthed(false)
   }
 
@@ -238,6 +292,74 @@ export default function AdminView() {
             <span className="font-semibold text-blue-600">{formatNaira(volume?.total_vault_saves_kobo || 0)}</span>
           </div>
         </div>
+      </div>
+
+      {/* Revenue Withdrawal */}
+      <div className="bg-white rounded-2xl border border-emerald-200 p-5 mb-4">
+        <button
+          onClick={() => setShowWithdrawRevenue(!showWithdrawRevenue)}
+          className="w-full flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <Banknote className="w-4 h-4 text-emerald-600" />
+            <span className="text-sm font-semibold text-slate-800">Withdraw Revenue</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-emerald-600">{formatNaira(revenueKobo)} available</span>
+            <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showWithdrawRevenue ? 'rotate-180' : ''}`} />
+          </div>
+        </button>
+
+        {showWithdrawRevenue && (
+          <form onSubmit={handleWithdrawRevenue} className="mt-4 space-y-3">
+            <div>
+              <label className="text-xs text-slate-500 mb-1 block">Amount (₦)</label>
+              <input
+                type="number"
+                value={withdrawAmount}
+                onChange={(e) => setWithdrawAmount(e.target.value)}
+                placeholder="e.g. 50000"
+                min={1000}
+                max={revenueKobo / 100}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 mb-1 block">Bank Code</label>
+              <input
+                type="text"
+                value={withdrawBankCode}
+                onChange={(e) => setWithdrawBankCode(e.target.value)}
+                placeholder="e.g. 058 (GTBank)"
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 mb-1 block">Account Number</label>
+              <input
+                type="text"
+                value={withdrawAccount}
+                onChange={(e) => setWithdrawAccount(e.target.value)}
+                placeholder="10-digit account number"
+                maxLength={10}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            {withdrawFeedback && (
+              <p className={`text-xs px-3 py-2 rounded-lg ${withdrawFeedback.startsWith('✓') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                {withdrawFeedback}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={withdrawBusy}
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-xl transition disabled:opacity-60 flex items-center justify-center gap-2"
+            >
+              {withdrawBusy && <Loader2 className="w-4 h-4 animate-spin" />}
+              Withdraw to Bank
+            </button>
+          </form>
+        )}
       </div>
 
       {/* Recent Fees */}

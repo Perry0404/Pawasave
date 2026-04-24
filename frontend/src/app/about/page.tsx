@@ -13,6 +13,11 @@ export default function AboutPage() {
       <header className="px-6 pt-14 pb-10 max-w-2xl mx-auto text-center">
         <Link href="/" className="inline-block mb-6 text-emerald-400 text-sm font-medium hover:underline">&larr; Back to App</Link>
         <h1 className="text-4xl font-bold tracking-tight mb-3">PawaSave</h1>
+        <div className="flex justify-center mt-3 mb-2">
+          <a href="https://orynth.dev/projects/pawasave" target="_blank" rel="noopener noreferrer">
+            <img src="https://orynth.dev/api/badge/pawasave?theme=light&style=default" alt="Featured on Orynth" width={260} height={80} />
+          </a>
+        </div>
         <p className="text-lg text-slate-400 leading-relaxed">
           Collect naira. Save in dollars. Withdraw anytime.<br className="hidden sm:block" />
           The smartest way for Nigerians to protect and grow their money.

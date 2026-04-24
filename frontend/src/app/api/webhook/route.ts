@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
+import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
 
 const WEBHOOK_SECRET = process.env.FLINT_WEBHOOK_SECRET || ''
 
@@ -45,10 +46,14 @@ export async function POST(request: NextRequest) {
   }
 
   // Use service role to bypass RLS
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return NextResponse.json({ error: 'Webhook service key not configured' }, { status: 503 })
+  }
+
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { auth: { persistSession: false } }
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    { auth: { persistSession: false } },
   )
 
   // Find the pending transaction
@@ -74,27 +79,32 @@ export async function POST(request: NextRequest) {
       .eq('id', tx.id)
 
     if (tx.type === 'deposit') {
-      // On-ramp completed: credit user's USDC vault
-      const amountNaira = data.processedAmount || data.amount || tx.amount_kobo / 100
-      const rate = 1550
-      const usdcMicro = Math.floor((amountNaira / rate) * 1_000_000)
+      // On-ramp completed: credit user USDC minus platform fee
+      const amountNaira = Number(data.processedAmount || data.amount || tx.amount_kobo / 100)
+      const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
+      const grossUsdcMicro = Math.floor((amountNaira / rate) * 1_000_000)
+
+      // Deduct platform fee (stored on transaction as kobo, convert to micro-USDC)
+      const feeKobo = Number(tx.platform_fee_kobo || 0)
+      const feeUsdcMicro = feeKobo > 0 ? Math.floor((feeKobo / 100 / rate) * 1_000_000) : 0
+      const userUsdcMicro = Math.max(0, grossUsdcMicro - feeUsdcMicro)
 
       await supabase.rpc('credit_wallet', {
         p_user_id: tx.user_id,
         p_naira_kobo: 0,
-        p_usdc_micro: usdcMicro,
+        p_usdc_micro: userUsdcMicro,
       })
 
-      // Update the transaction with USDC amount
+      // Update the transaction with net USDC amount
       await supabase
         .from('transactions')
-        .update({ amount_usdc_micro: usdcMicro })
+        .update({ amount_usdc_micro: userUsdcMicro })
         .eq('id', tx.id)
 
-      // Auto-allocate 90% to cNGN yield pool
+      // Auto-allocate 90% to cNGN yield pool (from user's net amount)
       await supabase.rpc('allocate_cngn_pool', {
         p_user_id: tx.user_id,
-        p_usdc_micro: usdcMicro,
+        p_usdc_micro: userUsdcMicro,
       })
     }
     // For withdrawal: balance was already debited upfront, nothing more needed
@@ -106,7 +116,7 @@ export async function POST(request: NextRequest) {
 
     if (tx.type === 'withdrawal') {
       // Refund the debited USDC
-      const rate = 1550
+      const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
       const usdcMicro = Math.floor((tx.amount_kobo / 100 / rate) * 1_000_000)
       await supabase.rpc('credit_wallet', {
         p_user_id: tx.user_id,

@@ -130,7 +130,7 @@ export interface PlatformFee {
   id: string
   user_id: string
   transaction_ref: string
-  fee_type: 'ramp_onramp' | 'ramp_offramp' | 'vault_lock_penalty'
+  fee_type: 'ramp_onramp' | 'ramp_offramp' | 'vault_lock_penalty' | 'esusu_penalty' | 'admin_revenue_withdrawal'
   gross_amount_kobo: number
   fee_amount_kobo: number
   fee_percent: number

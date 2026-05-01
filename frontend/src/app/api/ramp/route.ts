@@ -89,8 +89,12 @@ function formatProviderError(provider: Provider, error: unknown) {
     return 'Xend is not fully configured. Merchant API calls require XEND_PRIVATE_KEY as the merchant private PEM, not the public key uploaded to Xend.'
   }
 
-  if (provider === 'flipeet' && (error instanceof FlipeetApiError || isAuthError(message))) {
-    return 'Flipeet authentication failed. Confirm FLIPEET_API_KEY is set on the active deployment, then redeploy.'
+  if (provider === 'flipeet') {
+    const status = error instanceof FlipeetApiError ? error.status : 0
+    if (status === 401 || status === 403 || isAuthError(message)) {
+      return 'Flipeet authentication failed. Confirm FLIPEET_API_KEY is set correctly in Vercel environment variables.'
+    }
+    return `Flipeet: ${message}`
   }
 
   return message

@@ -96,16 +96,23 @@ async function request<T>(path: string, payload: Record<string, unknown>): Promi
   })
 
   const json = (await res.json().catch(() => null)) as FlipeetEnvelope<T> | null
+
+  // Surface the most specific error message available
   const message =
-    json?.data?.message
+    json?.data?.data?.message
+    || json?.data?.message
     || json?.message
     || `Flipeet API error ${res.status}`
 
-  if (!res.ok || json?.status === 'failed' || json?.data?.success === false || !json?.data?.data) {
+  if (!res.ok || json?.status === 'failed' || json?.data?.success === false) {
     throw new FlipeetApiError(message, res.status)
   }
 
-  return json.data.data
+  // Some success responses nest data under data.data, others don't
+  const result = (json?.data?.data ?? json?.data) as T
+  if (!result) throw new FlipeetApiError('Empty response from Flipeet', res.status)
+
+  return result
 }
 
 export async function getFlipeetRate(type: 'on' | 'off'): Promise<FlipeetRateResult> {

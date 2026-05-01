@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
-import { validatePosInvoice, processPosInvoice } from '@/lib/xend'
+import { validatePosInvoice, processPosInvoice, registerProxyMember } from '@/lib/xend'
 import {
   FlipeetApiError,
   getFlipeetRate,
@@ -13,10 +13,14 @@ import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
 
 const FLINT_API_KEY = process.env.FLINT_API_KEY || ''
 const FLINT_BASE = 'https://stables.flintapi.io/v1'
-const CUSTODY_ADDRESS = process.env.FLINT_CUSTODY_ADDRESS || ''
+// Custody address where on-ramped USDC is received. Shared across providers.
+const CUSTODY_ADDRESS =
+  process.env.FLINT_CUSTODY_ADDRESS
+  || process.env.XEND_CUSTODY_ADDRESS
+  || process.env.RAMP_CUSTODY_ADDRESS
+  || ''
 const FLIPEET_CUSTODY_ADDRESS =
   process.env.FLIPEET_CUSTODY_ADDRESS
-  || process.env.RAMP_CUSTODY_ADDRESS
   || CUSTODY_ADDRESS
 const DEFAULT_FEE_PERCENT = 1.5
 const DEFAULT_XEND_ESTIMATED_FEE = 120
@@ -275,6 +279,27 @@ async function runFlint(
   }
 }
 
+async function ensureXendMemberId(supabase: any, userId: string): Promise<string> {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('xend_member_id')
+    .eq('id', userId)
+    .single()
+
+  if (profile?.xend_member_id) return profile.xend_member_id
+
+  // Auto-register this user as an Xend proxy member on first use
+  const result = await registerProxyMember(userId)
+  const memberId = result.data.memberId
+
+  await supabase
+    .from('profiles')
+    .update({ xend_member_id: memberId })
+    .eq('id', userId)
+
+  return memberId
+}
+
 async function runXend(
   supabase: any,
   userId: string,
@@ -283,25 +308,17 @@ async function runXend(
 ): Promise<ProviderResult> {
   if (!XEND_CONFIGURED) throw new Error('Xend provider unavailable')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('xend_member_id')
-    .eq('id', userId)
-    .single()
-
-  if (!profile?.xend_member_id) {
-    throw new Error('Xend is not linked to your account yet')
-  }
+  const xendMemberId = await ensureXendMemberId(supabase, userId)
 
   const currency = 'USDC'
-  await validatePosInvoice(profile.xend_member_id, {
+  await validatePosInvoice(xendMemberId, {
     amount: 0,
     currency,
     fiatAmount: amount,
     fiatCurrency: 'NGN',
   })
 
-  const invoice = await processPosInvoice(profile.xend_member_id, {
+  const invoice = await processPosInvoice(xendMemberId, {
     amount: 0,
     currency,
     fiatAmount: amount,
@@ -479,7 +496,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'No ramp provider is currently configured. Set FLINT_API_KEY, or enable FLIPEET_ACTIVE with FLIPEET_API_KEY and RAMP_CUSTODY_ADDRESS, or fully configure XEND with the merchant private key.',
+            'No ramp provider is currently configured. Set FLINT_API_KEY in environment variables, or set FLIPEET_API_KEY and FLIPEET_CUSTODY_ADDRESS for Flipeet.',
         },
         { status: 503 },
       )

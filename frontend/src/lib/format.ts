@@ -1,4 +1,4 @@
-const RATE = 1550 // Base NGN/USD — in production, fetch from API
+const RATE = 1550 // Fallback rate — UI fetches live rate from /api/ramp/rate on mount
 
 export function formatNaira(kobo: number): string {
   const n = kobo / 100

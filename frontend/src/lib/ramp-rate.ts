@@ -1,4 +1,5 @@
 const FLINT_BASE = 'https://stables.flintapi.io/v1'
+const FLIPEET_BASE = 'https://api.pay.flipeet.io/api/v1/public'
 const FALLBACK_RATE = Number(process.env.NGN_USD_RATE || 1550)
 
 function asNumber(value: unknown): number | null {
@@ -37,26 +38,54 @@ function extractRate(payload: any): number | null {
 }
 
 export async function getNgnUsdRateFromFlint(apiKey?: string): Promise<number> {
-  if (!apiKey) return FALLBACK_RATE
+  // Try Flint endpoints first
+  if (apiKey) {
+    const endpoints = [
+      `${FLINT_BASE}/ramp/rate?from=NGN&to=USDC`,
+      `${FLINT_BASE}/ramp/rates`,
+      `${FLINT_BASE}/rates`,
+    ]
 
-  const endpoints = [
-    `${FLINT_BASE}/rates`,
-    `${FLINT_BASE}/ramp/rates`,
-    `${FLINT_BASE}/ramp/rate?from=NGN&to=USDC`,
-  ]
+    for (const url of endpoints) {
+      try {
+        const res = await fetch(url, {
+          headers: { 'x-api-key': apiKey },
+          next: { revalidate: 30 },
+        })
+        if (!res.ok) continue
+        const data = await res.json()
+        const rate = extractRate(data)
+        if (rate) return rate
+      } catch {
+        // Try next endpoint
+      }
+    }
+  }
 
-  for (const url of endpoints) {
+  // Fallback: try Flipeet rate endpoint (no auth needed for rate)
+  const flipeetApiKey = process.env.FLIPEET_API_KEY
+  if (flipeetApiKey) {
     try {
-      const res = await fetch(url, {
-        headers: { 'x-api-key': apiKey },
+      const res = await fetch(`${FLIPEET_BASE}/on-ramp/rate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': flipeetApiKey,
+        },
+        body: JSON.stringify({ asset: 'usdc', network: 'base', currency: 'NGN', country: 'NG' }),
         next: { revalidate: 30 },
       })
-      if (!res.ok) continue
-      const data = await res.json()
-      const rate = extractRate(data)
-      if (rate) return rate
+      if (res.ok) {
+        const data = await res.json()
+        const flipeetRate = asNumber(
+          data?.data?.data?.rate
+          || data?.data?.rate
+          || data?.rate,
+        )
+        if (flipeetRate) return flipeetRate
+      }
     } catch {
-      // Try next endpoint and fall back if none works.
+      // Fall through to static fallback
     }
   }
 

@@ -49,7 +49,10 @@ export async function POST(request: NextRequest) {
 
   const error = feesError || usersError || volumeError || recentFeesError || revenueError
   if (error) {
-    return NextResponse.json({ error: error.message || 'Failed to load admin dashboard' }, { status: 500 })
+    return NextResponse.json({
+      error: error.message || 'Failed to load admin dashboard',
+      detail: { feesError: feesError?.message, usersError: usersError?.message, volumeError: volumeError?.message, recentFeesError: recentFeesError?.message, revenueError: revenueError?.message },
+    }, { status: 500 })
   }
 
   return NextResponse.json({

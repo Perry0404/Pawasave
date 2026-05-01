@@ -98,10 +98,12 @@ async function request<T>(path: string, payload: Record<string, unknown>): Promi
   const json = (await res.json().catch(() => null)) as FlipeetEnvelope<T> | null
 
   // Surface the most specific error message available
-  const message =
-    json?.data?.data?.message
-    || json?.data?.message
-    || json?.message
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const anyJson = json as any
+  const message: string =
+    anyJson?.data?.data?.message
+    || anyJson?.data?.message
+    || anyJson?.message
     || `Flipeet API error ${res.status}`
 
   if (!res.ok || json?.status === 'failed' || json?.data?.success === false) {

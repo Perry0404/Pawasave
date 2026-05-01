@@ -48,8 +48,11 @@ export default function VaultView({ wallet, refresh }: Props) {
   if (!wallet) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
 
   const rate = liveRate
+  const cngnYieldMicro = wallet.cngn_yield_earned_micro || 0
+  const cngnTotalMicro = (wallet.cngn_pool_micro || 0) + cngnYieldMicro
   const savingsKobo = microUsdcToKobo(wallet.usdc_balance_micro, rate)
   const cngnPoolKobo = microUsdcToKobo(wallet.cngn_pool_micro || 0, rate)
+  const cngnTotalKobo = microUsdcToKobo(cngnTotalMicro, rate)
   const activeLocks = locks.filter(l => l.status === 'active')
   const totalLockedMicro = activeLocks.reduce((s, l) => s + l.amount_usdc_micro, 0)
   const lockedKobo = microUsdcToKobo(totalLockedMicro, rate)
@@ -126,23 +129,32 @@ export default function VaultView({ wallet, refresh }: Props) {
   // ─── Vault header card (always shown) ────────────────────────────────────
   const VaultCard = () => (
     <div className="bg-gradient-to-br from-amber-500 via-orange-600 to-rose-700 rounded-2xl p-5 text-white mb-5">
-      <div className="flex items-center gap-2 mb-3">
-        <Shield className="w-4 h-4 text-amber-100" />
-        <p className="text-amber-100 text-xs font-medium uppercase tracking-wider">cNGN Yield Vault</p>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Shield className="w-4 h-4 text-amber-100" />
+          <p className="text-amber-100 text-xs font-medium uppercase tracking-wider">cNGN Yield Vault</p>
+        </div>
+        <span className="text-xs font-semibold bg-white/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+          <TrendingUp className="w-3 h-3" /> {CNGN_APY}% APY
+        </span>
       </div>
-      <p className="text-3xl font-bold tracking-tight">{formatNaira(cngnPoolKobo)}</p>
-      <p className="text-amber-100 text-sm mt-1">{(wallet.cngn_pool_micro / 1_000_000).toFixed(2)} cNGN</p>
+      <p className="text-3xl font-bold tracking-tight">{formatNaira(cngnTotalKobo)}</p>
+      <p className="text-amber-100 text-sm mt-0.5">{(cngnTotalMicro / 1_000_000).toFixed(4)} USDC total value</p>
       <div className="flex items-center gap-4 mt-4 pt-3 border-t border-white/10 text-xs">
         <div>
-          <p className="text-amber-100">Yield Earned</p>
-          <p className="font-semibold mt-0.5">{formatUsdc(wallet.cngn_yield_earned_micro || 0)}</p>
+          <p className="text-amber-100">Principal</p>
+          <p className="font-semibold mt-0.5">{formatNaira(cngnPoolKobo)}</p>
         </div>
         <div>
-          <p className="text-amber-100">USDC Free</p>
+          <p className="text-amber-200">Yield Earned</p>
+          <p className="font-bold mt-0.5 text-amber-200">{formatUsdc(cngnYieldMicro)}</p>
+        </div>
+        <div>
+          <p className="text-amber-100">Liquid USDC</p>
           <p className="font-semibold mt-0.5">{formatUsdc(wallet.usdc_balance_micro)}</p>
         </div>
         <div>
-          <p className="text-amber-100">cNGN Locked</p>
+          <p className="text-amber-100">Locked</p>
           <p className="font-semibold mt-0.5">{formatNaira(lockedKobo)}</p>
         </div>
       </div>

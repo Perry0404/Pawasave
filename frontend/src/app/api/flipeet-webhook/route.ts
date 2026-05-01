@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
+import { depositToXendMoneyMarket } from '@/lib/xend'
 
 function readString(...values: unknown[]) {
   for (const value of values) {
@@ -110,6 +111,17 @@ export async function POST(request: NextRequest) {
         p_user_id: tx.user_id,
         p_usdc_micro: userUsdcMicro,
       })
+
+      // Deploy 90% pool portion to Xend money market (best-effort)
+      const poolUsdc = Math.floor(userUsdcMicro * 0.9) / 1_000_000
+      if (poolUsdc >= 0.01) {
+        depositToXendMoneyMarket({
+          amount: poolUsdc,
+          narration: `PawaSave deposit pool – tx ${tx.id}`,
+        }).catch((err: unknown) => {
+          console.warn('Xend money market deposit skipped:', err)
+        })
+      }
     }
   } else if (isFailedStatus(status)) {
     await supabase

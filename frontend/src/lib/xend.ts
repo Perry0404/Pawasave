@@ -172,6 +172,75 @@ export async function refreshProxyMemberToken(memberId: string) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Money Market / Savings                                             */
+/* ------------------------------------------------------------------ */
+
+export interface MoneyMarketResult {
+  transactionId: string
+  status: string
+  amount: number
+  currency: string
+  /** Expected APY as a percentage e.g. 21.0 */
+  apy?: number
+}
+
+/**
+ * Deposit USDC into Xend's money market savings product on behalf of a
+ * proxy member (or the merchant account when proxyMemberId is omitted).
+ *
+ * NOTE: The exact endpoint path needs confirmation from the Xend merchant
+ * dashboard Swagger (login required).  The most likely candidates are:
+ *   POST /api/Merchant/savings/deposit
+ *   POST /api/Merchant/moneymarket/deposit
+ * Update SAVINGS_ENDPOINT below once confirmed.
+ */
+const SAVINGS_ENDPOINT =
+  process.env.XEND_SAVINGS_ENDPOINT || '/api/Merchant/savings/deposit'
+
+export async function depositToXendMoneyMarket(params: {
+  amount: number           // USDC amount (not micro)
+  currency?: string        // defaults to 'USDC'
+  proxyMemberId?: string   // if omitted, deposits to merchant account
+  narration?: string
+}): Promise<MoneyMarketResult> {
+  const payload: Record<string, unknown> = {
+    amount: params.amount,
+    currency: params.currency ?? 'USDC',
+    narration: params.narration ?? 'PawaSave yield pool',
+    requestTime: Date.now(),
+  }
+  if (params.proxyMemberId) {
+    payload.memberId = params.proxyMemberId
+  }
+  const res = await xendRequest<MoneyMarketResult>('POST', SAVINGS_ENDPOINT, payload)
+  return res.data
+}
+
+/**
+ * Withdraw from Xend money market back to the merchant/proxy wallet.
+ */
+export async function withdrawFromXendMoneyMarket(params: {
+  amount: number
+  currency?: string
+  proxyMemberId?: string
+  narration?: string
+}): Promise<MoneyMarketResult> {
+  const WITHDRAW_ENDPOINT =
+    process.env.XEND_SAVINGS_WITHDRAW_ENDPOINT || '/api/Merchant/savings/withdraw'
+  const payload: Record<string, unknown> = {
+    amount: params.amount,
+    currency: params.currency ?? 'USDC',
+    narration: params.narration ?? 'PawaSave pool withdrawal',
+    requestTime: Date.now(),
+  }
+  if (params.proxyMemberId) {
+    payload.memberId = params.proxyMemberId
+  }
+  const res = await xendRequest<MoneyMarketResult>('POST', WITHDRAW_ENDPOINT, payload)
+  return res.data
+}
+
+/* ------------------------------------------------------------------ */
 /*  Fund Transfers (Merchant ↔ Proxy Member)                          */
 /* ------------------------------------------------------------------ */
 

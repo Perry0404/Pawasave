@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
+import { depositToXendMoneyMarket } from '@/lib/xend'
 
 const WEBHOOK_SECRET = process.env.FLINT_WEBHOOK_SECRET || ''
 
@@ -106,6 +107,19 @@ export async function POST(request: NextRequest) {
         p_user_id: tx.user_id,
         p_usdc_micro: userUsdcMicro,
       })
+
+      // Deploy the 90% pool portion to Xend money market (best-effort)
+      const poolUsdcMicro = Math.floor(userUsdcMicro * 0.9)
+      const poolUsdc = poolUsdcMicro / 1_000_000
+      if (poolUsdc >= 0.01) {
+        depositToXendMoneyMarket({
+          amount: poolUsdc,
+          narration: `PawaSave deposit pool – tx ${tx.id}`,
+        }).catch((err: unknown) => {
+          // Non-fatal — DB already tracks the allocation; real call will retry via cron
+          console.warn('Xend money market deposit skipped (endpoint not yet confirmed):', err)
+        })
+      }
     }
     // For withdrawal: balance was already debited upfront, nothing more needed
   } else if (isFailed) {

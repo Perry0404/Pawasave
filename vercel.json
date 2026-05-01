@@ -1,5 +1,11 @@
 {
   "installCommand": "cd frontend && npm install",
   "buildCommand": "cd frontend && npm run build",
-  "outputDirectory": "frontend/.next"
+  "outputDirectory": "frontend/.next",
+  "crons": [
+    {
+      "path": "/api/cron/accrue-yield",
+      "schedule": "0 0 * * *"
+    }
+  ]
 }

@@ -39,19 +39,19 @@ export async function POST(request: NextRequest) {
 
   const recentFeeLimit = Math.min(Math.max(body.recentFeeLimit ?? 30, 1), 200)
 
-  const [{ data: fees, error: feesError }, { data: users, error: usersError }, { data: volume, error: volumeError }, { data: recentFees, error: recentFeesError }, { data: revenueSetting, error: revenueError }] = await Promise.all([
+  const [{ data: fees, error: feesError }, { data: users, error: usersError }, { data: volume, error: volumeError }, { data: recentFees, error: recentFeesError }, { data: revenueRows }] = await Promise.all([
     supabase.rpc('admin_fee_summary'),
     supabase.rpc('admin_user_stats'),
     supabase.rpc('admin_tx_volume'),
     supabase.rpc('admin_recent_fees', { p_limit: recentFeeLimit }),
-    supabase.from('platform_settings').select('value').eq('key', 'platform_revenue_kobo').single(),
+    supabase.from('platform_settings').select('value').eq('key', 'platform_revenue_kobo').maybeSingle(),
   ])
 
-  const error = feesError || usersError || volumeError || recentFeesError || revenueError
+  const error = feesError || usersError || volumeError || recentFeesError
   if (error) {
     return NextResponse.json({
       error: error.message || 'Failed to load admin dashboard',
-      detail: { feesError: feesError?.message, usersError: usersError?.message, volumeError: volumeError?.message, recentFeesError: recentFeesError?.message, revenueError: revenueError?.message },
+      detail: { feesError: feesError?.message, usersError: usersError?.message, volumeError: volumeError?.message, recentFeesError: recentFeesError?.message },
     }, { status: 500 })
   }
 
@@ -60,6 +60,6 @@ export async function POST(request: NextRequest) {
     users: users?.[0] ?? null,
     volume: volume?.[0] ?? null,
     recentFees: recentFees ?? [],
-    revenueKobo: Number(revenueSetting?.value || 0),
+    revenueKobo: Number(revenueRows?.value || 0),
   })
 }

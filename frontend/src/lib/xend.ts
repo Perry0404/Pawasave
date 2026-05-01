@@ -172,98 +172,103 @@ export async function refreshProxyMemberToken(memberId: string) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Money Market / Savings                                             */
+/*  Currency IDs (staging; override via env for production)            */
 /* ------------------------------------------------------------------ */
 
-export interface MoneyMarketResult {
-  transactionId: string
-  status: string
+// Fetch from /api/Public/currencies if these differ in production
+const CURRENCY_ID_USDC =
+  process.env.XEND_CURRENCY_ID_USDC || '87dda6c1-c4b8-4c1d-a108-3adda3be006d'
+const CURRENCY_ID_CNGN =
+  process.env.XEND_CURRENCY_ID_CNGN || '307f21f3-b0e1-4b2d-bfd9-f178af7289e9'
+
+export { CURRENCY_ID_USDC, CURRENCY_ID_CNGN }
+
+/* ------------------------------------------------------------------ */
+/*  Money Market — implemented via Merchant Proxy Fund Transfer        */
+/*  POST /api/Merchant/proxy/member/{proxyMemberId}/funds/transfer     */
+/*  action CREDIT: merchant custodial → member wallet (deposit)        */
+/*  action DEBIT : member wallet → merchant custodial (withdraw)       */
+/* ------------------------------------------------------------------ */
+
+export interface FundsTransferResult {
+  transitWallet: {
+    _id: string
+    fundSource: string
+    fundDestination: string
+    transitWalletState: string
+    transitAction: string
+    amountToCredit: number
+  }
   amount: number
-  currency: string
-  /** Expected APY as a percentage e.g. 21.0 */
-  apy?: number
+  currencyId: string
+  memberId: string
+  merchantCompanyId: string
 }
 
 /**
- * Deposit USDC into Xend's money market savings product on behalf of a
- * proxy member (or the merchant account when proxyMemberId is omitted).
+ * Credit/debit USDC between the merchant custodial wallet and a proxy
+ * member's Xend wallet. This is the correct Merchant API for moving
+ * funds — there is no separate savings endpoint in the Merchant API.
  *
- * NOTE: The exact endpoint path needs confirmation from the Xend merchant
- * dashboard Swagger (login required).  The most likely candidates are:
- *   POST /api/Merchant/savings/deposit
- *   POST /api/Merchant/moneymarket/deposit
- * Update SAVINGS_ENDPOINT below once confirmed.
- */
-const SAVINGS_ENDPOINT =
-  process.env.XEND_SAVINGS_ENDPOINT || '/api/Merchant/savings/deposit'
-
-export async function depositToXendMoneyMarket(params: {
-  amount: number           // USDC amount (not micro)
-  currency?: string        // defaults to 'USDC'
-  proxyMemberId?: string   // if omitted, deposits to merchant account
-  narration?: string
-}): Promise<MoneyMarketResult> {
-  const payload: Record<string, unknown> = {
-    amount: params.amount,
-    currency: params.currency ?? 'USDC',
-    narration: params.narration ?? 'PawaSave yield pool',
-    requestTime: Date.now(),
-  }
-  if (params.proxyMemberId) {
-    payload.memberId = params.proxyMemberId
-  }
-  const res = await xendRequest<MoneyMarketResult>('POST', SAVINGS_ENDPOINT, payload)
-  return res.data
-}
-
-/**
- * Withdraw from Xend money market back to the merchant/proxy wallet.
- */
-export async function withdrawFromXendMoneyMarket(params: {
-  amount: number
-  currency?: string
-  proxyMemberId?: string
-  narration?: string
-}): Promise<MoneyMarketResult> {
-  const WITHDRAW_ENDPOINT =
-    process.env.XEND_SAVINGS_WITHDRAW_ENDPOINT || '/api/Merchant/savings/withdraw'
-  const payload: Record<string, unknown> = {
-    amount: params.amount,
-    currency: params.currency ?? 'USDC',
-    narration: params.narration ?? 'PawaSave pool withdrawal',
-    requestTime: Date.now(),
-  }
-  if (params.proxyMemberId) {
-    payload.memberId = params.proxyMemberId
-  }
-  const res = await xendRequest<MoneyMarketResult>('POST', WITHDRAW_ENDPOINT, payload)
-  return res.data
-}
-
-/* ------------------------------------------------------------------ */
-/*  Fund Transfers (Merchant ↔ Proxy Member)                          */
-/* ------------------------------------------------------------------ */
-
-export interface TransferResult {
-  transactionId: string
-  status: string
-  amount: number
-}
-
-/**
- * Transfer funds between merchant custodial wallet and a proxy member wallet.
+ * Endpoint: POST /api/Merchant/proxy/member/{proxyMemberId}/funds/transfer
  */
 export async function proxyFundsTransfer(params: {
-  destinationAccount: string // proxy member wallet address or ID
-  amount: number
-  currency?: string
-  narration?: string
-}) {
-  return xendRequest<TransferResult>(
+  proxyMemberId: string   // goes in the URL path
+  action: 'CREDIT' | 'DEBIT'
+  amount: number          // in token units (not micro)
+  currencyId?: string     // defaults to USDC
+  description?: string
+}): Promise<FundsTransferResult> {
+  const payload: Record<string, unknown> = {
+    currencyId: params.currencyId ?? CURRENCY_ID_USDC,
+    amount: params.amount,
+    action: params.action,
+    description: params.description ?? 'PawaSave yield pool',
+  }
+  const res = await xendRequest<FundsTransferResult>(
     'POST',
-    '/api/Merchant/proxyfunds/transfer',
-    { ...params, requestTime: Date.now() },
+    `/api/Merchant/proxy/member/${params.proxyMemberId}/funds/transfer`,
+    payload,
   )
+  return res.data
+}
+
+/**
+ * Deposit USDC into a proxy member's Xend wallet (yield pool).
+ * Shorthand for proxyFundsTransfer with action=CREDIT.
+ */
+export async function depositToXendMoneyMarket(params: {
+  proxyMemberId: string
+  amount: number           // USDC amount (not micro-USDC)
+  currencyId?: string
+  description?: string
+}): Promise<FundsTransferResult> {
+  return proxyFundsTransfer({
+    proxyMemberId: params.proxyMemberId,
+    action: 'CREDIT',
+    amount: params.amount,
+    currencyId: params.currencyId,
+    description: params.description ?? 'PawaSave deposit → yield pool',
+  })
+}
+
+/**
+ * Withdraw USDC from a proxy member's Xend wallet back to merchant custodial.
+ * Shorthand for proxyFundsTransfer with action=DEBIT.
+ */
+export async function withdrawFromXendMoneyMarket(params: {
+  proxyMemberId: string
+  amount: number
+  currencyId?: string
+  description?: string
+}): Promise<FundsTransferResult> {
+  return proxyFundsTransfer({
+    proxyMemberId: params.proxyMemberId,
+    action: 'DEBIT',
+    amount: params.amount,
+    currencyId: params.currencyId,
+    description: params.description ?? 'PawaSave yield pool → withdrawal',
+  })
 }
 
 /* ------------------------------------------------------------------ */

@@ -108,17 +108,27 @@ export async function POST(request: NextRequest) {
         p_usdc_micro: userUsdcMicro,
       })
 
-      // Deploy the 90% pool portion to Xend money market (best-effort)
+      // Deploy the 90% pool portion to Xend (best-effort, needs xend_member_id)
       const poolUsdcMicro = Math.floor(userUsdcMicro * 0.9)
       const poolUsdc = poolUsdcMicro / 1_000_000
       if (poolUsdc >= 0.01) {
-        depositToXendMoneyMarket({
-          amount: poolUsdc,
-          narration: `PawaSave deposit pool – tx ${tx.id}`,
-        }).catch((err: unknown) => {
-          // Non-fatal — DB already tracks the allocation; real call will retry via cron
-          console.warn('Xend money market deposit skipped (endpoint not yet confirmed):', err)
-        })
+        supabase
+          .from('profiles')
+          .select('xend_member_id')
+          .eq('id', tx.user_id)
+          .single()
+          .then(({ data: prof }) => {
+            if (prof?.xend_member_id) {
+              return depositToXendMoneyMarket({
+                proxyMemberId: prof.xend_member_id,
+                amount: poolUsdc,
+                description: `PawaSave deposit pool – tx ${tx.id}`,
+              })
+            }
+          })
+          .catch((err: unknown) => {
+            console.warn('Xend money market deposit skipped:', err)
+          })
       }
     }
     // For withdrawal: balance was already debited upfront, nothing more needed

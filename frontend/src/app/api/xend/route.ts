@@ -107,10 +107,10 @@ export async function POST(request: NextRequest) {
 
         // Transfer from merchant custody to proxy member on Xend
         const result = await proxyFundsTransfer({
-          destinationAccount: profile.xend_member_id,
+          proxyMemberId: profile.xend_member_id,
+          action: 'CREDIT',
           amount: amountUsdc,
-          currency: 'USDC',
-          narration: 'PawaSave yield pool deposit',
+          description: 'PawaSave yield pool deposit',
         })
 
         // Debit user's local vault and allocate to pool
@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
         })
 
         return NextResponse.json({
-          transactionId: result.data.transactionId,
+          transitWalletId: result.transitWallet._id,
           message: 'Deposited to Xend yield pool',
         })
       }
@@ -152,10 +152,10 @@ export async function POST(request: NextRequest) {
 
         // Transfer from proxy member back to merchant custody
         const result = await proxyFundsTransfer({
-          destinationAccount: prof.xend_member_id,
+          proxyMemberId: prof.xend_member_id,
+          action: 'DEBIT',
           amount: amountUsdc,
-          currency: 'USDC',
-          narration: 'PawaSave yield pool withdrawal',
+          description: 'PawaSave yield pool withdrawal',
         })
 
         // Credit user's local vault from pool
@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
         })
 
         return NextResponse.json({
-          transactionId: result.data.transactionId,
+          transitWalletId: result.transitWallet._id,
           message: 'Withdrawn from Xend yield pool',
         })
       }

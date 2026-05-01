@@ -115,12 +115,23 @@ export async function POST(request: NextRequest) {
       // Deploy 90% pool portion to Xend money market (best-effort)
       const poolUsdc = Math.floor(userUsdcMicro * 0.9) / 1_000_000
       if (poolUsdc >= 0.01) {
-        depositToXendMoneyMarket({
-          amount: poolUsdc,
-          narration: `PawaSave deposit pool – tx ${tx.id}`,
-        }).catch((err: unknown) => {
-          console.warn('Xend money market deposit skipped:', err)
-        })
+        supabase
+          .from('profiles')
+          .select('xend_member_id')
+          .eq('id', tx.user_id)
+          .single()
+          .then(({ data: prof }) => {
+            if (prof?.xend_member_id) {
+              return depositToXendMoneyMarket({
+                proxyMemberId: prof.xend_member_id,
+                amount: poolUsdc,
+                description: `PawaSave deposit pool – tx ${tx.id}`,
+              })
+            }
+          })
+          .catch((err: unknown) => {
+            console.warn('Xend money market deposit skipped:', err)
+          })
       }
     }
   } else if (isFailedStatus(status)) {

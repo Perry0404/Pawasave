@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || ''
 
+// Temporary debug endpoint — remove after confirming env var is set
+export async function GET() {
+  return NextResponse.json({
+    configured: !!ADMIN_PASSWORD,
+    length: ADMIN_PASSWORD.length,
+    firstChar: ADMIN_PASSWORD[0] ?? null,
+    lastChar: ADMIN_PASSWORD[ADMIN_PASSWORD.length - 1] ?? null,
+  })
+}
+
 export async function POST(request: NextRequest) {
   if (!ADMIN_PASSWORD) {
     return NextResponse.json({ error: 'Admin password not configured' }, { status: 503 })

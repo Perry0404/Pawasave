@@ -191,27 +191,32 @@ export async function withdrawFromVault(amountKobo: number, usdcMicro: number) {
 
   const freeUsdc = Number(wallet?.usdc_balance_micro || 0)
   const cngnPool = Number(wallet?.cngn_pool_micro || 0)
-  const shortfall = Math.max(0, usdcMicro - freeUsdc)
+  const totalAvailable = freeUsdc + cngnPool
 
-  if (shortfall > 0) {
-    if (shortfall > cngnPool) throw new Error('Insufficient vault balance')
+  if (usdcMicro > totalAvailable) throw new Error('Insufficient vault balance')
 
+  // Pull from cNGN pool first, then from free balance if needed
+  const fromPool = Math.min(cngnPool, usdcMicro)
+  if (fromPool > 0) {
     const { data: freed, error: freeError } = await supabase.rpc('withdraw_cngn_pool', {
       p_user_id: user.id,
-      p_amount_micro: shortfall,
+      p_amount_micro: fromPool,
     })
-
     if (freeError) throw freeError
     if (!freed) throw new Error('Insufficient vault balance')
   }
 
-  const { data: ok, error } = await supabase.rpc('withdraw_from_vault', {
-    p_user_id: user.id,
-    p_naira_kobo: amountKobo,
-    p_usdc_micro: usdcMicro,
-  })
-  if (error) throw error
-  if (!ok) throw new Error('Insufficient vault balance')
+  // Now deduct whatever remains from free usdc_balance_micro (could be 0)
+  const fromFree = usdcMicro - fromPool
+  if (fromFree > 0) {
+    const { data: ok2, error: e2 } = await supabase.rpc('withdraw_from_vault', {
+      p_user_id: user.id,
+      p_naira_kobo: 0,
+      p_usdc_micro: fromFree,
+    })
+    if (e2) throw e2
+    if (!ok2) throw new Error('Insufficient vault balance')
+  }
 
   await supabase.from('transactions').insert({
     user_id: user.id,
@@ -219,7 +224,7 @@ export async function withdrawFromVault(amountKobo: number, usdcMicro: number) {
     direction: 'credit',
     amount_kobo: amountKobo,
     amount_usdc_micro: usdcMicro,
-    description: 'Withdrew from USDC vault',
+    description: 'Withdrew from vault to wallet',
     status: 'completed',
   })
 }

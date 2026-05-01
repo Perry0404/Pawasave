@@ -32,14 +32,19 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   // Withdraw state
   const [banks, setBanks] = useState<Bank[]>([])
   const [bankCode, setBankCode] = useState('')
+  const [bankSearch, setBankSearch] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
   const [banksLoading, setBanksLoading] = useState(false)
+  const [banksError, setBanksError] = useState(false)
   const [transactionPin, setTransactionPin] = useState('')
 
   useEffect(() => {
     if (view === 'withdraw' && banks.length === 0) {
       setBanksLoading(true)
-      getBanks().then(b => { setBanks(b); setBanksLoading(false) }).catch(() => setBanksLoading(false))
+      setBanksError(false)
+      getBanks()
+        .then(b => { setBanks(b); setBanksLoading(false) })
+        .catch(() => { setBanksLoading(false); setBanksError(true) })
     }
   }, [view, banks.length])
 
@@ -64,7 +69,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
 
   const flash = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(''), 4000) }
 
-  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setAccountNumber(''); setCopied(false) }
+  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setBankSearch(''); setAccountNumber(''); setCopied(false) }
 
   const goBack = () => { resetForm(); setView('main') }
 
@@ -298,18 +303,53 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
             <label className="text-xs text-slate-500 block mb-1.5">Bank</label>
             {banksLoading ? (
               <div className="flex items-center gap-2 py-3 text-sm text-slate-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading banks...</div>
+            ) : banksError ? (
+              <div className="text-xs text-red-500 py-2">Could not load banks. Please retry.</div>
             ) : (
-              <div className="relative">
-                <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                <select
-                  value={bankCode}
-                  onChange={e => setBankCode(e.target.value)}
-                  className="w-full pl-10 pr-8 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="">Select a bank</option>
-                  {banks.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              <div className="space-y-2">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={bankSearch}
+                    onChange={e => { setBankSearch(e.target.value); setBankCode('') }}
+                    placeholder="Search bank name..."
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                {bankSearch.length > 0 && (
+                  <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl bg-white shadow-sm divide-y divide-slate-100">
+                    {banks
+                      .filter(b => b.name.toLowerCase().includes(bankSearch.toLowerCase()))
+                      .slice(0, 10)
+                      .map(b => (
+                        <button
+                          key={b.code}
+                          type="button"
+                          onClick={() => { setBankCode(b.code); setBankSearch(b.name) }}
+                          className={`w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 transition ${bankCode === b.code ? 'font-semibold text-emerald-700 bg-emerald-50' : 'text-slate-800'}`}
+                        >
+                          {b.name}
+                        </button>
+                      ))}
+                    {banks.filter(b => b.name.toLowerCase().includes(bankSearch.toLowerCase())).length === 0 && (
+                      <p className="px-4 py-3 text-sm text-slate-400">No banks found</p>
+                    )}
+                  </div>
+                )}
+                {!bankSearch && (
+                  <div className="relative">
+                    <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                    <select
+                      value={bankCode}
+                      onChange={e => { setBankCode(e.target.value); setBankSearch(banks.find(b => b.code === e.target.value)?.name || '') }}
+                      className="w-full pl-10 pr-8 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="">— or select from list —</option>
+                      {banks.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -17,7 +17,7 @@
 import crypto from 'crypto'
 
 const BASE_URL =
-  process.env.XEND_BASE_URL || 'https://api-solid-staging.xend.africa'
+  process.env.XEND_BASE_URL || 'https://api-solid.xend.africa'
 const MERCHANT_ID = process.env.XEND_MERCHANT_ID || ''
 const API_KEY = process.env.XEND_API_KEY || ''
 const PRIVATE_KEY_PEM = (process.env.XEND_PRIVATE_KEY || '').replace(

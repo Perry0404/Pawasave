@@ -3,21 +3,35 @@ import { createServerClient } from '@supabase/ssr'
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { validatePosInvoice, processPosInvoice } from '@/lib/xend'
+import {
+  FlipeetApiError,
+  getFlipeetRate,
+  initializeFlipeetOffRamp,
+  initializeFlipeetOnRamp,
+} from '@/lib/flipeet'
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
 
 const FLINT_API_KEY = process.env.FLINT_API_KEY || ''
 const FLINT_BASE = 'https://stables.flintapi.io/v1'
 const CUSTODY_ADDRESS = process.env.FLINT_CUSTODY_ADDRESS || ''
+const FLIPEET_CUSTODY_ADDRESS =
+  process.env.FLIPEET_CUSTODY_ADDRESS
+  || process.env.RAMP_CUSTODY_ADDRESS
+  || CUSTODY_ADDRESS
 const DEFAULT_FEE_PERCENT = 1.5
 const DEFAULT_XEND_ESTIMATED_FEE = 120
-const XEND_ACTIVE = process.env.XEND_ACTIVE === 'true'
+const DEFAULT_FLIPEET_ESTIMATED_FEE = 100
+// Providers auto-enable when credentials are present — no manual flag needed
 const FLINT_CONFIGURED = Boolean(FLINT_API_KEY)
 const XEND_CONFIGURED = Boolean(
-  XEND_ACTIVE && process.env.XEND_MERCHANT_ID && process.env.XEND_API_KEY && process.env.XEND_PRIVATE_KEY,
+  process.env.XEND_MERCHANT_ID && process.env.XEND_API_KEY && process.env.XEND_PRIVATE_KEY,
+)
+const FLIPEET_CONFIGURED = Boolean(
+  process.env.FLIPEET_API_KEY && FLIPEET_CUSTODY_ADDRESS,
 )
 
 type RampType = 'on' | 'off'
-type Provider = 'flint' | 'xend'
+type Provider = 'flint' | 'xend' | 'flipeet'
 
 type ProviderResult = {
   provider: Provider
@@ -54,6 +68,28 @@ function calcFlintFees(amountNaira: number, type: RampType) {
   const vat = type === 'off' ? subtotal * 0.075 : 0
   const gasFee = type === 'on' ? 150 : 0
   return Math.ceil(subtotal + vat + gasFee)
+}
+
+function isAuthError(message: string) {
+  return /invalid key|invalid api key|unauthorized|forbidden|401|403/i.test(message)
+}
+
+function formatProviderError(provider: Provider, error: unknown) {
+  const message = error instanceof Error ? error.message : 'Service temporarily unavailable'
+
+  if (provider === 'flint' && isAuthError(message)) {
+    return 'Flint authentication failed. Confirm FLINT_API_KEY is the live API key on the active deployment, then redeploy.'
+  }
+
+  if (provider === 'xend' && /credentials not configured|private key/i.test(message)) {
+    return 'Xend is not fully configured. Merchant API calls require XEND_PRIVATE_KEY as the merchant private PEM, not the public key uploaded to Xend.'
+  }
+
+  if (provider === 'flipeet' && (error instanceof FlipeetApiError || isAuthError(message))) {
+    return 'Flipeet authentication failed. Confirm FLIPEET_API_KEY is set on the active deployment, then redeploy.'
+  }
+
+  return message
 }
 
 async function getNumberSetting(supabase: any, key: string, fallback: number): Promise<number> {
@@ -321,6 +357,91 @@ async function runXend(
   }
 }
 
+async function runFlipeet(
+  request: NextRequest,
+  supabase: any,
+  userId: string,
+  type: RampType,
+  amount: number,
+  bankCode?: string,
+  accountNumber?: string,
+): Promise<ProviderResult> {
+  if (!FLIPEET_CONFIGURED) throw new Error('Flipeet provider unavailable')
+
+  const reference = generateRef()
+  const feePercent = await getNumberSetting(supabase, 'ramp_fee_percent', DEFAULT_FEE_PERCENT)
+  const pawaFeeNaira = Math.round((amount * feePercent) / 100)
+  const providerFeeNaira = await getNumberSetting(
+    supabase,
+    'flipeet_estimated_fee_naira',
+    DEFAULT_FLIPEET_ESTIMATED_FEE,
+  )
+  const origin = request.nextUrl.origin || 'https://pawasave.xyz'
+
+  const result = type === 'on'
+    ? await initializeFlipeetOnRamp({
+      amount,
+      reference,
+      callbackUrl: `${origin}/api/flipeet-webhook`,
+      walletAddress: FLIPEET_CUSTODY_ADDRESS,
+      holderName: process.env.RAMP_BENEFICIARY_NAME || 'PawaSave Treasury',
+    })
+    : await initializeFlipeetOffRamp({
+      amount,
+      reference,
+      callbackUrl: `${origin}/api/flipeet-webhook`,
+      bankCode: bankCode || '',
+      accountNumber: accountNumber || '',
+      holderName: process.env.RAMP_BENEFICIARY_NAME || 'PawaSave User',
+    })
+
+  const pawaFeeKobo = Math.round(pawaFeeNaira * 100)
+  await supabase.from('transactions').insert({
+    user_id: userId,
+    type: type === 'on' ? 'deposit' : 'withdrawal',
+    direction: type === 'on' ? 'credit' : 'debit',
+    amount_kobo: Math.round(amount * 100),
+    platform_fee_kobo: pawaFeeKobo,
+    description: type === 'on' ? 'Received via Flipeet' : 'Sent via Flipeet',
+    reference,
+    paychant_tx_id: result.reference || null,
+    status: 'pending',
+  })
+
+  await recordPlatformFee(
+    supabase,
+    userId,
+    reference,
+    type === 'on' ? 'ramp_onramp' : 'ramp_offramp',
+    Math.round(amount * 100),
+    pawaFeeKobo,
+    feePercent,
+  )
+
+  if (type === 'off') {
+    const debitError = await maybeDebitForWithdrawal(supabase, userId, amount, reference)
+    if (debitError) throw new Error('Insufficient USDC balance')
+  }
+
+  return {
+    provider: 'flipeet',
+    transactionId: result.reference,
+    reference,
+    bankName: result.deposit?.bank_name,
+    bankCode: result.deposit?.bank_code,
+    accountNumber: result.deposit?.account_number,
+    accountName: result.deposit?.account_name,
+    depositAddress: result.deposit?.address,
+    amount: Math.round(amount),
+    currency: result.destination?.currency || result.deposit?.asset,
+    network: result.destination?.network || process.env.FLIPEET_NETWORK || 'base',
+    pawaFee: pawaFeeNaira,
+    providerFee: providerFeeNaira,
+    totalFee: pawaFeeNaira + providerFeeNaira,
+    feePercent,
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { user, supabase } = await getSupabaseUser()
@@ -352,22 +473,44 @@ export async function POST(request: NextRequest) {
 
     if (FLINT_CONFIGURED) availableProviders.push('flint')
     if (XEND_CONFIGURED) availableProviders.push('xend')
+    if (FLIPEET_CONFIGURED) availableProviders.push('flipeet')
 
     if (availableProviders.length === 0) {
-      return NextResponse.json({ error: 'No ramp provider is currently configured' }, { status: 503 })
+      return NextResponse.json(
+        {
+          error:
+            'No ramp provider is currently configured. Set FLINT_API_KEY, or enable FLIPEET_ACTIVE with FLIPEET_API_KEY and RAMP_CUSTODY_ADDRESS, or fully configure XEND with the merchant private key.',
+        },
+        { status: 503 },
+      )
     }
 
     const estimatedFlint = pawaFee + calcFlintFees(amount, type)
     const estimatedXend = pawaFee + await getNumberSetting(supabase, 'xend_estimated_fee_naira', DEFAULT_XEND_ESTIMATED_FEE)
+    const flipeetRate = FLIPEET_CONFIGURED ? await getFlipeetRate(type).catch(() => null) : null
+    const estimatedFlipeet = pawaFee + await getNumberSetting(
+      supabase,
+      'flipeet_estimated_fee_naira',
+      Number(flipeetRate?.rate) > 0 ? 0 : DEFAULT_FLIPEET_ESTIMATED_FEE,
+    )
 
     const orderedProviders = [...availableProviders].sort((a, b) => {
-      const feeA = a === 'flint' ? estimatedFlint : estimatedXend
-      const feeB = b === 'flint' ? estimatedFlint : estimatedXend
+      const feeA = a === 'flint'
+        ? estimatedFlint
+        : a === 'xend'
+          ? estimatedXend
+          : estimatedFlipeet
+      const feeB = b === 'flint'
+        ? estimatedFlint
+        : b === 'xend'
+          ? estimatedXend
+          : estimatedFlipeet
       return feeA - feeB
     })
 
     const run = async (provider: Provider) => {
       if (provider === 'flint') return runFlint(request, supabase, user.id, type, amount, bankCode, accountNumber)
+      if (provider === 'flipeet') return runFlipeet(request, supabase, user.id, type, amount, bankCode, accountNumber)
       return runXend(supabase, user.id, type, amount)
     }
 
@@ -377,7 +520,7 @@ export async function POST(request: NextRequest) {
     } catch (primaryErr: any) {
       const fallbackProvider = orderedProviders[1]
       if (!fallbackProvider) {
-        const errMsg = primaryErr?.message || 'Service temporarily unavailable'
+        const errMsg = formatProviderError(orderedProviders[0], primaryErr)
         console.error('Ramp provider failure', { provider: orderedProviders[0], primaryErr })
         return NextResponse.json({ error: errMsg }, { status: 422 })
       }
@@ -386,7 +529,7 @@ export async function POST(request: NextRequest) {
         const result = await run(fallbackProvider)
         return NextResponse.json({ ...result, selectedBy: 'fallback' })
       } catch (fallbackErr: any) {
-        const errMsg = primaryErr?.message || fallbackErr?.message || 'Service temporarily unavailable'
+        const errMsg = formatProviderError(orderedProviders[0], primaryErr)
         console.error('Ramp provider failure', { providers: orderedProviders, primaryErr, fallbackErr })
         return NextResponse.json({ error: errMsg }, { status: 422 })
       }

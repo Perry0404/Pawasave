@@ -1,6 +1,6 @@
 // Client-side helpers to call our secure API routes (API keys stay server-side)
 
-export type RampProvider = 'flint' | 'xend'
+export type RampProvider = 'flint' | 'xend' | 'flipeet'
 
 export interface RampResult {
   provider?: RampProvider

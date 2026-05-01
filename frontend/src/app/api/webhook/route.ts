@@ -112,23 +112,23 @@ export async function POST(request: NextRequest) {
       const poolUsdcMicro = Math.floor(userUsdcMicro * 0.9)
       const poolUsdc = poolUsdcMicro / 1_000_000
       if (poolUsdc >= 0.01) {
-        supabase
-          .from('profiles')
-          .select('xend_member_id')
-          .eq('id', tx.user_id)
-          .single()
-          .then(({ data: prof }) => {
-            if (prof?.xend_member_id) {
-              return depositToXendMoneyMarket({
-                proxyMemberId: prof.xend_member_id,
-                amount: poolUsdc,
-                description: `PawaSave deposit pool – tx ${tx.id}`,
-              })
-            }
-          })
-          .catch((err: unknown) => {
-            console.warn('Xend money market deposit skipped:', err)
-          })
+        Promise.resolve(
+          supabase
+            .from('profiles')
+            .select('xend_member_id')
+            .eq('id', tx.user_id)
+            .single()
+        ).then(({ data: prof }) => {
+          if (prof?.xend_member_id) {
+            return depositToXendMoneyMarket({
+              proxyMemberId: prof.xend_member_id,
+              amount: poolUsdc,
+              description: `PawaSave deposit pool – tx ${tx.id}`,
+            })
+          }
+        }).catch((err: unknown) => {
+          console.warn('Xend money market deposit skipped:', err)
+        })
       }
     }
     // For withdrawal: balance was already debited upfront, nothing more needed

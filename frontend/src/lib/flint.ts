@@ -42,11 +42,12 @@ export async function initiateWithdrawal(
   bankCode: string,
   accountNumber: string,
   transactionPin: string,
+  holderName?: string,
 ): Promise<RampResult> {
   const res = await fetch('/api/ramp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: 'off', amount: amountNaira, bankCode, accountNumber, transactionPin }),
+    body: JSON.stringify({ type: 'off', amount: amountNaira, bankCode, accountNumber, transactionPin, holderName }),
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error || 'Withdrawal failed')

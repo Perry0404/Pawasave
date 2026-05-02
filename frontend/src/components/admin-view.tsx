@@ -12,6 +12,7 @@ export default function AdminView() {
   const [password, setPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [authError, setAuthError] = useState('')
+  const [dashboardError, setDashboardError] = useState('')
   const [fees, setFees] = useState<AdminFeeSummary | null>(null)
   const [users, setUsers] = useState<AdminUserStats | null>(null)
   const [volume, setVolume] = useState<AdminTxVolume | null>(null)
@@ -52,17 +53,18 @@ export default function AdminView() {
         })
         const data = await res.json()
         if (!res.ok) {
-          throw new Error(data.error || 'Failed to load admin dashboard')
+          setDashboardError(data.error || 'Dashboard load failed — check Vercel logs')
+        } else {
+          setDashboardError('')
+          setFees(data.fees)
+          setUsers(data.users)
+          setVolume(data.volume)
+          setRecentFees(data.recentFees || [])
+          setRevenueKobo(data.revenueKobo || 0)
         }
-        setFees(data.fees)
-        setUsers(data.users)
-        setVolume(data.volume)
-        setRecentFees(data.recentFees || [])
-        setRevenueKobo(data.revenueKobo || 0)
-      } catch {
-        sessionStorage.removeItem(ADMIN_STORAGE_KEY)
-        sessionStorage.removeItem('pawa_admin_pw')
-        setAuthed(false)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Network error'
+        setDashboardError(msg)
       }
 
       setLoading(false)
@@ -189,6 +191,13 @@ export default function AdminView() {
           <LogOut className="w-4 h-4" />
         </button>
       </div>
+
+      {dashboardError && (
+        <div className="mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>{dashboardError}</span>
+        </div>
+      )}
 
       {/* Revenue Card */}
       <div className="bg-gradient-to-br from-emerald-600 to-teal-700 rounded-2xl p-5 text-white mb-4">

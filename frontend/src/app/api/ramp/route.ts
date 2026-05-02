@@ -397,6 +397,7 @@ async function runFlipeet(
   amount: number,
   bankCode?: string,
   accountNumber?: string,
+  holderName?: string,
 ): Promise<ProviderResult> {
   if (!FLIPEET_CONFIGURED) throw new Error('Flipeet provider unavailable')
 
@@ -424,7 +425,7 @@ async function runFlipeet(
       callbackUrl: `${origin}/api/flipeet-webhook`,
       bankCode: bankCode || '',
       accountNumber: accountNumber || '',
-      holderName: process.env.RAMP_BENEFICIARY_NAME || 'PawaSave User',
+      holderName: holderName || process.env.RAMP_BENEFICIARY_NAME || 'PawaSave User',
     })
 
   const pawaFeeKobo = Math.round(pawaFeeNaira * 100)
@@ -485,6 +486,7 @@ export async function POST(request: NextRequest) {
     const bankCode = body.bankCode as string | undefined
     const accountNumber = body.accountNumber as string | undefined
     const transactionPin = body.transactionPin as string | undefined
+    const holderName = body.holderName as string | undefined
 
     if ((type !== 'on' && type !== 'off') || !Number.isFinite(amount) || amount < 100) {
       return NextResponse.json({ error: 'Amount must be at least ₦100' }, { status: 400 })
@@ -542,7 +544,7 @@ export async function POST(request: NextRequest) {
 
     const run = async (provider: Provider) => {
       if (provider === 'flint') return runFlint(request, supabase, user.id, type, amount, bankCode, accountNumber)
-      if (provider === 'flipeet') return runFlipeet(request, supabase, user.id, type, amount, bankCode, accountNumber)
+      if (provider === 'flipeet') return runFlipeet(request, supabase, user.id, type, amount, bankCode, accountNumber, holderName)
       return runXend(supabase, user.id, type, amount)
     }
 

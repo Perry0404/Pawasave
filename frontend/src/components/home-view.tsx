@@ -69,7 +69,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
 
   const flash = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(''), 4000) }
 
-  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setBankSearch(''); setAccountNumber(''); setCopied(false) }
+  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setBankSearch(''); setAccountNumber(''); setAccountHolderName(''); setCopied(false) }
 
   const goBack = () => { resetForm(); setView('main') }
 
@@ -99,6 +99,9 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     if (!bankCode || !accountNumber || accountNumber.length < 10) {
       flash('Enter valid bank details'); return
     }
+    if (!accountHolderName.trim()) {
+      flash('Enter the account holder name'); return
+    }
     if (!/^\d{4}$/.test(transactionPin)) {
       flash('Enter your 4-digit PIN to withdraw'); return
     }
@@ -107,7 +110,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     }
     setBusy(true)
     try {
-      await initiateWithdrawal(naira, bankCode, accountNumber, transactionPin)
+      await initiateWithdrawal(naira, bankCode, accountNumber, transactionPin, accountHolderName)
       flash('Sent! The recipient will receive NGN in their bank shortly.')
       resetForm()
       setTransactionPin('')
@@ -368,6 +371,17 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           </div>
 
           <div>
+            <label className="text-xs text-slate-500 block mb-1.5">Account Holder Name</label>
+            <input
+              type="text"
+              value={accountHolderName}
+              onChange={e => setAccountHolderName(e.target.value)}
+              placeholder="Full name on bank account"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+
+          <div>
             <label className="text-xs text-slate-500 block mb-1.5">Transaction PIN</label>
             <input
               type="password"
@@ -385,7 +399,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
 
         <button
           onClick={handleWithdraw}
-          disabled={busy || !amount || !bankCode || accountNumber.length < 10 || transactionPin.length < 4}
+          disabled={busy || !amount || !bankCode || accountNumber.length < 10 || !accountHolderName.trim() || transactionPin.length < 4}
           className="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-60"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUpRight className="w-4 h-4" />}

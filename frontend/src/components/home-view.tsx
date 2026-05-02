@@ -34,6 +34,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   const [bankCode, setBankCode] = useState('')
   const [bankSearch, setBankSearch] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
+  const [accountHolderName, setAccountHolderName] = useState('')
   const [banksLoading, setBanksLoading] = useState(false)
   const [banksError, setBanksError] = useState(false)
   const [transactionPin, setTransactionPin] = useState('')

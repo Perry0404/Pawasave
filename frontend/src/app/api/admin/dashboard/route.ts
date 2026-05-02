@@ -40,12 +40,13 @@ export async function POST(request: NextRequest) {
   const recentFeeLimit = Math.min(Math.max(body.recentFeeLimit ?? 30, 1), 200)
 
   // Run all RPCs independently — partial failures don't kill the dashboard
+  // Wrap in Promise.resolve() so .catch() is available (supabase returns PromiseLike)
   const [feesRes, usersRes, volumeRes, recentFeesRes, revenueRes] = await Promise.all([
-    supabase.rpc('admin_fee_summary').catch(() => ({ data: null, error: null })),
-    supabase.rpc('admin_user_stats').catch(() => ({ data: null, error: null })),
-    supabase.rpc('admin_tx_volume').catch(() => ({ data: null, error: null })),
-    supabase.rpc('admin_recent_fees', { p_limit: recentFeeLimit }).catch(() => ({ data: null, error: null })),
-    supabase.from('platform_settings').select('value').eq('key', 'platform_revenue_kobo').maybeSingle().catch(() => ({ data: null, error: null })),
+    Promise.resolve(supabase.rpc('admin_fee_summary')).catch(() => ({ data: null, error: null })),
+    Promise.resolve(supabase.rpc('admin_user_stats')).catch(() => ({ data: null, error: null })),
+    Promise.resolve(supabase.rpc('admin_tx_volume')).catch(() => ({ data: null, error: null })),
+    Promise.resolve(supabase.rpc('admin_recent_fees', { p_limit: recentFeeLimit })).catch(() => ({ data: null, error: null })),
+    Promise.resolve(supabase.from('platform_settings').select('value').eq('key', 'platform_revenue_kobo').maybeSingle()).catch(() => ({ data: null, error: null })),
   ])
 
   return NextResponse.json({

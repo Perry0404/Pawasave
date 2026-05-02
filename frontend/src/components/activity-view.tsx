@@ -91,6 +91,11 @@ export default function ActivityView({ transactions }: Props) {
                         {labels[tx.type] || tx.type}
                       </p>
                       <p className="text-xs text-slate-400">{timeAgo(tx.created_at)}</p>
+                      {tx.reference && (
+                        <p className="text-[10px] text-slate-300 font-mono truncate mt-0.5" title={tx.reference}>
+                          Ref: {tx.reference.slice(0, 8)}…
+                        </p>
+                      )}
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className={`text-sm font-semibold ${colors.amount}`}>

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { formatNaira, formatUsdc, microUsdcToKobo, getRate, timeAgo } from '@/lib/format'
 import { initiateDeposit, initiateWithdrawal, getBanks, type RampResult, type Bank } from '@/lib/flint'
+import { talkback } from '@/lib/voice'
 import { ArrowUpRight, ArrowDownLeft, Vault, TrendingUp, Wallet, Plus, Minus, CreditCard, Loader2, ArrowLeft, Copy, Check, ChevronDown, Building2 } from 'lucide-react'
 import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
@@ -82,6 +83,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
       const result = await initiateDeposit(naira)
       setDepositInfo(result)
       setView('deposit-info')
+      talkback('deposit_init', profile?.display_name || user?.email || 'Chief', `₦${naira.toLocaleString('en-NG')}`)
     } catch (e: any) {
       flash(e.message || 'Deposit failed')
     } finally {
@@ -113,6 +115,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     try {
       await initiateWithdrawal(naira, bankCode, accountNumber, transactionPin, accountHolderName)
       flash('Sent! The recipient will receive NGN in their bank shortly.')
+      talkback('withdrawal_done', profile?.display_name || user?.email || 'Chief', `₦${parseFloat(amount).toLocaleString('en-NG')}`)
       resetForm()
       setTransactionPin('')
       setView('main')

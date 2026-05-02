@@ -441,6 +441,12 @@ async function runFlipeet(
     status: 'pending',
   })
 
+  if (type === 'off') {
+    const debitError = await maybeDebitForWithdrawal(supabase, userId, amount, reference)
+    if (debitError) throw new Error('Insufficient USDC balance')
+  }
+
+  // Only record fee AFTER debit succeeds — prevents phantom revenue from failed txs
   await recordPlatformFee(
     supabase,
     userId,
@@ -450,11 +456,6 @@ async function runFlipeet(
     pawaFeeKobo,
     feePercent,
   )
-
-  if (type === 'off') {
-    const debitError = await maybeDebitForWithdrawal(supabase, userId, amount, reference)
-    if (debitError) throw new Error('Insufficient USDC balance')
-  }
 
   return {
     provider: 'flipeet',

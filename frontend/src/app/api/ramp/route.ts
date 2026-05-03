@@ -105,6 +105,9 @@ function formatProviderError(provider: Provider, error: unknown) {
     if (status === 401 || status === 403 || isAuthError(message)) {
       return 'Flipeet authentication failed. Confirm FLIPEET_API_KEY is set correctly in Vercel environment variables.'
     }
+    if (/insufficient|balance|liquidity/i.test(message)) {
+      return 'Withdrawals are temporarily unavailable. Please try again in a few minutes or contact support.'
+    }
     return `Flipeet: ${message}`
   }
 

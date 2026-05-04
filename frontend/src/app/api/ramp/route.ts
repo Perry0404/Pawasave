@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
-import { validatePosInvoice, processPosInvoice, registerProxyMember } from '@/lib/xend'
+import { validatePosInvoice, processPosInvoice, registerProxyMember, merchantWalletWithdraw } from '@/lib/xend'
 import {
   FlipeetApiError,
   getFlipeetRate,
@@ -279,6 +279,33 @@ async function runFlint(
   if (type === 'off') {
     const debitError = await maybeDebitForWithdrawal(supabase, userId, amount, reference)
     if (debitError) throw new Error('Insufficient USDC balance')
+
+    // Send USDC from XEND custody wallet to Flint's off-ramp deposit address
+    const flintDepositAddress = flintData.data?.depositAddress
+    if (flintDepositAddress && XEND_CONFIGURED) {
+      const rate = await getNgnUsdRateFromFlint(FLINT_API_KEY)
+      const usdcAmount = amount / rate
+      const usdcMicro = Math.floor(usdcAmount * 1_000_000)
+      try {
+        await merchantWalletWithdraw({
+          destinationAddress: flintDepositAddress,
+          amount: usdcAmount,
+          network: 'base',
+          description: `PawaSave off-ramp ${reference}`,
+          reference,
+        })
+      } catch (xendErr: any) {
+        // Refund the user since we debited them but XEND send failed
+        await supabase.rpc('credit_wallet', {
+          p_user_id: userId,
+          p_naira_kobo: 0,
+          p_usdc_micro: usdcMicro,
+        })
+        await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+        console.error('XEND on-chain withdrawal failed for Flint off-ramp:', xendErr)
+        throw new Error('Could not send USDC to off-ramp provider. ' + (xendErr.message || 'Please try again.'))
+      }
+    }
   }
 
   return {
@@ -447,6 +474,33 @@ async function runFlipeet(
   if (type === 'off') {
     const debitError = await maybeDebitForWithdrawal(supabase, userId, amount, reference)
     if (debitError) throw new Error('Insufficient USDC balance')
+
+    // Send USDC from XEND custody wallet to Flipeet's off-ramp deposit address
+    const flipeetDepositAddress = result.deposit?.address
+    if (flipeetDepositAddress && XEND_CONFIGURED) {
+      const rate = await getNgnUsdRateFromFlint(FLINT_API_KEY)
+      const usdcAmount = amount / rate
+      const usdcMicro = Math.floor(usdcAmount * 1_000_000)
+      try {
+        await merchantWalletWithdraw({
+          destinationAddress: flipeetDepositAddress,
+          amount: usdcAmount,
+          network: process.env.FLIPEET_NETWORK || 'base',
+          description: `PawaSave off-ramp ${reference}`,
+          reference,
+        })
+      } catch (xendErr: any) {
+        // Refund the user since we debited them but XEND send failed
+        await supabase.rpc('credit_wallet', {
+          p_user_id: userId,
+          p_naira_kobo: 0,
+          p_usdc_micro: usdcMicro,
+        })
+        await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+        console.error('XEND on-chain withdrawal failed for Flipeet off-ramp:', xendErr)
+        throw new Error('Could not send USDC to off-ramp provider. ' + (xendErr.message || 'Please try again.'))
+      }
+    }
   }
 
   // Only record fee AFTER debit succeeds — prevents phantom revenue from failed txs

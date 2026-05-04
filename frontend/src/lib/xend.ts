@@ -367,6 +367,56 @@ export function verifyXendWebhook(
 /*  Public Key Verification (one-time setup check)                     */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/*  Merchant On-Chain Withdrawal                                       */
+/* ------------------------------------------------------------------ */
+
+export interface MerchantWithdrawResult {
+  transactionId?: string
+  reference?: string
+  status?: string
+  amount?: number
+  destinationAddress?: string
+  [key: string]: unknown
+}
+
+/**
+ * Send USDC on-chain from the merchant custody wallet to an external address.
+ * Used to fund off-ramp provider deposit addresses during user withdrawals.
+ *
+ * Endpoint: POST /api/Merchant/wallet/withdraw
+ * Auth: RSA-SHA256 (merchant-level, same as other Merchant endpoints)
+ */
+export async function merchantWalletWithdraw(params: {
+  destinationAddress: string
+  amount: number          // USDC in decimal (e.g. 10.5, not micro-units)
+  network?: string        // defaults to 'base'
+  currencyId?: string     // defaults to USDC currency ID
+  description?: string
+  reference?: string
+}): Promise<MerchantWithdrawResult> {
+  const payload: Record<string, unknown> = {
+    walletAddress: params.destinationAddress,
+    amount: params.amount,
+    currencyId: params.currencyId ?? CURRENCY_ID_USDC,
+    network: params.network ?? 'base',
+    requestTime: Date.now(),
+  }
+  if (params.description) payload.description = params.description
+  if (params.reference) payload.reference = params.reference
+
+  const res = await xendRequest<MerchantWithdrawResult>(
+    'POST',
+    '/api/Merchant/wallet/withdraw',
+    payload,
+  )
+  return res.data
+}
+
+/* ------------------------------------------------------------------ */
+/*  Public Key Verification (one-time setup check)                     */
+/* ------------------------------------------------------------------ */
+
 /** Verify that the uploaded public key matches our private key. */
 export async function verifyPublicKey(metadata: {
   companyName: string

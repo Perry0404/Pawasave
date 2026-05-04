@@ -371,6 +371,34 @@ export function verifyXendWebhook(
 /*  Merchant On-Chain Withdrawal                                       */
 /* ------------------------------------------------------------------ */
 
+// Set XEND_NETWORK_ID_BASE in Vercel env to the Base-network blockchainNetworkId
+// from your Xend merchant dashboard (Developer → Networks).
+const NETWORK_ID_BASE = process.env.XEND_NETWORK_ID_BASE || ''
+
+export interface WithdrawValidationResult {
+  fee: number
+  feeInUsd: number
+  totalAmount: number
+  emailVerificationSent: boolean
+  currency: { id: string; name: string; symbol: string }
+  blockchainNetwork: { id: string; name: string }
+  withdrawalLimits: {
+    dailyLimit: number
+    dailyUsed: number
+    dailyRemaining: number
+    monthlyLimit: number
+    monthlyUsed: number
+    monthlyRemaining: number
+  }
+  transactionAuthRequirement: {
+    requireTwoFa: boolean
+    requireEmailCode: boolean
+    requireTransactionPin: boolean
+    passKeyVerificationOptions: unknown
+    addressIsWhitelisted: boolean
+  }
+}
+
 export interface MerchantWithdrawResult {
   transactionId?: string
   reference?: string
@@ -381,8 +409,43 @@ export interface MerchantWithdrawResult {
 }
 
 /**
+ * Validate an on-chain withdrawal before processing.
+ * Returns fee info, limits, and which auth methods are required.
+ * If transactionAuthRequirement.addressIsWhitelisted is true, the process
+ * step will not require interactive 2FA/email/passkey — whitelisting the
+ * off-ramp provider addresses in the Xend dashboard is required for
+ * automated server-side withdrawals.
+ *
+ * Endpoint: POST /api/Merchant/wallet/withdraw/validate
+ * Auth: RSA-SHA256
+ */
+export async function validateMerchantWalletWithdraw(params: {
+  destinationAddress: string
+  amount: number
+  currencyId?: string
+  blockchainNetworkId?: string
+}): Promise<WithdrawValidationResult> {
+  const payload: Record<string, unknown> = {
+    destinationAddress: params.destinationAddress,
+    amount: params.amount,
+    currencyId: params.currencyId ?? CURRENCY_ID_USDC,
+    blockchainNetworkId: params.blockchainNetworkId ?? NETWORK_ID_BASE,
+    requestTime: Date.now(),
+  }
+
+  const res = await xendRequest<WithdrawValidationResult>(
+    'POST',
+    '/api/Merchant/wallet/withdraw/validate',
+    payload,
+  )
+  return res.data
+}
+
+/**
  * Send USDC on-chain from the merchant custody wallet to an external address.
- * Used to fund off-ramp provider deposit addresses during user withdrawals.
+ * Call validateMerchantWalletWithdraw first; if addressIsWhitelisted is true
+ * no interactive auth is needed. Whitelist Flipeet/Flint deposit addresses in
+ * the Xend merchant dashboard to enable automated withdrawals.
  *
  * Endpoint: POST /api/Merchant/wallet/withdraw
  * Auth: RSA-SHA256 (merchant-level, same as other Merchant endpoints)
@@ -390,16 +453,16 @@ export interface MerchantWithdrawResult {
 export async function merchantWalletWithdraw(params: {
   destinationAddress: string
   amount: number          // USDC in decimal (e.g. 10.5, not micro-units)
-  network?: string        // defaults to 'base'
-  currencyId?: string     // defaults to USDC currency ID
+  blockchainNetworkId?: string
+  currencyId?: string
   description?: string
   reference?: string
 }): Promise<MerchantWithdrawResult> {
   const payload: Record<string, unknown> = {
-    walletAddress: params.destinationAddress,
+    destinationAddress: params.destinationAddress,
     amount: params.amount,
     currencyId: params.currencyId ?? CURRENCY_ID_USDC,
-    network: params.network ?? 'base',
+    blockchainNetworkId: params.blockchainNetworkId ?? NETWORK_ID_BASE,
     requestTime: Date.now(),
   }
   if (params.description) payload.description = params.description

@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
-import { validatePosInvoice, processPosInvoice, registerProxyMember, merchantWalletWithdraw } from '@/lib/xend'
+import { validatePosInvoice, processPosInvoice, registerProxyMember, merchantWalletWithdraw, validateMerchantWalletWithdraw } from '@/lib/xend'
 import {
   FlipeetApiError,
   getFlipeetRate,
@@ -290,7 +290,6 @@ async function runFlint(
         await merchantWalletWithdraw({
           destinationAddress: flintDepositAddress,
           amount: usdcAmount,
-          network: 'base',
           description: `PawaSave off-ramp ${reference}`,
           reference,
         })
@@ -485,7 +484,6 @@ async function runFlipeet(
         await merchantWalletWithdraw({
           destinationAddress: flipeetDepositAddress,
           amount: usdcAmount,
-          network: process.env.FLIPEET_NETWORK || 'base',
           description: `PawaSave off-ramp ${reference}`,
           reference,
         })

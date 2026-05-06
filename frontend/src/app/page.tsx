@@ -1,5 +1,7 @@
 'use client'
 
+import { useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/use-data'
 import AuthScreen from '@/components/auth-screen'
 import AppShell from '@/components/app-shell'
@@ -8,6 +10,18 @@ import { Loader2 } from 'lucide-react'
 
 export default function Page() {
   const { user, loading } = useAuth()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  // After auth, redirect to invite join page if ?join=groupId was present
+  useEffect(() => {
+    if (user && !loading) {
+      const joinId = searchParams.get('join')
+      if (joinId) {
+        router.replace(`/join/${joinId}`)
+      }
+    }
+  }, [user, loading, searchParams, router])
 
   if (loading) {
     return (
@@ -24,3 +38,4 @@ export default function Page() {
 
   return <AppShell />
 }
+

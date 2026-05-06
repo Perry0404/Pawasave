@@ -431,7 +431,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           </div>
           {(wallet.cngn_pool_micro || 0) > 0 && (
             <div>
-              <p className="text-emerald-300 text-[11px]">cNGN Pool</p>
+              <p className="text-emerald-300 text-[11px]">Yield Pool · 33% APY</p>
               <p className="font-semibold">{formatNaira(cngnKobo)}</p>
             </div>
           )}

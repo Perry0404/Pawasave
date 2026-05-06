@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { formatNaira, formatUsdc, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
-import { Users, Plus, ChevronRight, Loader2, AlertCircle, ArrowLeft, Send, Vault, Wallet, Copy, Check } from 'lucide-react'
+import { Users, Plus, ChevronRight, Loader2, AlertCircle, ArrowLeft, Send, Vault, Wallet, Copy, Check, Share2 } from 'lucide-react'
 import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -25,6 +25,8 @@ export default function GroupsView({ user, wallet }: Props) {
   const [feedback, setFeedback] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'usdc' | 'naira' | 'crypto'>('usdc')
   const [copied, setCopied] = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
+  const [payoutMsg, setPayoutMsg] = useState('')
 
   // Create form
   const [formName, setFormName] = useState('')
@@ -92,6 +94,24 @@ export default function GroupsView({ user, wallet }: Props) {
     fetchGroups()
   }
 
+  const handleShare = async () => {
+    if (!selected) return
+    const url = `${window.location.origin}/join/${selected.id}`
+    if (typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: `Join my Ajo circle: ${selected.name}`,
+          text: `Contribute ${formatNaira(selected.contribution_amount_kobo)} ${selected.cycle_period} in our savings circle on PawaSave.`,
+          url,
+        })
+        return
+      } catch { /* user dismissed share sheet */ }
+    }
+    await navigator.clipboard.writeText(url)
+    setLinkCopied(true)
+    setTimeout(() => setLinkCopied(false), 2500)
+  }
+
   const openGroup = async (group: EsusuGroup) => {
     setSelected(group)
     const { data: m } = await supabase
@@ -144,6 +164,16 @@ export default function GroupsView({ user, wallet }: Props) {
       if (error) { setFeedback(error.message) } else {
         setFeedback('Crypto contribution recorded!')
         openGroup(selected)
+        // Fire-and-forget: deploy pot to XEND MM (33% APY)
+        fetch('/api/esusu/yield', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'deposit',
+            group_id: selected.id,
+            contribution_kobo: selected.contribution_amount_kobo,
+          }),
+        }).catch(() => {})
       }
       setBusy(false)
       setTimeout(() => setFeedback(''), 3000)
@@ -177,6 +207,36 @@ export default function GroupsView({ user, wallet }: Props) {
     if (error) { setFeedback(error.message) } else {
       setFeedback('Contribution sent!')
       openGroup(selected)
+      // Fire-and-forget: deploy pot to XEND MM (33% APY)
+      fetch('/api/esusu/yield', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'deposit',
+          group_id: selected.id,
+          contribution_kobo: selected.contribution_amount_kobo,
+        }),
+      }).catch(() => {})
+      // Check if cycle is now complete and trigger payout
+      const { data: payoutResult } = await supabase.rpc('process_esusu_payout', { p_group_id: selected.id })
+      if (payoutResult?.ok) {
+        setPayoutMsg(payoutResult.completed
+          ? '🎉 Circle complete! All members have been paid.'
+          : `🎉 Cycle ${payoutResult.cycle} complete! Payout sent to the next member.`
+        )
+        setTimeout(() => setPayoutMsg(''), 6000)
+        openGroup(selected) // refresh updated cycle
+        // Pay out any accumulated yield as a bonus on top of the base pot
+        fetch('/api/esusu/yield', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'payout',
+            group_id: selected.id,
+            recipient_user_id: payoutResult.paid_to,
+          }),
+        }).catch(() => {})
+      }
     }
     setBusy(false)
     setTimeout(() => setFeedback(''), 3000)
@@ -186,16 +246,30 @@ export default function GroupsView({ user, wallet }: Props) {
   if (selected) {
     return (
       <div className="px-4 pt-5">
-        <button
-          onClick={() => setSelected(null)}
-          className="flex items-center gap-1 text-sm text-slate-500 mb-4"
-        >
-          <ArrowLeft className="w-4 h-4" /> Back
-        </button>
+        <div className="flex items-center justify-between mb-4">
+          <button
+            onClick={() => setSelected(null)}
+            className="flex items-center gap-1 text-sm text-slate-500"
+          >
+            <ArrowLeft className="w-4 h-4" /> Back
+          </button>
+          <button
+            onClick={handleShare}
+            className="flex items-center gap-1.5 text-sm font-semibold text-purple-600 bg-purple-50 px-3 py-1.5 rounded-lg hover:bg-purple-100 transition"
+          >
+            {linkCopied ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+            {linkCopied ? 'Link copied!' : 'Invite'}
+          </button>
+        </div>
         <div className="bg-gradient-to-br from-purple-600 to-violet-700 rounded-2xl p-5 text-white mb-4">
-          <p className="text-sm text-purple-200 font-medium">{selected.name}</p>
+          <div className="flex items-start justify-between">
+            <p className="text-sm text-purple-200 font-medium">{selected.name}</p>
+            <span className="text-[10px] font-bold bg-emerald-400/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-400/30">
+              33% APY
+            </span>
+          </div>
           <p className="text-2xl font-bold mt-1">{formatNaira(selected.contribution_amount_kobo)}</p>
-          <p className="text-xs text-purple-300 mt-1">{selected.cycle_period} &middot; Cycle {selected.current_cycle}</p>
+          <p className="text-xs text-purple-300 mt-1">{selected.cycle_period} &middot; Cycle {selected.current_cycle} &middot; Pot earning yield</p>
         </div>
 
         {/* Members */}
@@ -286,9 +360,15 @@ export default function GroupsView({ user, wallet }: Props) {
         </button>
 
         {feedback && (
-          <div className={`mb-4 px-4 py-2.5 rounded-xl text-sm font-medium ${
+          <div className={`mb-2 px-4 py-2.5 rounded-xl text-sm font-medium ${
             feedback.includes('sent') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
           }`}>{feedback}</div>
+        )}
+
+        {payoutMsg && (
+          <div className="mb-4 px-4 py-3 rounded-xl text-sm font-medium bg-violet-50 text-violet-700 border border-violet-200">
+            {payoutMsg}
+          </div>
         )}
 
         {/* Recent Contributions */}
@@ -418,7 +498,10 @@ export default function GroupsView({ user, wallet }: Props) {
                   {formatNaira(g.contribution_amount_kobo)} / {g.cycle_period} &middot; {g.member_count}/{g.max_members} members
                 </p>
               </div>
-              <ChevronRight className="w-4 h-4 text-slate-400" />
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">33% APY</span>
+                <ChevronRight className="w-4 h-4 text-slate-400" />
+              </div>
             </button>
           ))}
         </div>
@@ -427,7 +510,7 @@ export default function GroupsView({ user, wallet }: Props) {
       <div className="flex items-start gap-2.5 mt-6 bg-purple-50 rounded-xl px-4 py-3">
         <AlertCircle className="w-4 h-4 text-purple-400 mt-0.5 flex-shrink-0" />
         <p className="text-xs text-purple-600 leading-relaxed">
-          Esusu is a traditional group savings system. Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot.
+          Esusu is a traditional group savings system. Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot. <span className="font-semibold text-emerald-600">The pot earns 33% APY</span> via Xend Money Market while members save.
         </p>
       </div>
     </div>

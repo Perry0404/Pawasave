@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
-import { validatePosInvoice, processPosInvoice, registerProxyMember, merchantWalletWithdraw, validateMerchantWalletWithdraw } from '@/lib/xend'
+import { validatePosInvoice, processPosInvoice, registerProxyMember, merchantWalletWithdraw, validateMerchantWalletWithdraw, proxyCryptoToFiatTransfer, proxyFundsTransfer } from '@/lib/xend'
 import {
   FlipeetApiError,
   getFlipeetRate,
@@ -22,6 +22,9 @@ const CUSTODY_ADDRESS =
 const FLIPEET_CUSTODY_ADDRESS =
   process.env.FLIPEET_CUSTODY_ADDRESS
   || CUSTODY_ADDRESS
+// Fixed offramp receiving addresses from each provider — whitelist these in XEND dashboard.
+// Flipeet: USDC is sent here (whitelisted) before Flipeet pays NGN to user's bank.
+const FLIPEET_OFFRAMP_ADDRESS = process.env.FLIPEET_OFFRAMP_ADDRESS || ''
 const DEFAULT_FEE_PERCENT = 1.5
 const DEFAULT_XEND_ESTIMATED_FEE = 120
 const DEFAULT_FLIPEET_ESTIMATED_FEE = 100
@@ -213,10 +216,9 @@ async function runFlint(
   userId: string,
   type: RampType,
   amount: number,
-  bankCode?: string,
-  accountNumber?: string,
 ): Promise<ProviderResult> {
   if (!FLINT_CONFIGURED) throw new Error('Flint provider unavailable')
+  if (type === 'off') throw new Error('Flint provider unavailable for off-ramp')
 
   const reference = generateRef()
   const feePercent = await getNumberSetting(supabase, 'ramp_fee_percent', DEFAULT_FEE_PERCENT)
@@ -232,11 +234,7 @@ async function runFlint(
     notifyUrl: `${origin}/api/webhook`,
   }
 
-  if (type === 'on') {
-    if (CUSTODY_ADDRESS) flintBody.destination = { address: CUSTODY_ADDRESS }
-  } else {
-    flintBody.destination = { bankCode, accountNumber }
-  }
+  if (CUSTODY_ADDRESS) flintBody.destination = { address: CUSTODY_ADDRESS }
 
   const flintRes = await fetch(`${FLINT_BASE}/ramp/initialise`, {
     method: 'POST',
@@ -256,56 +254,20 @@ async function runFlint(
   const pawaFeeKobo = Math.round(pawaFeeNaira * 100)
   await supabase.from('transactions').insert({
     user_id: userId,
-    type: type === 'on' ? 'deposit' : 'withdrawal',
-    direction: type === 'on' ? 'credit' : 'debit',
+    type: 'deposit',
+    direction: 'credit',
     amount_kobo: Math.round(amount * 100),
     platform_fee_kobo: pawaFeeKobo,
-    description: type === 'on' ? 'Received via FlintAPI' : 'Sent via FlintAPI',
+    description: 'Received via FlintAPI',
     reference,
     paychant_tx_id: flintData.data?.transactionId || null,
     status: 'pending',
   })
 
   await recordPlatformFee(
-    supabase,
-    userId,
-    reference,
-    type === 'on' ? 'ramp_onramp' : 'ramp_offramp',
-    Math.round(amount * 100),
-    pawaFeeKobo,
-    feePercent,
+    supabase, userId, reference, 'ramp_onramp',
+    Math.round(amount * 100), pawaFeeKobo, feePercent,
   )
-
-  if (type === 'off') {
-    const debitError = await maybeDebitForWithdrawal(supabase, userId, amount, reference)
-    if (debitError) throw new Error('Insufficient USDC balance')
-
-    // Send USDC from XEND custody wallet to Flint's off-ramp deposit address
-    const flintDepositAddress = flintData.data?.depositAddress
-    if (flintDepositAddress && XEND_CONFIGURED) {
-      const rate = await getNgnUsdRateFromFlint(FLINT_API_KEY)
-      const usdcAmount = amount / rate
-      const usdcMicro = Math.floor(usdcAmount * 1_000_000)
-      try {
-        await merchantWalletWithdraw({
-          destinationAddress: flintDepositAddress,
-          amount: usdcAmount,
-          description: `PawaSave off-ramp ${reference}`,
-          reference,
-        })
-      } catch (xendErr: any) {
-        // Refund the user since we debited them but XEND send failed
-        await supabase.rpc('credit_wallet', {
-          p_user_id: userId,
-          p_naira_kobo: 0,
-          p_usdc_micro: usdcMicro,
-        })
-        await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
-        console.error('XEND on-chain withdrawal failed for Flint off-ramp:', xendErr)
-        throw new Error('Could not send USDC to off-ramp provider. ' + (xendErr.message || 'Please try again.'))
-      }
-    }
-  }
 
   return {
     provider: 'flint',
@@ -349,72 +311,136 @@ async function runXend(
   userId: string,
   type: RampType,
   amount: number,
+  bankCode?: string,
+  accountNumber?: string,
+  holderName?: string,
 ): Promise<ProviderResult> {
   if (!XEND_CONFIGURED) throw new Error('Xend provider unavailable')
 
   const xendMemberId = await ensureXendMemberId(supabase, userId)
-
-  const currency = 'USDC'
-  await validatePosInvoice(xendMemberId, {
-    amount: 0,
-    currency,
-    fiatAmount: amount,
-    fiatCurrency: 'NGN',
-  })
-
-  const invoice = await processPosInvoice(xendMemberId, {
-    amount: 0,
-    currency,
-    fiatAmount: amount,
-    fiatCurrency: 'NGN',
-  })
 
   const reference = generateRef()
   const feePercent = await getNumberSetting(supabase, 'ramp_fee_percent', DEFAULT_FEE_PERCENT)
   const pawaFeeNaira = Math.round((amount * feePercent) / 100)
   const providerFeeNaira = await getNumberSetting(supabase, 'xend_estimated_fee_naira', DEFAULT_XEND_ESTIMATED_FEE)
 
-  const pawaFeeKoboXend = Math.round(pawaFeeNaira * 100)
+  if (type === 'on') {
+    // On-ramp: generate a crypto deposit address via POS invoice
+    const currency = 'USDC'
+    await validatePosInvoice(xendMemberId, {
+      amount: 0,
+      currency,
+      fiatAmount: amount,
+      fiatCurrency: 'NGN',
+    })
+
+    const invoice = await processPosInvoice(xendMemberId, {
+      amount: 0,
+      currency,
+      fiatAmount: amount,
+      fiatCurrency: 'NGN',
+    })
+
+    const pawaFeeKobo = Math.round(pawaFeeNaira * 100)
+    await supabase.from('transactions').insert({
+      user_id: userId,
+      type: 'deposit',
+      direction: 'credit',
+      amount_kobo: Math.round(amount * 100),
+      platform_fee_kobo: pawaFeeKobo,
+      description: 'Received via Xend Finance',
+      reference,
+      paychant_tx_id: invoice.data.invoiceId,
+      status: 'pending',
+    })
+
+    await recordPlatformFee(supabase, userId, reference, 'ramp_onramp', Math.round(amount * 100), pawaFeeKobo, feePercent)
+
+    return {
+      provider: 'xend',
+      transactionId: invoice.data.invoiceId,
+      reference,
+      walletAddress: invoice.data.walletAddress,
+      depositAddress: invoice.data.walletAddress,
+      amount: Math.round(amount),
+      currency: invoice.data.currency,
+      network: invoice.data.network,
+      pawaFee: pawaFeeNaira,
+      providerFee: providerFeeNaira,
+      totalFee: pawaFeeNaira + providerFeeNaira,
+      feePercent,
+    }
+  }
+
+  // Off-ramp: XEND native crypto → NGN bank transfer
+  // Debit user's PawaSave USDC balance first
+  const debitError = await maybeDebitForWithdrawal(supabase, userId, amount, reference)
+  if (debitError) throw new Error('Insufficient USDC balance')
+
+  const rate = await getNgnUsdRateFromFlint(FLINT_API_KEY)
+  const usdcAmount = amount / rate
+  const usdcMicro = Math.floor(usdcAmount * 1_000_000)
+
+  // Record the transaction row before calling XEND (so we have a reference if it fails)
+  const pawaFeeKoboOff = Math.round(pawaFeeNaira * 100)
   await supabase.from('transactions').insert({
     user_id: userId,
-    type: type === 'on' ? 'deposit' : 'withdrawal',
-    direction: type === 'on' ? 'credit' : 'debit',
+    type: 'withdrawal',
+    direction: 'debit',
     amount_kobo: Math.round(amount * 100),
-    platform_fee_kobo: pawaFeeKoboXend,
-    description: type === 'on' ? 'Received via Xend Finance' : 'Sent via Xend Finance',
+    platform_fee_kobo: pawaFeeKoboOff,
+    description: 'Sent via Xend Finance',
     reference,
-    paychant_tx_id: invoice.data.invoiceId,
     status: 'pending',
   })
 
-  await recordPlatformFee(
-    supabase,
-    userId,
-    reference,
-    type === 'on' ? 'ramp_onramp' : 'ramp_offramp',
-    Math.round(amount * 100),
-    pawaFeeKoboXend,
-    feePercent,
-  )
+  try {
+    // 1. Move USDC from merchant custodial → proxy member wallet
+    await proxyFundsTransfer({
+      proxyMemberId: xendMemberId,
+      action: 'CREDIT',
+      amount: usdcAmount,
+      description: `PawaSave withdrawal fund ${reference}`,
+    })
 
-  if (type === 'off') {
-    const debitError = await maybeDebitForWithdrawal(supabase, userId, amount, reference)
-    if (debitError) throw new Error('Insufficient USDC balance')
-  }
+    // 2. XEND converts USDC → NGN and pays to user's bank
+    const xendResult = await proxyCryptoToFiatTransfer({
+      proxyMemberId: xendMemberId,
+      amount: usdcAmount,
+      bankCode: bankCode || '',
+      accountNumber: accountNumber || '',
+      accountName: holderName || '',
+      reference,
+      remark: `PawaSave withdrawal ${reference}`,
+    })
 
-  return {
-    provider: 'xend',
-    transactionId: invoice.data.invoiceId,
-    reference,
-    walletAddress: invoice.data.walletAddress,
-    depositAddress: invoice.data.walletAddress,
-    amount: Math.round(amount),
-    currency: invoice.data.currency,
-    network: invoice.data.network,
-    pawaFee: pawaFeeNaira,
-    providerFee: providerFeeNaira,
-    totalFee: pawaFeeNaira + providerFeeNaira,
-    feePercent,
+    await recordPlatformFee(supabase, userId, reference, 'ramp_offramp', Math.round(amount * 100), pawaFeeKoboOff, feePercent)
+
+    return {
+      provider: 'xend',
+      transactionId: xendResult.id,
+      reference,
+      amount: Math.round(amount),
+      pawaFee: pawaFeeNaira,
+      providerFee: providerFeeNaira,
+      totalFee: pawaFeeNaira + providerFeeNaira,
+      feePercent,
+    }
+  } catch (xendErr: any) {
+    // Refund user — debit the proxy member wallet back to merchant and credit PawaSave balance
+    try {
+      await proxyFundsTransfer({
+        proxyMemberId: xendMemberId,
+        action: 'DEBIT',
+        amount: usdcAmount,
+        description: `Refund – failed withdrawal ${reference}`,
+      })
+    } catch {
+      // Best-effort debit back; if this also fails the merchant wallet already has the funds
+    }
+    await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: usdcMicro })
+    await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+    throw new Error(xendErr.message || 'Xend withdrawal failed. Please try again.')
   }
 }
 
@@ -474,8 +500,12 @@ async function runFlipeet(
     const debitError = await maybeDebitForWithdrawal(supabase, userId, amount, reference)
     if (debitError) throw new Error('Insufficient USDC balance')
 
-    // Send USDC from XEND custody wallet to Flipeet's off-ramp deposit address
-    const flipeetDepositAddress = result.deposit?.address
+    // Send USDC from XEND custody wallet to Flipeet's receiving address.
+    // Prefer the fixed whitelisted offramp address (set FLIPEET_OFFRAMP_ADDRESS in env
+    // and whitelist it in the XEND merchant dashboard). Falls back to the
+    // per-transaction deposit address returned by Flipeet (may be blocked by XEND
+    // if not whitelisted).
+    const flipeetDepositAddress = FLIPEET_OFFRAMP_ADDRESS || result.deposit?.address
     if (flipeetDepositAddress && XEND_CONFIGURED) {
       const rate = await getNgnUsdRateFromFlint(FLINT_API_KEY)
       const usdcAmount = amount / rate
@@ -561,7 +591,8 @@ export async function POST(request: NextRequest) {
     const pawaFee = Math.round((amount * feePercent) / 100)
     const availableProviders: Provider[] = []
 
-    if (FLINT_CONFIGURED) availableProviders.push('flint')
+    // Flint is on-ramp only. XEND and Flipeet handle both on-ramp and off-ramp.
+    if (FLINT_CONFIGURED && type === 'on') availableProviders.push('flint')
     if (XEND_CONFIGURED) availableProviders.push('xend')
     if (FLIPEET_CONFIGURED) availableProviders.push('flipeet')
 
@@ -599,9 +630,9 @@ export async function POST(request: NextRequest) {
     })
 
     const run = async (provider: Provider) => {
-      if (provider === 'flint') return runFlint(request, supabase, user.id, type, amount, bankCode, accountNumber)
+      if (provider === 'flint') return runFlint(request, supabase, user.id, type, amount)
       if (provider === 'flipeet') return runFlipeet(request, supabase, user.id, type, amount, bankCode, accountNumber, holderName)
-      return runXend(supabase, user.id, type, amount)
+      return runXend(supabase, user.id, type, amount, bankCode, accountNumber, holderName)
     }
 
     try {

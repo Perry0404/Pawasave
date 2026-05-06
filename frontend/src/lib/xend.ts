@@ -504,3 +504,75 @@ export async function verifyPublicKey(metadata: {
     { metadata: full, signature: sig },
   )
 }
+
+/* ------------------------------------------------------------------ */
+/*  Crypto → Fiat Bank Transfer (XEND native off-ramp)                */
+/*  Converts USDC in a proxy member's wallet directly to NGN and      */
+/*  pays it to a Nigerian bank account — no external provider needed. */
+/* ------------------------------------------------------------------ */
+
+export interface CryptoToFiatResult {
+  id: string
+  withdrawalStatus: string
+  memberId: string
+  memberBankAccountId?: string
+  sourceTransactionAmount: number
+  sourceCurrencyId: string
+  destinationAmount: number
+  destinationAccountNumber: string
+  destinationAccountName: string
+  destinationCommercialBankId: string
+  destinationFiatCurrencySymbol: string
+  destinationTransactionRef?: string
+  destinationSessionId?: string
+  destinationRemark?: string
+  sourceToDestinationExchangeRate?: number
+  transactionFeeInSourceCurrency?: number
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * Transfer USDC from a proxy member's wallet and pay NGN to a Nigerian bank.
+ * This is XEND's native off-ramp — no Flipeet/Flint needed.
+ *
+ * Endpoint: POST /api/Merchant/proxy/member/{proxyMemberId}/crypto-to-fiat
+ * Auth: RSA-SHA256 (merchant-level)
+ *
+ * @param proxyMemberId  - The Xend proxy member ID of the withdrawing user
+ * @param amount         - Amount in USDC (decimal, e.g. 10.5)
+ * @param bankCode       - Nigerian bank code (e.g. "058" for GTBank)
+ * @param accountNumber  - Destination bank account number
+ * @param accountName    - Account holder name
+ * @param reference      - Your internal reference
+ */
+export async function proxyCryptoToFiatTransfer(params: {
+  proxyMemberId: string
+  amount: number
+  currencyId?: string
+  bankCode: string
+  accountNumber: string
+  accountName: string
+  reference?: string
+  remark?: string
+}): Promise<CryptoToFiatResult> {
+  const payload: Record<string, unknown> = {
+    sourceAmount: params.amount,
+    sourceCurrencyId: params.currencyId ?? CURRENCY_ID_USDC,
+    destinationCommercialBankCode: params.bankCode,
+    destinationAccountNumber: params.accountNumber,
+    destinationAccountName: params.accountName,
+    destinationFiatCurrencySymbol: 'NGN',
+    requestTime: Date.now(),
+  }
+  if (params.reference) payload.destinationTransactionRef = params.reference
+  if (params.remark) payload.destinationRemark = params.remark
+
+  const res = await xendRequest<CryptoToFiatResult>(
+    'POST',
+    `/api/Merchant/proxy/member/${params.proxyMemberId}/crypto-to-fiat`,
+    payload,
+  )
+  return res.data
+}

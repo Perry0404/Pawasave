@@ -36,10 +36,11 @@ export async function POST(request: NextRequest) {
       email: 'esusu-pool@pawasave.internal',
     })
 
+    const memberId = result.data.memberId
     return NextResponse.json({
       success: true,
-      memberId: result.memberId,
-      message: `Set XEND_ESUSU_POOL_MEMBER_ID=${result.memberId} in your Vercel env vars`,
+      memberId,
+      message: `Set XEND_ESUSU_POOL_MEMBER_ID=${memberId} in your Vercel env vars`,
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'

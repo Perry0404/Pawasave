@@ -30,12 +30,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 401 })
   }
 
+  // Check XEND credentials are configured
+  const xendConfigured = !!(process.env.XEND_MERCHANT_ID && process.env.XEND_API_KEY && process.env.XEND_PRIVATE_KEY)
+  if (!xendConfigured) {
+    return NextResponse.json({ error: 'XEND credentials not configured in Vercel env vars (XEND_MERCHANT_ID, XEND_API_KEY, XEND_PRIVATE_KEY)' }, { status: 503 })
+  }
+
   try {
+    // XEND requires externalProxyMemberUniqueId to be a valid UUID
     const result = await xendRequest<ProxyMemberResult>(
       'POST',
       '/api/Merchant/proxymember/add',
       {
-        externalProxyMemberUniqueId: 'pawasave-esusu-pool',
+        externalProxyMemberUniqueId: '00000000-0000-0000-0000-esusupool0001',
         firstName: 'Esusu',
         lastName: 'Pool',
         requestTime: Date.now(),
@@ -46,10 +53,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       memberId,
+      raw: result,
       message: `Set XEND_ESUSU_POOL_MEMBER_ID=${memberId} in your Vercel env vars`,
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ error: message, hint: 'Check Vercel function logs for full XEND response' }, { status: 500 })
+    // Return the full error message from XEND to help diagnose
+    return NextResponse.json({ error: message, hint: 'Check Vercel function logs for full XEND response. Ensure XEND_MERCHANT_ID, XEND_API_KEY, XEND_PRIVATE_KEY are set in Vercel.' }, { status: 500 })
   }
 }

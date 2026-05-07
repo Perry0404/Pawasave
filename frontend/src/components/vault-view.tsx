@@ -22,7 +22,7 @@ const LOCK_DURATIONS = [
 type SavingsPlan = null | 'flexible' | 'fixed'
 // Within a plan, which action is active
 type FlexAction = 'save' | 'withdraw'
-const CNGN_APY = 21
+const CNGN_APY = 33
 
 export default function VaultView({ wallet, refresh }: Props) {
   const [plan, setPlan] = useState<SavingsPlan>(null)
@@ -226,10 +226,10 @@ export default function VaultView({ wallet, refresh }: Props) {
                 <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-500 transition" />
               </div>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Save into the cNGN yield pool and withdraw anytime. Earns 21% APY automatically — no lock-in.
+                Save into the cNGN yield pool and withdraw anytime. Earns 33% APY automatically — no lock-in.
               </p>
               <div className="flex items-center gap-3 mt-3">
-                <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">21% APY</span>
+                <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">33% APY</span>
                 <span className="text-xs text-slate-400">Withdraw anytime</span>
               </div>
             </div>
@@ -312,10 +312,10 @@ export default function VaultView({ wallet, refresh }: Props) {
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 p-5">
-          {/* 21% APY badge */}
+          {/* 33% APY badge */}
           <div className="flex items-center gap-2 mb-4 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
             <TrendingUp className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
-            <p className="text-xs text-emerald-700 font-medium">21% APY · cNGN Yield Pool via Xend Asset Chain</p>
+            <p className="text-xs text-emerald-700 font-medium">33% APY · XEND Money Market</p>
           </div>
 
           <AmountInput

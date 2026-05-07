@@ -4,17 +4,19 @@ import { useState } from 'react'
 import { useAuth, useProfile, useWallet, useTransactions } from '@/hooks/use-data'
 import HomeView from './home-view'
 import GroupsView from './groups-view'
+import GoalsView from './goals-view'
 import ActivityView from './activity-view'
 import VaultView from './vault-view'
 import KycGate from './kyc-gate'
 import Logo from './logo'
-import { Home, Users, Activity, LifeBuoy, Settings, LogOut, ShieldCheck, X, Vault } from 'lucide-react'
+import { Home, Users, Activity, LifeBuoy, Settings, LogOut, ShieldCheck, X, Vault, Target } from 'lucide-react'
 
-type Tab = 'home' | 'vault' | 'groups' | 'activity' | 'support' | 'settings'
+type Tab = 'home' | 'vault' | 'goals' | 'groups' | 'activity' | 'support' | 'settings'
 
 const tabs: { id: Tab; label: string; Icon: React.FC<any> }[] = [
-  { id: 'home', label: 'Home', Icon: Home },
-  { id: 'vault', label: 'Save', Icon: Vault },
+  { id: 'home',     label: 'Home',    Icon: Home },
+  { id: 'vault',    label: 'Save',    Icon: Vault },
+  { id: 'goals',    label: 'Goals',   Icon: Target },
   { id: 'groups', label: 'Groups', Icon: Users },
   { id: 'activity', label: 'Activity', Icon: Activity },
   { id: 'support', label: 'Support', Icon: LifeBuoy },
@@ -139,6 +141,7 @@ export default function AppShell() {
         <div className="max-w-lg mx-auto">
           {tab === 'home' && <HomeView wallet={wallet} transactions={transactions} user={user} refresh={refresh} profile={profile} onStartKyc={() => setShowKycGate(true)} onNavigateVault={() => setTab('vault')} />}
           {tab === 'vault' && <VaultView wallet={wallet} refresh={refresh} />}
+          {tab === 'goals' && <GoalsView wallet={wallet} refresh={refresh} />}
           {tab === 'groups' && <GroupsView user={user} wallet={wallet} />}
           {tab === 'activity' && <ActivityView transactions={transactions} />}
           {tab === 'support' && (

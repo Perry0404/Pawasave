@@ -154,6 +154,25 @@ export interface AdminFeeSummary {
   this_month_fees_kobo: number
 }
 
+export interface SavingsGoal {
+  id: string
+  user_id: string
+  title: string
+  target_naira_kobo: number
+  target_usdc_micro: number
+  frequency: 'daily' | 'weekly' | 'monthly'
+  contribution_naira_kobo: number
+  contribution_usdc_micro: number
+  saved_naira_kobo: number
+  saved_usdc_micro: number
+  interest_earned_micro: number
+  status: 'active' | 'completed' | 'broken'
+  started_at: string
+  last_contributed_at: string | null
+  completed_at: string | null
+  created_at: string
+}
+
 export interface AdminUserStats {
   total_users: number
   total_wallets: number

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { registerProxyMember } from '@/lib/xend'
+import { xendRequest } from '@/lib/xend'
+import type { ProxyMemberResult } from '@/lib/xend'
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || ''
 
@@ -30,11 +31,16 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await registerProxyMember('pawasave-esusu-pool', {
-      firstName: 'Esusu',
-      lastName: 'Pool',
-      email: 'esusu-pool@pawasave.internal',
-    })
+    const result = await xendRequest<ProxyMemberResult>(
+      'POST',
+      '/api/Merchant/proxymember/add',
+      {
+        externalProxyMemberUniqueId: 'pawasave-esusu-pool',
+        firstName: 'Esusu',
+        lastName: 'Pool',
+        requestTime: Date.now(),
+      },
+    )
 
     const memberId = result.data.memberId
     return NextResponse.json({
@@ -44,6 +50,6 @@ export async function POST(request: NextRequest) {
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: message, hint: 'Check Vercel function logs for full XEND response' }, { status: 500 })
   }
 }

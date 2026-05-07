@@ -101,19 +101,19 @@ export default function AboutPage() {
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
               <h3 className="font-semibold text-white mb-2">📈 Yield Pools</h3>
               <p className="text-slate-400 text-sm leading-relaxed">
-                Earn up to 21% APY through Xend Asset Chain yield and Morpho vaults. Lock savings for 30–365 days for the best returns with projected interest previews.
+                Earn 33% APY on your savings via the XEND Money Market. Save to the vault and your money starts earning automatically — no lock-in required.
               </p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-              <h3 className="font-semibold text-white mb-2">🔄 Dual Ramp Providers</h3>
+              <h3 className="font-semibold text-white mb-2">🔄 Smart Ramp Routing</h3>
               <p className="text-slate-400 text-sm leading-relaxed">
-                Choose between FlintAPI and Xend Finance for on-ramp (naira→crypto) and off-ramp (crypto→naira) transactions. Two providers means better uptime and rates.
+                Deposits and withdrawals are routed automatically to the best available provider — FlintAPI, Flipeet, or Xend Finance — for the lowest fee and fastest settlement.
               </p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-              <h3 className="font-semibold text-white mb-2">🔐 Non-Custodial Addresses</h3>
+              <h3 className="font-semibold text-white mb-2">🏦 Bank-to-Crypto Deposits</h3>
               <p className="text-slate-400 text-sm leading-relaxed">
-                Each user gets their own personal deposit address on the Base L2 blockchain. You control your crypto — PawaSave never holds your funds in a shared wallet.
+                Deposit naira directly from your Nigerian bank account via a virtual bank transfer — no crypto knowledge required. Your funds are instantly converted to USDC and auto-saved.
               </p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">

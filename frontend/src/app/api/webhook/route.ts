@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
-import { depositToXendMoneyMarket } from '@/lib/xend'
 
 const WEBHOOK_SECRET = process.env.FLINT_WEBHOOK_SECRET || ''
 
@@ -102,34 +101,14 @@ export async function POST(request: NextRequest) {
         .update({ amount_usdc_micro: userUsdcMicro })
         .eq('id', tx.id)
 
-      // Auto-allocate 90% to cNGN yield pool (from user's net amount)
-      await supabase.rpc('allocate_cngn_pool', {
-        p_user_id: tx.user_id,
+      // Auto-allocate to vault (save_to_vault moves USDC into savings, earns 33% APY)
+      // Converts USDC to equivalent naira kobo for the vault debit side
+      const nairaKoboEquivalent = Math.floor((userUsdcMicro / 1_000_000) * rate * 100)
+      await supabase.rpc('save_to_vault', {
+        p_user_id:    tx.user_id,
+        p_naira_kobo: nairaKoboEquivalent,
         p_usdc_micro: userUsdcMicro,
       })
-
-      // Deploy the 90% pool portion to Xend (best-effort, needs xend_member_id)
-      const poolUsdcMicro = Math.floor(userUsdcMicro * 0.9)
-      const poolUsdc = poolUsdcMicro / 1_000_000
-      if (poolUsdc >= 0.01) {
-        Promise.resolve(
-          supabase
-            .from('profiles')
-            .select('xend_member_id')
-            .eq('id', tx.user_id)
-            .single()
-        ).then(({ data: prof }) => {
-          if (prof?.xend_member_id) {
-            return depositToXendMoneyMarket({
-              proxyMemberId: prof.xend_member_id,
-              amount: poolUsdc,
-              description: `PawaSave deposit pool – tx ${tx.id}`,
-            })
-          }
-        }).catch((err: unknown) => {
-          console.warn('Xend money market deposit skipped:', err)
-        })
-      }
     }
     // For withdrawal: balance was already debited upfront, nothing more needed
   } else if (isFailed) {

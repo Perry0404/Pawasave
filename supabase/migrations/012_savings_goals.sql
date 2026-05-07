@@ -130,15 +130,32 @@ BEGIN
 END;
 $$;
 
+-- ── Expand fee_type constraint to include goal break penalty ──────────────────
+ALTER TABLE public.platform_fees
+  DROP CONSTRAINT IF EXISTS platform_fees_fee_type_check;
+
+ALTER TABLE public.platform_fees
+  ADD CONSTRAINT platform_fees_fee_type_check
+  CHECK (fee_type IN (
+    'ramp_onramp',
+    'ramp_offramp',
+    'vault_lock_penalty',
+    'admin_revenue_withdrawal',
+    'esusu_penalty',
+    'goal_break_penalty'
+  ));
+
 -- ── RPC: break_savings_goal ───────────────────────────────────────────────────
--- Early withdrawal: returns principal only (no interest).
+-- Early withdrawal: returns principal only. Accrued interest goes to platform revenue.
 CREATE OR REPLACE FUNCTION public.break_savings_goal(
   p_goal_id UUID,
   p_user_id UUID
 ) RETURNS BOOLEAN
 LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
-  v_goal public.savings_goals%ROWTYPE;
+  v_goal     public.savings_goals%ROWTYPE;
+  v_days     NUMERIC;
+  v_interest BIGINT;
 BEGIN
   IF auth.uid() IS NOT NULL AND auth.uid() != p_user_id THEN
     RAISE EXCEPTION 'unauthorized';
@@ -151,14 +168,40 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'goal not found'; END IF;
   IF v_goal.status != 'active' THEN RAISE EXCEPTION 'goal is not active'; END IF;
 
+  -- Calculate how much interest had accrued — this becomes platform revenue
+  v_days     := GREATEST(1, EXTRACT(EPOCH FROM (NOW() - v_goal.started_at)) / 86400.0);
+  v_interest := FLOOR(v_goal.saved_usdc_micro * 0.33 * (v_days / 365.0));
+
+  -- Return only principal to user
   UPDATE public.wallets
   SET usdc_balance_micro = usdc_balance_micro + v_goal.saved_usdc_micro,
       naira_balance_kobo = naira_balance_kobo + v_goal.saved_naira_kobo
   WHERE user_id = p_user_id;
 
+  -- Record forfeited interest as platform revenue
+  IF v_interest > 0 THEN
+    INSERT INTO public.platform_fees (
+      user_id, transaction_ref, fee_type,
+      gross_amount_kobo, fee_amount_kobo, fee_percent
+    ) VALUES (
+      p_user_id,
+      'goal_break_' || p_goal_id,
+      'goal_break_penalty',
+      v_goal.saved_naira_kobo,
+      -- store interest in kobo column as a proxy (micro USDC → naira estimate not needed here)
+      v_interest,
+      33.0
+    );
+
+    UPDATE public.platform_settings
+    SET value = (COALESCE(value::bigint, 0) + v_interest)::text
+    WHERE key = 'platform_revenue_kobo';
+  END IF;
+
   UPDATE public.savings_goals
-  SET status       = 'broken',
-      completed_at = NOW()
+  SET status               = 'broken',
+      interest_earned_micro = 0,
+      completed_at          = NOW()
   WHERE id = p_goal_id;
 
   RETURN TRUE;

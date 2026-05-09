@@ -143,7 +143,7 @@ export default function AppShell() {
           {tab === 'vault' && <VaultView wallet={wallet} refresh={refresh} />}
           {tab === 'goals' && <GoalsView wallet={wallet} refresh={refresh} />}
           {tab === 'groups' && <GroupsView user={user} wallet={wallet} />}
-          {tab === 'activity' && <ActivityView transactions={transactions} />}
+          {tab === 'activity' && <ActivityView transactions={transactions} wallet={wallet} profile={profile} />}
           {tab === 'support' && (
             <div className="px-4 pt-5 pb-6">
               <div className="bg-white/95 rounded-2xl p-5 border border-white/60">

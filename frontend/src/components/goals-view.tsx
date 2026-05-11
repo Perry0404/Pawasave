@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Target, Plus, ArrowLeft, CheckCircle2, TrendingUp, Loader2, ChevronRight, XCircle } from 'lucide-react'
 import { formatNaira, formatUsdc, koboToMicroUsdc, microUsdcToKobo, getRate } from '@/lib/format'
-import { useSavingsGoals, createSavingsGoal, contributeToGoal, completeSavingsGoal, breakSavingsGoal } from '@/hooks/use-data'
+import { useSavingsGoals, createSavingsGoal, contributeToGoal, completeSavingsGoal, breakSavingsGoal, setGoalAutoContribute } from '@/hooks/use-data'
 import type { Wallet, SavingsGoal } from '@/lib/types'
 
 interface Props {
@@ -122,6 +122,18 @@ export default function GoalsView({ wallet, refresh }: Props) {
       flash(e.message || 'Could not break goal')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const handleToggleAuto = async (goal: SavingsGoal) => {
+    const next = !goal.auto_contribute_enabled
+    try {
+      await setGoalAutoContribute(goal.id, next)
+      setSelected(prev => prev ? { ...prev, auto_contribute_enabled: next } : null)
+      await refreshGoals()
+      flash(next ? 'Auto-contributions enabled' : 'Auto-contributions paused')
+    } catch (e: any) {
+      flash(e.message || 'Could not update setting')
     }
   }
 
@@ -345,6 +357,26 @@ export default function GoalsView({ wallet, refresh }: Props) {
             >
               Break goal early (no interest)
             </button>
+
+            {/* Auto-contribute toggle */}
+            <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-700">Auto-contributions</p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Automatically save {formatNaira(selected.contribution_naira_kobo)} {selected.frequency}
+                </p>
+              </div>
+              <button
+                onClick={() => handleToggleAuto(selected)}
+                className={`relative w-11 h-6 rounded-full transition-colors focus:outline-none ${
+                  selected.auto_contribute_enabled ? 'bg-emerald-500' : 'bg-slate-300'
+                }`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                  selected.auto_contribute_enabled ? 'translate-x-5' : 'translate-x-0'
+                }`} />
+              </button>
+            </div>
           </div>
         )}
 

@@ -271,6 +271,8 @@ export default function AuthScreen() {
           </a>
           <span className="text-slate-300">&middot;</span>
           <Link href="/privacy" className="text-emerald-600 hover:text-emerald-700 font-medium transition">Privacy Policy</Link>
+          <span className="text-slate-300">&middot;</span>
+          <Link href="/terms" className="text-emerald-600 hover:text-emerald-700 font-medium transition">Terms of Service</Link>
         </div>
       </div>
     </div>

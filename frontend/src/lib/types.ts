@@ -167,6 +167,7 @@ export interface SavingsGoal {
   saved_usdc_micro: number
   interest_earned_micro: number
   status: 'active' | 'completed' | 'broken'
+  auto_contribute_enabled: boolean
   started_at: string
   last_contributed_at: string | null
   completed_at: string | null

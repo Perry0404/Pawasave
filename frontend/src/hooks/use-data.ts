@@ -471,3 +471,11 @@ export async function breakSavingsGoal(goalId: string): Promise<void> {
   })
   if (error) throw error
 }
+
+export async function setGoalAutoContribute(goalId: string, enabled: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_goal_auto_contribute', {
+    p_goal_id: goalId,
+    p_enabled: enabled,
+  })
+  if (error) throw error
+}

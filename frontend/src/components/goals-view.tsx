@@ -138,7 +138,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
         </button>
         <h2 className="text-xl font-bold text-slate-900 mb-1">New Savings Goal</h2>
         <p className="text-sm text-slate-500 mb-6">
-          Your money is locked until you hit the target — earning 33% APY the whole way.
+          Your money is locked until you hit the target — earning 50% APY the whole way.
         </p>
 
         <div className="space-y-5">
@@ -227,7 +227,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
             <p className="text-xs font-bold text-emerald-800 mb-1.5">How it works</p>
             <ul className="text-xs text-emerald-700 space-y-1">
               <li>• Each contribution is locked until you reach your target</li>
-              <li>• Locked savings earn 33% APY automatically</li>
+              <li>• Locked savings earn 50% APY automatically</li>
               <li>• Break early to get your principal back (no interest)</li>
             </ul>
           </div>
@@ -254,7 +254,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
     const pct = progressPct(selected)
     const isTargetMet = selected.saved_usdc_micro >= selected.target_usdc_micro
     const daysElapsed = Math.max(1, (Date.now() - new Date(selected.started_at).getTime()) / 86400000)
-    const projectedInterest = Math.floor(selected.saved_usdc_micro * 0.33 * (daysElapsed / 365))
+    const projectedInterest = Math.floor(selected.saved_usdc_micro * 0.50 * (daysElapsed / 365))
 
     return (
       <div className="px-4 pt-5 pb-8">
@@ -270,7 +270,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
               <p className="text-emerald-100 text-xs font-medium uppercase tracking-wider">Savings Goal</p>
             </div>
             <span className="text-xs font-semibold bg-white/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-              <TrendingUp className="w-3 h-3" /> 33% APY
+              <TrendingUp className="w-3 h-3" /> 50% APY
             </span>
           </div>
 
@@ -378,7 +378,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
       <div className="flex items-center justify-between mb-5">
         <div>
           <h2 className="text-xl font-bold text-slate-900">Savings Goals</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Lock money, earn 33% APY, unlock at target</p>
+          <p className="text-xs text-slate-500 mt-0.5">Lock money, earn 50% APY, unlock at target</p>
         </div>
         <button
           onClick={() => setView('create')}
@@ -403,7 +403,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
           </div>
           <p className="font-bold text-slate-800 text-lg mb-1">No goals yet</p>
           <p className="text-sm text-slate-500 mb-6 max-w-xs mx-auto">
-            Set a target, contribute regularly, and watch your savings grow with 33% APY interest.
+            Set a target, contribute regularly, and watch your savings grow with 50% APY interest.
           </p>
           <button
             onClick={() => setView('create')}

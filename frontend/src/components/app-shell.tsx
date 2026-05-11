@@ -222,7 +222,7 @@ export default function AppShell() {
                     <p className="text-sm font-semibold text-slate-900">{wallet ? (wallet.usdc_balance_micro / 1_000_000).toFixed(2) : '0.00'} USDC</p>
                   </div>
                   <div className="bg-slate-100 rounded-xl px-3 py-2.5">
-                    <p className="text-[11px] text-slate-500">Yield Pool · 33% APY</p>
+                    <p className="text-[11px] text-slate-500">Yield Pool · Up to 50% APY</p>
                     <p className="text-sm font-semibold text-slate-900">{wallet ? (wallet.cngn_pool_micro / 1_000_000).toFixed(2) : '0.00'} cNGN</p>
                   </div>
                 </div>

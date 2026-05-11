@@ -101,7 +101,7 @@ export default function AboutPage() {
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
               <h3 className="font-semibold text-white mb-2">📈 Yield Pools</h3>
               <p className="text-slate-400 text-sm leading-relaxed">
-                Earn 33% APY on your savings via the XEND Money Market. Save to the vault and your money starts earning automatically — no lock-in required.
+                Earn up to 50% APY on fixed savings (XEND X Auto) or 33% APY on flexible savings (XEND Money Market). Save to the vault and your money starts earning automatically — no lock-in required.
               </p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">

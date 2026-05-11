@@ -22,7 +22,8 @@ const LOCK_DURATIONS = [
 type SavingsPlan = null | 'flexible' | 'fixed'
 // Within a plan, which action is active
 type FlexAction = 'save' | 'withdraw'
-const CNGN_APY = 33
+const FLEX_APY = 33   // Money Market (flexible vault) — users earn 33%, platform keeps remainder
+const FIXED_APY = 50  // X Auto (fixed/locked savings) — users earn 50%, platform keeps 6%
 
 export default function VaultView({ wallet, refresh }: Props) {
   const [plan, setPlan] = useState<SavingsPlan>(null)
@@ -60,7 +61,7 @@ export default function VaultView({ wallet, refresh }: Props) {
   const lockAmount = parseFloat(amount) || 0
   const lockKobo = Math.round(lockAmount * 100)
   const lockUsdc = koboToMicroUsdc(lockKobo, rate)
-  const projectedInterest = Math.floor(lockUsdc * (CNGN_APY / 100) * (lockDuration / 365))
+  const projectedInterest = Math.floor(lockUsdc * (FIXED_APY / 100) * (lockDuration / 365))
 
   const flash = (msg: string) => {
     setFeedback(msg)
@@ -97,8 +98,8 @@ export default function VaultView({ wallet, refresh }: Props) {
     const usdc = koboToMicroUsdc(kobo, rate)
     setBusy(true)
     try {
-      await lockSavings(usdc, kobo, lockDuration, CNGN_APY)
-      flash(`Locked ${formatUsdc(usdc)} in cNGN for ${lockDuration} days at ${CNGN_APY}% APY`)
+      await lockSavings(usdc, kobo, lockDuration, FIXED_APY)
+      flash(`Locked ${formatUsdc(usdc)} for ${lockDuration} days at ${FIXED_APY}% APY (X Auto)`)
       refreshLocks()
       setAmount('')
       refresh()
@@ -135,7 +136,7 @@ export default function VaultView({ wallet, refresh }: Props) {
           <p className="text-amber-100 text-xs font-medium uppercase tracking-wider">cNGN Yield Vault</p>
         </div>
         <span className="text-xs font-semibold bg-white/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-          <TrendingUp className="w-3 h-3" /> {CNGN_APY}% APY
+          <TrendingUp className="w-3 h-3" /> Up to {FIXED_APY}% APY
         </span>
       </div>
       <p className="text-3xl font-bold tracking-tight">{formatNaira(cngnTotalKobo)}</p>
@@ -226,10 +227,10 @@ export default function VaultView({ wallet, refresh }: Props) {
                 <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-500 transition" />
               </div>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Save into the cNGN yield pool and withdraw anytime. Earns 33% APY automatically — no lock-in.
+                Save into the cNGN yield pool and withdraw anytime. Earns {FLEX_APY}% APY automatically — no lock-in.
               </p>
               <div className="flex items-center gap-3 mt-3">
-                <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">33% APY</span>
+                <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">{FLEX_APY}% APY</span>
                 <span className="text-xs text-slate-400">Withdraw anytime</span>
               </div>
             </div>
@@ -251,10 +252,10 @@ export default function VaultView({ wallet, refresh }: Props) {
                 <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-purple-500 transition" />
               </div>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Time-lock your cNGN pool balance for 30–365 days. Same cNGN engine, but locked until maturity for disciplined savings.
+                Time-lock your savings via XEND X Auto for 30–365 days. Earn 50% APY — locked until maturity for disciplined savers.
               </p>
               <div className="flex items-center gap-3 mt-3">
-                <span className="text-xs font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">{CNGN_APY}% APY</span>
+                <span className="text-xs font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">{FIXED_APY}% APY</span>
                 <span className="text-xs text-slate-400">30 – 365 day lock</span>
               </div>
             </div>
@@ -315,7 +316,7 @@ export default function VaultView({ wallet, refresh }: Props) {
           {/* 33% APY badge */}
           <div className="flex items-center gap-2 mb-4 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
             <TrendingUp className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
-            <p className="text-xs text-emerald-700 font-medium">33% APY · XEND Money Market</p>
+            <p className="text-xs text-emerald-700 font-medium">{FLEX_APY}% APY · XEND Money Market</p>
           </div>
 
           <AmountInput
@@ -375,7 +376,7 @@ export default function VaultView({ wallet, refresh }: Props) {
       <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-4">
         <div className="flex items-center gap-2 mb-4 bg-purple-50 border border-purple-200 rounded-xl px-3 py-2">
           <TrendingUp className="w-3.5 h-3.5 text-purple-600 flex-shrink-0" />
-          <p className="text-xs text-purple-700 font-medium">{CNGN_APY}% APY · Locked cNGN balance</p>
+          <p className="text-xs text-purple-700 font-medium">{FIXED_APY}% APY · X Auto (Locked)</p>
         </div>
 
         <AmountInput
@@ -424,7 +425,7 @@ export default function VaultView({ wallet, refresh }: Props) {
               </div>
             </div>
             <p className="text-[10px] text-purple-400 mt-2 text-center">
-              {CNGN_APY}% APY · {lockDuration} days · Locked inside cNGN strategy
+              {FIXED_APY}% APY · {lockDuration} days · XEND X Auto
             </p>
           </div>
         )}

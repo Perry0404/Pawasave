@@ -40,7 +40,7 @@ export default function AppShell() {
   const [pinConfirm, setPinConfirm] = useState('')
   const [settingsFeedback, setSettingsFeedback] = useState('')
 
-  const refresh = () => { refreshWallet(); refreshTx() }
+  const refresh = async () => { await Promise.all([refreshWallet(), refreshTx()]) }
 
   const gradients = {
     mint: 'from-emerald-600 via-teal-700 to-slate-900',

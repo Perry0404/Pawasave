@@ -112,6 +112,11 @@ function formatProviderError(provider: Provider, error: unknown) {
     if (/insufficient|balance|liquidity/i.test(message)) {
       return 'Withdrawals are temporarily unavailable. Please try again in a few minutes or contact support.'
     }
+    // Flipeet occasionally leaks internal DB enum errors (e.g. "Invalid input value for enum
+    // transaction_status_enum"). These are transient API-side bugs — show a clean message.
+    if (/invalid input value for enum|transaction_status_enum|enum.*status/i.test(message)) {
+      return 'Payment provider is temporarily unavailable. Please wait a moment and try again, or contact support if it persists.'
+    }
     return `Flipeet: ${message}`
   }
 

@@ -183,9 +183,37 @@ export default function GroupsView({ user, wallet }: Props) {
     }
 
     if (paymentMethod === 'usdc') {
-      // First withdraw from USDC vault to naira, then contribute
+      // First withdraw from USDC vault to naira, then contribute.
+      // Must free cNGN pool funds first (same as withdrawFromVault in use-data.ts),
+      // because most USDC sits in cngn_pool_micro (not usdc_balance_micro) after deposit.
       const rate = getRate()
       const usdcMicro = koboToMicroUsdc(selected.contribution_amount_kobo, rate)
+
+      const freeUsdc = wallet?.usdc_balance_micro || 0
+      const cngnPool = wallet?.cngn_pool_micro || 0
+
+      if (usdcMicro > freeUsdc + cngnPool) {
+        setFeedback('Insufficient USDC vault balance')
+        setBusy(false)
+        setTimeout(() => setFeedback(''), 3000)
+        return
+      }
+
+      // Free pool funds into usdc_balance first if needed
+      const fromPool = Math.min(cngnPool, Math.max(0, usdcMicro - freeUsdc))
+      if (fromPool > 0) {
+        const { data: freed, error: freeErr } = await supabase.rpc('withdraw_cngn_pool', {
+          p_user_id: user.id,
+          p_amount_micro: fromPool,
+        })
+        if (freeErr || !freed) {
+          setFeedback(freeErr?.message || 'Insufficient vault balance')
+          setBusy(false)
+          setTimeout(() => setFeedback(''), 3000)
+          return
+        }
+      }
+
       const { data: vaultOk, error: vaultErr } = await supabase.rpc('withdraw_from_vault', {
         p_user_id: user.id,
         p_naira_kobo: selected.contribution_amount_kobo,

@@ -38,6 +38,10 @@ export interface Transaction {
     | 'emergency_payout'
     | 'split_auto_save'
     | 'split_auto_esusu'
+    | 'goal_contribute'
+    | 'goal_claim'
+    | 'creator_incentive'
+    | 'cngn_pool_in'
   direction: 'credit' | 'debit'
   amount_kobo: number
   amount_usdc_micro: number | null

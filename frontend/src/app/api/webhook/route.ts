@@ -65,6 +65,13 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (txErr || !tx) {
+    // Already processed — return 200 so the provider stops retrying
+    const { data: existingTx } = await supabase
+      .from('transactions')
+      .select('status')
+      .eq('reference', data.reference)
+      .single()
+    if (existingTx) return NextResponse.json({ ok: true, already_processed: true })
     return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
   }
 
@@ -101,12 +108,10 @@ export async function POST(request: NextRequest) {
         .update({ amount_usdc_micro: userUsdcMicro })
         .eq('id', tx.id)
 
-      // Auto-allocate to vault (save_to_vault moves USDC into savings, earns 33% APY)
-      // Converts USDC to equivalent naira kobo for the vault debit side
-      const nairaKoboEquivalent = Math.floor((userUsdcMicro / 1_000_000) * rate * 100)
-      await supabase.rpc('save_to_vault', {
-        p_user_id:    tx.user_id,
-        p_naira_kobo: nairaKoboEquivalent,
+      // Allocate 90% of deposited USDC into the cNGN yield pool (earns 33% APY)
+      // This is the correct call — save_to_vault moves naira→usdc and is NOT for this purpose
+      await supabase.rpc('allocate_cngn_pool', {
+        p_user_id: tx.user_id,
         p_usdc_micro: userUsdcMicro,
       })
     }

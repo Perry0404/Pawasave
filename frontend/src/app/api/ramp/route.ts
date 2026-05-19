@@ -601,9 +601,9 @@ export async function POST(request: NextRequest) {
     const pawaFee = Math.round((amount * feePercent) / 100)
     const availableProviders: Provider[] = []
 
-    // Flint is on-ramp only. XEND and Flipeet handle both on-ramp and off-ramp.
-    if (FLINT_CONFIGURED && type === 'on') availableProviders.push('flint')
-    if (XEND_CONFIGURED) availableProviders.push('xend')
+    // Flint and Xend are NGN-only. For USD on-ramps, only Flipeet is supported.
+    if (FLINT_CONFIGURED && type === 'on' && depositCurrency === 'NGN') availableProviders.push('flint')
+    if (XEND_CONFIGURED && depositCurrency === 'NGN') availableProviders.push('xend')
     if (FLIPEET_CONFIGURED) availableProviders.push('flipeet')
 
     if (availableProviders.length === 0) {

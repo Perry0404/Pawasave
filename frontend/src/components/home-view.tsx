@@ -66,7 +66,8 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
 
   const rate = liveRate
   const savingsKobo = microUsdcToKobo(wallet.usdc_balance_micro, rate)
-  const cngnKobo = microUsdcToKobo(wallet.cngn_pool_micro || 0, rate)
+  // Include both pool principal AND accrued yield so balance reflects actual earnings
+  const cngnKobo = microUsdcToKobo((wallet.cngn_pool_micro || 0) + (wallet.cngn_yield_earned_micro || 0), rate)
   const totalKobo = wallet.naira_balance_kobo + savingsKobo + cngnKobo
   const recentTxs = transactions.slice(0, 6)
 
@@ -126,8 +127,8 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
       talkback('withdrawal_done', profile?.display_name || user?.email || 'Chief', `₦${parseFloat(amount).toLocaleString('en-NG')}`)
       resetForm()
       setTransactionPin('')
+      await refresh()
       setView('main')
-      refresh()
     } catch (e: any) {
       flash(e.message || 'Withdrawal failed')
     } finally {

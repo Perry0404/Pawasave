@@ -74,6 +74,13 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (txErr || !tx) {
+    // Return 200 if already processed so Flipeet stops retrying
+    const { data: existingTx } = await supabase
+      .from('transactions')
+      .select('status')
+      .eq('reference', reference)
+      .single()
+    if (existingTx) return NextResponse.json({ ok: true, already_processed: true })
     return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
   }
 
@@ -84,16 +91,31 @@ export async function POST(request: NextRequest) {
       .eq('id', tx.id)
 
     if (tx.type === 'deposit') {
-      const amountNaira = readNumber(
-        data?.source?.amount,
-        data?.amount,
-        (body as any).amount,
-        tx.amount_kobo / 100,
+      // Prefer destination USDC amount (handles both NGN and USD on-ramps correctly).
+      // destination.amount is the USDC the user actually receives — no rate conversion needed.
+      // Fallback: convert source NGN amount using live rate (for providers that don't send destination).
+      const destinationUsdcDirect = readNumber(
+        data?.destination?.amount,
+        data?.destination?.amount_usd,
       )
-      const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
-      const grossUsdcMicro = Math.floor((amountNaira / rate) * 1_000_000)
+      let grossUsdcMicro: number
+      if (destinationUsdcDirect > 0) {
+        grossUsdcMicro = Math.floor(destinationUsdcDirect * 1_000_000)
+      } else {
+        const amountNaira = readNumber(
+          data?.source?.amount,
+          data?.amount,
+          (body as any).amount,
+          tx.amount_kobo / 100,
+        )
+        const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
+        grossUsdcMicro = Math.floor((amountNaira / rate) * 1_000_000)
+      }
       const feeKobo = Number(tx.platform_fee_kobo || 0)
-      const feeUsdcMicro = feeKobo > 0 ? Math.floor((feeKobo / 100 / rate) * 1_000_000) : 0
+      // Fee is already baked into destination amount when using direct USDC; only deduct for NGN fallback
+      const feeUsdcMicro = (destinationUsdcDirect <= 0 && feeKobo > 0)
+        ? Math.floor((feeKobo / 100 / (await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY))) * 1_000_000)
+        : 0
       const userUsdcMicro = Math.max(0, grossUsdcMicro - feeUsdcMicro)
 
       await supabase.rpc('credit_wallet', {

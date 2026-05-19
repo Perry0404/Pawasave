@@ -52,73 +52,60 @@ export async function POST(request: NextRequest) {
 
   // Process based on event type
   if (status === 'completed' || event.includes('completed')) {
-    // If this is a ramp completion, credit the user's vault
-    if (memberId && amount > 0) {
-      // Look up user by xend_member_id
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('xend_member_id', memberId)
-        .single()
+    // Look up the pending PawaSave transaction by Xend invoiceId (stored as paychant_tx_id)
+    // This prevents double-crediting if the webhook fires multiple times.
+    const { data: tx } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('paychant_tx_id', transactionId)
+      .eq('status', 'pending')
+      .single()
 
-      if (profile) {
-        const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
-        const usdcMicro = Math.floor((amount / rate) * 1_000_000)
+    if (tx) {
+      // Mark the existing transaction as completed
+      await supabase
+        .from('transactions')
+        .update({ status: 'completed' })
+        .eq('id', tx.id)
 
-        // Credit the user's USDC vault
-        await supabase.rpc('credit_wallet', {
-          p_user_id: profile.id,
-          p_naira_kobo: 0,
-          p_usdc_micro: usdcMicro,
-        })
+      const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
+      const usdcMicro = Math.floor((amount > 0 ? amount : tx.amount_kobo / 100) / rate * 1_000_000)
 
-        // Record the transaction
-        await supabase.from('transactions').insert({
-          user_id: profile.id,
-          type: 'deposit',
-          direction: 'credit',
-          amount_kobo: Math.round(amount * 100),
-          amount_usdc_micro: usdcMicro,
-          description: 'Received via Xend Finance',
-          reference: transactionId,
-          status: 'completed',
-        })
+      await supabase.rpc('credit_wallet', {
+        p_user_id: tx.user_id,
+        p_naira_kobo: 0,
+        p_usdc_micro: usdcMicro,
+      })
 
-        // Auto-allocate 90% to cNGN yield pool
-        await supabase.rpc('allocate_cngn_pool', {
-          p_user_id: profile.id,
-          p_usdc_micro: usdcMicro,
-        })
-      }
+      await supabase.rpc('allocate_cngn_pool', {
+        p_user_id: tx.user_id,
+        p_usdc_micro: usdcMicro,
+      })
     }
+    // If no pending tx found, this is either already processed (idempotent) or an unknown Xend event — ignore safely.
   } else if (status === 'failed' || event.includes('failed')) {
-    // Handle failure — refund if we debited earlier
-    if (memberId) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('xend_member_id', memberId)
-        .single()
+    // Find the pending transaction to refund
+    const { data: tx } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('paychant_tx_id', transactionId)
+      .eq('status', 'pending')
+      .single()
 
-      if (profile && amount > 0) {
+    if (tx) {
+      await supabase
+        .from('transactions')
+        .update({ status: 'failed' })
+        .eq('id', tx.id)
+
+      // Refund only if this was a debit-first withdrawal (type === 'withdrawal')
+      if (tx.type === 'withdrawal') {
         const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
-        const usdcMicro = Math.floor((amount / rate) * 1_000_000)
-
+        const usdcMicro = Math.floor((tx.amount_kobo / 100) / rate * 1_000_000)
         await supabase.rpc('credit_wallet', {
-          p_user_id: profile.id,
+          p_user_id: tx.user_id,
           p_naira_kobo: 0,
           p_usdc_micro: usdcMicro,
-        })
-
-        await supabase.from('transactions').insert({
-          user_id: profile.id,
-          type: 'deposit',
-          direction: 'credit',
-          amount_kobo: Math.round(amount * 100),
-          amount_usdc_micro: usdcMicro,
-          description: 'Xend refund — transaction failed',
-          reference: transactionId,
-          status: 'completed',
         })
       }
     }

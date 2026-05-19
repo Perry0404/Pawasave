@@ -12,20 +12,22 @@ interface Props {
 }
 
 const txLabels: Record<string, string> = {
-  deposit:          'Deposit',
-  withdrawal:       'Withdrawal',
-  save_to_vault:    'Saved to Vault',
-  vault_withdraw:   'Vault Withdrawal',
-  esusu_contribute: 'Esusu Contribution',
-  esusu_payout:     'Esusu Payout',
-  emergency_payout: 'Emergency Payout',
-  split_auto_save:  'Auto Save',
-  split_auto_esusu: 'Auto Esusu',
-  goal_contribute:  'Goal Contribution',
-  goal_claim:       'Goal Claimed',
+  deposit:            'Deposit',
+  withdrawal:         'Withdrawal',
+  save_to_vault:      'Saved to Vault',
+  vault_withdraw:     'Vault Withdrawal',
+  esusu_contribute:   'Esusu Contribution',
+  esusu_payout:       'Esusu Payout',
+  emergency_payout:   'Emergency Payout',
+  split_auto_save:    'Auto Save',
+  split_auto_esusu:   'Auto Esusu',
+  goal_contribute:    'Goal Contribution',
+  goal_claim:         'Goal Claimed',
+  creator_incentive:  'Creator Incentive',
+  cngn_pool_in:       'Yield Pool Entry',
 }
 
-const CREDIT_TYPES = ['deposit', 'vault_withdraw', 'esusu_payout', 'emergency_payout', 'goal_claim']
+const CREDIT_TYPES = ['deposit', 'vault_withdraw', 'esusu_payout', 'emergency_payout', 'goal_claim', 'creator_incentive']
 
 function formatDate(ts: string) {
   return new Date(ts).toLocaleString('en-NG', {
@@ -167,31 +169,35 @@ function generateStatement(transactions: Transaction[], wallet: Wallet | null | 
 }
 
 const icons: Record<string, typeof ArrowDownLeft> = {
-  deposit:          ArrowDownLeft,
-  withdrawal:       ArrowUpRight,
-  save_to_vault:    Shield,
-  vault_withdraw:   Shield,
-  esusu_contribute: Users,
-  esusu_payout:     Users,
-  emergency_payout: AlertTriangle,
-  split_auto_save:  RefreshCw,
-  split_auto_esusu: RefreshCw,
-  goal_contribute:  Target,
-  goal_claim:       Target,
+  deposit:            ArrowDownLeft,
+  withdrawal:         ArrowUpRight,
+  save_to_vault:      Shield,
+  vault_withdraw:     Shield,
+  esusu_contribute:   Users,
+  esusu_payout:       Users,
+  emergency_payout:   AlertTriangle,
+  split_auto_save:    RefreshCw,
+  split_auto_esusu:   RefreshCw,
+  goal_contribute:    Target,
+  goal_claim:         Target,
+  creator_incentive:  ArrowDownLeft,
+  cngn_pool_in:       ArrowDownLeft,
 }
 
 const labels = txLabels
 
 const colorMap: Record<string, { bg: string; icon: string; amount: string }> = {
-  deposit: { bg: 'bg-emerald-100', icon: 'text-emerald-600', amount: 'text-emerald-600' },
-  withdrawal: { bg: 'bg-orange-100', icon: 'text-orange-600', amount: 'text-orange-600' },
-  save_to_vault: { bg: 'bg-blue-100', icon: 'text-blue-600', amount: 'text-blue-600' },
-  vault_withdraw: { bg: 'bg-indigo-100', icon: 'text-indigo-600', amount: 'text-indigo-600' },
-  esusu_contribute: { bg: 'bg-purple-100', icon: 'text-purple-600', amount: 'text-purple-600' },
-  esusu_payout: { bg: 'bg-violet-100', icon: 'text-violet-600', amount: 'text-violet-600' },
-  emergency_payout: { bg: 'bg-amber-100', icon: 'text-amber-600', amount: 'text-amber-600' },
-  split_auto_save: { bg: 'bg-cyan-100', icon: 'text-cyan-600', amount: 'text-cyan-600' },
-  split_auto_esusu: { bg: 'bg-teal-100', icon: 'text-teal-600', amount: 'text-teal-600' },
+  deposit:           { bg: 'bg-emerald-100', icon: 'text-emerald-600', amount: 'text-emerald-600' },
+  withdrawal:        { bg: 'bg-orange-100', icon: 'text-orange-600', amount: 'text-orange-600' },
+  save_to_vault:     { bg: 'bg-blue-100', icon: 'text-blue-600', amount: 'text-blue-600' },
+  vault_withdraw:    { bg: 'bg-indigo-100', icon: 'text-indigo-600', amount: 'text-indigo-600' },
+  esusu_contribute:  { bg: 'bg-purple-100', icon: 'text-purple-600', amount: 'text-purple-600' },
+  esusu_payout:      { bg: 'bg-violet-100', icon: 'text-violet-600', amount: 'text-violet-600' },
+  emergency_payout:  { bg: 'bg-amber-100', icon: 'text-amber-600', amount: 'text-amber-600' },
+  split_auto_save:   { bg: 'bg-cyan-100', icon: 'text-cyan-600', amount: 'text-cyan-600' },
+  split_auto_esusu:  { bg: 'bg-teal-100', icon: 'text-teal-600', amount: 'text-teal-600' },
+  creator_incentive: { bg: 'bg-amber-100', icon: 'text-amber-600', amount: 'text-amber-600' },
+  cngn_pool_in:      { bg: 'bg-emerald-100', icon: 'text-emerald-600', amount: 'text-emerald-600' },
 }
 
 const defaultColor = { bg: 'bg-slate-100', icon: 'text-slate-600', amount: 'text-slate-600' }

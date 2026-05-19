@@ -467,7 +467,26 @@ async function runFlipeet(
     DEFAULT_FLIPEET_ESTIMATED_FEE,
   )
   const origin = request.nextUrl.origin || 'https://pawasave.xyz'
+  const pawaFeeKobo = Math.round(pawaFeeNaira * 100)
 
+  // ── OFF-RAMP: debit user balance BEFORE calling Flipeet ─────────────────────
+  // This guarantees we never trigger a payout for a user with insufficient funds.
+  if (type === 'off') {
+    await supabase.from('transactions').insert({
+      user_id: userId,
+      type: 'withdrawal',
+      direction: 'debit',
+      amount_kobo: Math.round(amount * 100),
+      platform_fee_kobo: pawaFeeKobo,
+      description: 'Sent via Flipeet',
+      reference,
+      status: 'pending',
+    })
+    const debitError = await maybeDebitForWithdrawal(supabase, userId, amount, reference)
+    if (debitError) throw new Error('Insufficient USDC balance')
+  }
+
+  // ── Call Flipeet API ─────────────────────────────────────────────────────────
   const result = type === 'on'
     ? await initializeFlipeetOnRamp({
       amount,
@@ -487,28 +506,27 @@ async function runFlipeet(
       holderName: holderName || process.env.RAMP_BENEFICIARY_NAME || 'PawaSave User',
     })
 
-  const pawaFeeKobo = Math.round(pawaFeeNaira * 100)
-  await supabase.from('transactions').insert({
-    user_id: userId,
-    type: type === 'on' ? 'deposit' : 'withdrawal',
-    direction: type === 'on' ? 'credit' : 'debit',
-    amount_kobo: Math.round(amount * 100),
-    platform_fee_kobo: pawaFeeKobo,
-    description: type === 'on' ? 'Received via Flipeet' : 'Sent via Flipeet',
-    reference,
-    paychant_tx_id: result.reference || null,
-    status: 'pending',
-  })
-
-  if (type === 'off') {
-    const debitError = await maybeDebitForWithdrawal(supabase, userId, amount, reference)
-    if (debitError) throw new Error('Insufficient USDC balance')
+  if (type === 'on') {
+    // On-ramp: insert pending tx after getting provider details
+    await supabase.from('transactions').insert({
+      user_id: userId,
+      type: 'deposit',
+      direction: 'credit',
+      amount_kobo: Math.round(amount * 100),
+      platform_fee_kobo: pawaFeeKobo,
+      description: 'Received via Flipeet',
+      reference,
+      paychant_tx_id: result.reference || null,
+      status: 'pending',
+    })
+  } else {
+    // Off-ramp: update the pre-inserted tx with the provider's reference
+    await supabase
+      .from('transactions')
+      .update({ paychant_tx_id: result.reference || null })
+      .eq('reference', reference)
 
     // Send USDC from XEND custody wallet to Flipeet's receiving address.
-    // Prefer the fixed whitelisted offramp address (set FLIPEET_OFFRAMP_ADDRESS in env
-    // and whitelist it in the XEND merchant dashboard). Falls back to the
-    // per-transaction deposit address returned by Flipeet (may be blocked by XEND
-    // if not whitelisted).
     const flipeetDepositAddress = FLIPEET_OFFRAMP_ADDRESS || result.deposit?.address
     if (flipeetDepositAddress && XEND_CONFIGURED) {
       const rate = await getNgnUsdRateFromFlint(FLINT_API_KEY)
@@ -522,7 +540,7 @@ async function runFlipeet(
           reference,
         })
       } catch (xendErr: any) {
-        // Refund the user since we debited them but XEND send failed
+        // Refund the user since XEND send failed after we debited them
         await supabase.rpc('credit_wallet', {
           p_user_id: userId,
           p_naira_kobo: 0,

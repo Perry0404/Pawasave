@@ -446,18 +446,28 @@ export async function contributeToGoal(
 export async function completeSavingsGoal(goalId: string): Promise<number> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
+
+  // Fetch goal before completing so we can record accurate kobo in the tx
+  const { data: goal } = await supabase
+    .from('savings_goals')
+    .select('saved_naira_kobo, saved_usdc_micro')
+    .eq('id', goalId)
+    .single()
+
   const { data: interest, error } = await supabase.rpc('complete_savings_goal', {
     p_goal_id: goalId,
     p_user_id: user.id,
   })
   if (error) throw error
+
   await supabase.from('transactions').insert({
-    user_id:   user.id,
-    type:      'goal_claim',
-    direction: 'credit',
-    amount_kobo: 0,
-    description: 'Savings goal completed with interest',
-    status:    'completed',
+    user_id:          user.id,
+    type:             'goal_claim',
+    direction:        'credit',
+    amount_kobo:      goal?.saved_naira_kobo ?? 0,
+    amount_usdc_micro: (goal?.saved_usdc_micro ?? 0) + (interest as number ?? 0),
+    description:      'Savings goal completed with interest',
+    status:           'completed',
   })
   return interest as number
 }

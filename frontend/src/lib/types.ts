@@ -48,6 +48,7 @@ export interface Transaction {
   description: string
   reference: string | null
   paychant_tx_id: string | null
+  platform_fee_kobo: number | null
   status: 'pending' | 'completed' | 'failed'
   created_at: string
 }

@@ -117,6 +117,10 @@ function formatProviderError(provider: Provider, error: unknown) {
     if (/invalid input value for enum|transaction_status_enum|enum.*status/i.test(message)) {
       return 'Payment provider is temporarily unavailable. Please wait a moment and try again, or contact support if it persists.'
     }
+    // 400 without a descriptive message = bad request (missing/invalid field our side)
+    if (status === 400 && (message === `Flipeet API error 400` || !message.trim())) {
+      return 'Payment provider rejected the request. Please try again or contact support.'
+    }
     return `Flipeet: ${message}`
   }
 

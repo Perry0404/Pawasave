@@ -100,11 +100,15 @@ async function request<T>(path: string, payload: Record<string, unknown>): Promi
   // Surface the most specific error message available
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const anyJson = json as any
-  const message: string =
+  // NestJS class-validator may return message as an array — join it
+  const rawMessage =
     anyJson?.data?.data?.message
     || anyJson?.data?.message
     || anyJson?.message
-    || `Flipeet API error ${res.status}`
+    || null
+  const message: string = Array.isArray(rawMessage)
+    ? rawMessage.join('; ')
+    : (rawMessage || `Flipeet API error ${res.status}`)
 
   if (!res.ok || json?.status === 'failed' || json?.data?.success === false) {
     throw new FlipeetApiError(message, res.status)
@@ -142,9 +146,6 @@ export async function initializeFlipeetOnRamp(params: {
 }) {
   const currency = params.currency || DEFAULT_CURRENCY
   const country = params.country || DEFAULT_COUNTRY
-  // Note: holder_type, channel, and reason are intentionally omitted for on-ramp —
-  // Flipeet auto-determines channel (virtual account) and transaction type from
-  // asset/network/currency context. Sending them can trigger routing bugs in their API.
   return request<FlipeetInitResult>('/on-ramp/initialize', {
     amount: Math.round(params.amount),
     asset: DEFAULT_ASSET,
@@ -152,11 +153,14 @@ export async function initializeFlipeetOnRamp(params: {
     currency,
     country,
     beneficiary: {
+      holder_type: 'BUSINESS',
       holder_name: params.holderName || 'PawaSave Treasury',
       wallet_address: params.walletAddress,
     },
     callback_url: params.callbackUrl,
     reference: params.reference,
+    channel: 'BANK',
+    reason: 'OTHER',
   })
 }
 

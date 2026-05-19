@@ -71,6 +71,7 @@ export interface EsusuGroup {
   current_cycle: number
   pot_balance_kobo: number
   emergency_pot_kobo: number
+  creator_incentive_percent: number
   status: 'forming' | 'active' | 'completed'
   created_at: string
 }

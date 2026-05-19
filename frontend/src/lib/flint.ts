@@ -7,6 +7,8 @@ export interface RampResult {
   transactionId: string
   reference: string
   selectedBy?: 'best_rate' | 'fallback'
+  /** Currency used for this on-ramp (NGN or USD) */
+  depositCurrency?: 'NGN' | 'USD'
   // on-ramp: bank details to pay into (FlintAPI)
   bankName?: string
   bankCode?: string
@@ -30,11 +32,22 @@ export async function initiateDeposit(amountNaira: number): Promise<RampResult> 
   const res = await fetch('/api/ramp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: 'on', amount: amountNaira }),
+    body: JSON.stringify({ type: 'on', amount: amountNaira, currency: 'NGN' }),
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error || 'Deposit failed')
-  return data
+  return { ...data, depositCurrency: 'NGN' }
+}
+
+export async function initiateUsdDeposit(amountUsd: number): Promise<RampResult> {
+  const res = await fetch('/api/ramp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'on', amount: amountUsd, currency: 'USD' }),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'USD deposit failed')
+  return { ...data, depositCurrency: 'USD' }
 }
 
 export async function initiateWithdrawal(

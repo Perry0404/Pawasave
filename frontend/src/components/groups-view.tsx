@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { formatNaira, formatUsdc, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
-import { Users, Plus, ChevronRight, Loader2, AlertCircle, ArrowLeft, Send, Vault, Wallet, Copy, Check, Share2 } from 'lucide-react'
+import { Users, Plus, ChevronRight, Loader2, AlertCircle, ArrowLeft, Send, Vault, Wallet, Copy, Check, Share2, Crown, Bell, ShieldCheck } from 'lucide-react'
 import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -33,6 +33,7 @@ export default function GroupsView({ user, wallet }: Props) {
   const [formAmount, setFormAmount] = useState('')
   const [formMax, setFormMax] = useState('5')
   const [formFreq, setFormFreq] = useState<EsusuGroup['cycle_period']>('monthly')
+  const [formIncentive, setFormIncentive] = useState(0) // creator incentive %
 
   const fetchGroups = useCallback(async () => {
     if (!user) return
@@ -78,6 +79,7 @@ export default function GroupsView({ user, wallet }: Props) {
         cycle_period: formFreq,
         max_members: parseInt(formMax),
         current_cycle: 0,
+        creator_incentive_percent: formIncentive,
       })
       .select()
       .single()
@@ -90,7 +92,7 @@ export default function GroupsView({ user, wallet }: Props) {
     })
     setBusy(false)
     setShowCreate(false)
-    setFormName(''); setFormAmount(''); setFormMax('5')
+    setFormName(''); setFormAmount(''); setFormMax('5'); setFormIncentive(0)
     fetchGroups()
   }
 
@@ -263,14 +265,70 @@ export default function GroupsView({ user, wallet }: Props) {
         </div>
         <div className="bg-gradient-to-br from-purple-600 to-violet-700 rounded-2xl p-5 text-white mb-4">
           <div className="flex items-start justify-between">
-            <p className="text-sm text-purple-200 font-medium">{selected.name}</p>
-            <span className="text-[10px] font-bold bg-emerald-400/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-400/30">
-              33% APY
-            </span>
+            <div>
+              <p className="text-sm text-purple-200 font-medium">{selected.name}</p>
+              {selected.owner_id === user?.id && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-300 mt-0.5">
+                  <Crown className="w-3 h-3" /> Creator
+                </span>
+              )}
+            </div>
+            <div className="flex flex-col items-end gap-1">
+              <span className="text-[10px] font-bold bg-emerald-400/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-400/30">
+                33% APY
+              </span>
+              {selected.creator_incentive_percent > 0 && (
+                <span className="text-[10px] font-bold bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-400/30">
+                  {selected.creator_incentive_percent}% creator fee
+                </span>
+              )}
+            </div>
           </div>
-          <p className="text-2xl font-bold mt-1">{formatNaira(selected.contribution_amount_kobo)}</p>
+          <p className="text-2xl font-bold mt-2">{formatNaira(selected.contribution_amount_kobo)}</p>
           <p className="text-xs text-purple-300 mt-1">{selected.cycle_period} &middot; Cycle {selected.current_cycle} &middot; Pot earning yield</p>
         </div>
+
+        {/* Creator admin panel */}
+        {selected.owner_id === user?.id && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Crown className="w-4 h-4 text-amber-600" />
+              <p className="text-sm font-bold text-amber-800">Creator Dashboard</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-white rounded-lg p-2.5 border border-amber-100">
+                <p className="text-amber-600 font-medium">Pot Balance</p>
+                <p className="font-bold text-slate-800 mt-0.5">{formatNaira(selected.pot_balance_kobo)}</p>
+              </div>
+              <div className="bg-white rounded-lg p-2.5 border border-amber-100">
+                <p className="text-amber-600 font-medium">Members</p>
+                <p className="font-bold text-slate-800 mt-0.5">{members.length}/{selected.max_members}</p>
+              </div>
+              <div className="bg-white rounded-lg p-2.5 border border-amber-100">
+                <p className="text-amber-600 font-medium">Current Cycle</p>
+                <p className="font-bold text-slate-800 mt-0.5">{selected.current_cycle} of {selected.max_members}</p>
+              </div>
+              <div className="bg-white rounded-lg p-2.5 border border-amber-100">
+                <p className="text-amber-600 font-medium">Your incentive</p>
+                <p className="font-bold text-amber-600 mt-0.5">{selected.creator_incentive_percent}% per payout</p>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={handleShare}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-semibold rounded-lg transition"
+              >
+                <Bell className="w-3.5 h-3.5" /> Invite Members
+              </button>
+              <button
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-semibold rounded-lg transition"
+                onClick={() => setFeedback('Emergency vote feature coming soon')}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" /> Emergency Vote
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Members */}
         <h3 className="text-sm font-semibold text-slate-800 mb-2">Members ({members.length}/{selected.max_members})</h3>
@@ -444,6 +502,48 @@ export default function GroupsView({ user, wallet }: Props) {
               >Monthly</button>
             </div>
           </div>
+
+          {/* Creator incentive */}
+          <div>
+            <label className="text-xs text-slate-500 block mb-1">
+              Creator Incentive <span className="text-purple-500 font-semibold">(optional, 0–5%)</span>
+            </label>
+            <p className="text-[11px] text-slate-400 mb-2">
+              Automatically deducted from each cycle payout and credited to your wallet as the circle manager.
+            </p>
+            <div className="flex gap-2">
+              {[0, 1, 2, 3, 5].map(v => (
+                <button
+                  key={v}
+                  onClick={() => setFormIncentive(v)}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${
+                    formIncentive === v
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {v === 0 ? 'None' : `${v}%`}
+                </button>
+              ))}
+            </div>
+            {formIncentive > 0 && (
+              <p className="text-[11px] text-purple-600 mt-1.5 font-medium">
+                You earn {formIncentive}% of every payout as circle manager
+              </p>
+            )}
+          </div>
+
+          {/* Flipeet virtual account info */}
+          <div className="bg-purple-50 border border-purple-200 rounded-xl p-3.5">
+            <p className="text-xs font-bold text-purple-800 mb-1.5">Virtual Account powered by Flipeet Pay</p>
+            <ul className="text-xs text-purple-700 space-y-1">
+              <li>• Each member gets a dedicated virtual bank account</li>
+              <li>• KYC verification: $3.50 per account (one-time)</li>
+              <li>• Monthly maintenance: $3.50 per account</li>
+              <li>• 7–14 day grace period · Auto-suspension on low balance</li>
+            </ul>
+          </div>
+
           {feedback && (
             <div className="px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>
           )}
@@ -500,6 +600,7 @@ export default function GroupsView({ user, wallet }: Props) {
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">33% APY</span>
+                {g.owner_id === user?.id && <Crown className="w-3.5 h-3.5 text-amber-400" />}
                 <ChevronRight className="w-4 h-4 text-slate-400" />
               </div>
             </button>

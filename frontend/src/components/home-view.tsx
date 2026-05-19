@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { formatNaira, formatUsdc, microUsdcToKobo, getRate, timeAgo } from '@/lib/format'
-import { initiateDeposit, initiateWithdrawal, getBanks, type RampResult, type Bank } from '@/lib/flint'
+import { initiateDeposit, initiateUsdDeposit, initiateWithdrawal, getBanks, type RampResult, type Bank } from '@/lib/flint'
 import { talkback } from '@/lib/voice'
 import { ArrowUpRight, ArrowDownLeft, Vault, TrendingUp, Wallet, Plus, Minus, CreditCard, Loader2, ArrowLeft, Copy, Check, ChevronDown, Building2 } from 'lucide-react'
 import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
@@ -25,6 +25,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [amount, setAmount] = useState('')
+  const [depositCurrency, setDepositCurrency] = useState<'NGN' | 'USD'>('NGN')
   const [depositInfo, setDepositInfo] = useState<RampResult | null>(null)
   const [copied, setCopied] = useState(false)
   const [addrCopied, setAddrCopied] = useState(false)
@@ -71,19 +72,26 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
 
   const flash = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(''), 4000) }
 
-  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setBankSearch(''); setAccountNumber(''); setAccountHolderName(''); setCopied(false) }
+  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setBankSearch(''); setAccountNumber(''); setAccountHolderName(''); setCopied(false); setDepositCurrency('NGN') }
 
   const goBack = () => { resetForm(); setView('main') }
 
   const handleDeposit = async () => {
-    const naira = parseFloat(amount)
-    if (!naira || naira < 100) { flash('Minimum amount is ₦100'); return }
+    const val = parseFloat(amount)
+    if (depositCurrency === 'NGN') {
+      if (!val || val < 100) { flash('Minimum amount is ₦100'); return }
+    } else {
+      if (!val || val < 1) { flash('Minimum amount is $1'); return }
+    }
     setBusy(true)
     try {
-      const result = await initiateDeposit(naira)
+      const result = depositCurrency === 'USD'
+        ? await initiateUsdDeposit(val)
+        : await initiateDeposit(val)
       setDepositInfo(result)
       setView('deposit-info')
-      talkback('deposit_init', profile?.display_name || user?.email || 'Chief', `₦${naira.toLocaleString('en-NG')}`)
+      talkback('deposit_init', profile?.display_name || user?.email || 'Chief',
+        depositCurrency === 'USD' ? `$${val.toLocaleString()}` : `₦${val.toLocaleString('en-NG')}`)
     } catch (e: any) {
       flash(e.message || 'Deposit failed')
     } finally {
@@ -137,31 +145,65 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
 
   // --- Deposit amount form ---
   if (view === 'deposit') {
+    const val = parseFloat(amount) || 0
+    const ngnEquiv = depositCurrency === 'USD' ? val * rate : val
+    const usdEquiv = depositCurrency === 'NGN' ? val / rate : val
     return (
       <div className="px-4 pt-5">
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <h2 className="text-lg font-bold text-slate-900 mb-1">Receive Money</h2>
-        <p className="text-sm text-slate-400 mb-4">Send naira via bank transfer. It auto-converts to USDC and saves in your vault.</p>
+        <p className="text-sm text-slate-400 mb-4">Deposit naira or USD. Funds auto-convert to USDC and save in your vault.</p>
+
+        {/* Currency tab */}
+        <div className="flex bg-slate-100 rounded-xl p-1 mb-5">
+          <button
+            onClick={() => { setDepositCurrency('NGN'); setAmount('') }}
+            className={`flex-1 py-2 text-sm font-bold rounded-lg transition ${
+              depositCurrency === 'NGN' ? 'bg-white shadow text-slate-900' : 'text-slate-500'
+            }`}
+          >
+            ₦ NGN
+          </button>
+          <button
+            onClick={() => { setDepositCurrency('USD'); setAmount('') }}
+            className={`flex-1 py-2 text-sm font-bold rounded-lg transition ${
+              depositCurrency === 'USD' ? 'bg-white shadow text-slate-900' : 'text-slate-500'
+            }`}
+          >
+            $ USD
+          </button>
+        </div>
 
         <div className="mb-5 bg-slate-100 rounded-xl px-3 py-2.5">
           <p className="text-xs text-slate-600">Provider is selected automatically for best effective rate and uptime.</p>
         </div>
 
         <div>
-          <label className="text-xs text-slate-500 block mb-1.5">Amount (₦)</label>
-          <input
-            type="number"
-            inputMode="numeric"
-            value={amount}
-            onChange={e => setAmount(e.target.value)}
-            placeholder="e.g. 5000"
-            className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            autoFocus
-          />
-          {amount && parseFloat(amount) >= 100 && (
-            <p className="text-xs text-slate-400 mt-2">≈ ${(parseFloat(amount) / rate).toFixed(2)} USDC at ₦{rate}/USD</p>
+          <label className="text-xs text-slate-500 block mb-1.5">
+            Amount ({depositCurrency === 'NGN' ? '₦' : '$'})
+          </label>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">
+              {depositCurrency === 'NGN' ? '₦' : '$'}
+            </span>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              placeholder={depositCurrency === 'NGN' ? 'e.g. 5000' : 'e.g. 50'}
+              className="w-full pl-8 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              autoFocus
+            />
+          </div>
+          {val > 0 && (
+            <p className="text-xs text-slate-400 mt-2">
+              {depositCurrency === 'NGN'
+                ? `≈ $${usdEquiv.toFixed(2)} USDC at ₦${rate.toLocaleString()}/USD`
+                : `≈ ₦${ngnEquiv.toLocaleString('en-NG', { maximumFractionDigits: 0 })} at ₦${rate.toLocaleString()}/USD`}
+            </p>
           )}
         </div>
 
@@ -190,13 +232,19 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
         <p className="text-sm text-slate-400 mb-5">
           {depositInfo.provider === 'xend'
             ? 'Send crypto to the wallet address below. Your vault will be credited automatically.'
-            : 'Send the exact amount below. Your vault will be credited automatically.'}
+            : depositInfo.depositCurrency === 'USD'
+              ? 'Transfer the exact USD amount below. Your USDC vault will be credited once confirmed.'
+              : 'Send the exact amount below. Your vault will be credited automatically.'}
         </p>
 
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 space-y-4">
           <div>
             <p className="text-[11px] text-emerald-600 font-medium">Amount</p>
-            <p className="text-2xl font-bold text-emerald-800">₦{parseInt(amount).toLocaleString()}</p>
+            <p className="text-2xl font-bold text-emerald-800">
+              {depositInfo.depositCurrency === 'USD'
+                ? `$${parseInt(amount).toLocaleString()}`
+                : `₦${parseInt(amount).toLocaleString()}`}
+            </p>
           </div>
           {/* Xend: show wallet address */}
           {depositInfo.walletAddress && (

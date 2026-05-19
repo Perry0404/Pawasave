@@ -135,13 +135,19 @@ export async function initializeFlipeetOnRamp(params: {
   callbackUrl: string
   walletAddress: string
   holderName?: string
+  /** Fiat currency for the on-ramp. Defaults to NGN. Pass 'USD' for dollar deposits. */
+  currency?: string
+  /** Country code for the on-ramp. Defaults to env FLIPEET_COUNTRY_CODE (NG). */
+  country?: string
 }) {
+  const currency = params.currency || DEFAULT_CURRENCY
+  const country = params.country || DEFAULT_COUNTRY
   return request<FlipeetInitResult>('/on-ramp/initialize', {
     amount: Math.round(params.amount),
     asset: DEFAULT_ASSET,
     network: DEFAULT_NETWORK,
-    currency: DEFAULT_CURRENCY,
-    country: DEFAULT_COUNTRY,
+    currency,
+    country,
     beneficiary: {
       holder_type: 'BUSINESS',
       holder_name: params.holderName || 'PawaSave Treasury',

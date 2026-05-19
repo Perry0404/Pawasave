@@ -453,6 +453,8 @@ async function runFlipeet(
   bankCode?: string,
   accountNumber?: string,
   holderName?: string,
+  /** 'NGN' (default) or 'USD' — only applies to on-ramp */
+  depositCurrency: 'NGN' | 'USD' = 'NGN',
 ): Promise<ProviderResult> {
   if (!FLIPEET_CONFIGURED) throw new Error('Flipeet provider unavailable')
 
@@ -473,6 +475,8 @@ async function runFlipeet(
       callbackUrl: `${origin}/api/flipeet-webhook`,
       walletAddress: FLIPEET_CUSTODY_ADDRESS,
       holderName: process.env.RAMP_BENEFICIARY_NAME || 'PawaSave Treasury',
+      currency: depositCurrency,
+      country: depositCurrency === 'USD' ? 'US' : (process.env.FLIPEET_COUNTRY_CODE || 'NG'),
     })
     : await initializeFlipeetOffRamp({
       amount,
@@ -573,9 +577,15 @@ export async function POST(request: NextRequest) {
     const accountNumber = body.accountNumber as string | undefined
     const transactionPin = body.transactionPin as string | undefined
     const holderName = body.holderName as string | undefined
+    const depositCurrency = (body.currency === 'USD' ? 'USD' : 'NGN') as 'NGN' | 'USD'
 
-    if ((type !== 'on' && type !== 'off') || !Number.isFinite(amount) || amount < 100) {
-      return NextResponse.json({ error: 'Amount must be at least ₦100' }, { status: 400 })
+    // USD on-ramp: minimum $1; NGN on-ramp: minimum ₦100
+    const minAmount = depositCurrency === 'USD' ? 1 : 100
+    if ((type !== 'on' && type !== 'off') || !Number.isFinite(amount) || amount < minAmount) {
+      return NextResponse.json(
+        { error: depositCurrency === 'USD' ? 'Minimum deposit is $1' : 'Amount must be at least ₦100' },
+        { status: 400 },
+      )
     }
 
     if (type === 'off' && (!bankCode || !accountNumber)) {
@@ -631,7 +641,7 @@ export async function POST(request: NextRequest) {
 
     const run = async (provider: Provider) => {
       if (provider === 'flint') return runFlint(request, supabase, user.id, type, amount)
-      if (provider === 'flipeet') return runFlipeet(request, supabase, user.id, type, amount, bankCode, accountNumber, holderName)
+      if (provider === 'flipeet') return runFlipeet(request, supabase, user.id, type, amount, bankCode, accountNumber, holderName, depositCurrency)
       return runXend(supabase, user.id, type, amount, bankCode, accountNumber, holderName)
     }
 

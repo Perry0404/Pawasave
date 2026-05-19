@@ -5,6 +5,7 @@ import crypto from 'crypto'
 import { validatePosInvoice, processPosInvoice, registerProxyMember, merchantWalletWithdraw, validateMerchantWalletWithdraw, proxyCryptoToFiatTransfer, proxyFundsTransfer } from '@/lib/xend'
 import {
   FlipeetApiError,
+  FlipeetInitResult,
   getFlipeetRate,
   initializeFlipeetOffRamp,
   initializeFlipeetOnRamp,
@@ -487,24 +488,39 @@ async function runFlipeet(
   }
 
   // ── Call Flipeet API ─────────────────────────────────────────────────────────
-  const result = type === 'on'
-    ? await initializeFlipeetOnRamp({
-      amount,
-      reference,
-      callbackUrl: `${origin}/api/flipeet-webhook`,
-      walletAddress: FLIPEET_CUSTODY_ADDRESS,
-      holderName: process.env.RAMP_BENEFICIARY_NAME || 'PawaSave Treasury',
-      currency: depositCurrency,
-      country: depositCurrency === 'USD' ? 'US' : (process.env.FLIPEET_COUNTRY_CODE || 'NG'),
-    })
-    : await initializeFlipeetOffRamp({
-      amount,
-      reference,
-      callbackUrl: `${origin}/api/flipeet-webhook`,
-      bankCode: bankCode || '',
-      accountNumber: accountNumber || '',
-      holderName: holderName || process.env.RAMP_BENEFICIARY_NAME || 'PawaSave User',
-    })
+  // Wrap in try/catch: if the off-ramp API call fails after the user was debited, we must
+  // refund their balance and mark the tx failed before re-throwing. Without this, the caller's
+  // fallback logic would attempt a second debit via a different provider (double-debit).
+  let result: FlipeetInitResult
+  try {
+    result = type === 'on'
+      ? await initializeFlipeetOnRamp({
+        amount,
+        reference,
+        callbackUrl: `${origin}/api/flipeet-webhook`,
+        walletAddress: FLIPEET_CUSTODY_ADDRESS,
+        holderName: process.env.RAMP_BENEFICIARY_NAME || 'PawaSave Treasury',
+        currency: depositCurrency,
+        country: depositCurrency === 'USD' ? 'US' : (process.env.FLIPEET_COUNTRY_CODE || 'NG'),
+      })
+      : await initializeFlipeetOffRamp({
+        amount,
+        reference,
+        callbackUrl: `${origin}/api/flipeet-webhook`,
+        bankCode: bankCode || '',
+        accountNumber: accountNumber || '',
+        holderName: holderName || process.env.RAMP_BENEFICIARY_NAME || 'PawaSave User',
+      })
+  } catch (apiErr: unknown) {
+    if (type === 'off') {
+      // Refund the user — balance was debited before this API call
+      const rate = await getNgnUsdRateFromFlint(FLINT_API_KEY)
+      const usdcMicro = Math.floor((amount / rate) * 1_000_000)
+      await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: usdcMicro })
+      await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+    }
+    throw apiErr
+  }
 
   if (type === 'on') {
     // On-ramp: insert pending tx after getting provider details
@@ -667,6 +683,13 @@ export async function POST(request: NextRequest) {
       const result = await run(orderedProviders[0])
       return NextResponse.json({ ...result, selectedBy: 'best_rate' })
     } catch (primaryErr: any) {
+      // Never fall back for off-ramps: every run*() debits the user's balance before
+      // calling the provider and refunds on failure. A fallback would debit a second time.
+      if (type === 'off') {
+        const errMsg = formatProviderError(orderedProviders[0], primaryErr)
+        console.error('Ramp off-ramp failure', { provider: orderedProviders[0], primaryErr })
+        return NextResponse.json({ error: errMsg }, { status: 422 })
+      }
       const fallbackProvider = orderedProviders[1]
       if (!fallbackProvider) {
         const errMsg = formatProviderError(orderedProviders[0], primaryErr)

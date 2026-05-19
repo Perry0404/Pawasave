@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
+import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
+
+function timingSafeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder()
+  const aa = enc.encode(a)
+  const bb = enc.encode(b)
+  if (aa.byteLength !== bb.byteLength) return false
+  return crypto.timingSafeEqual(aa, bb)
+}
 
 export async function GET(request: NextRequest) {
   // Simple auth via query param for admin polling
   const pw = request.nextUrl.searchParams.get('pw')
-  if (!pw || pw !== process.env.ADMIN_PASSWORD) {
+  const adminPassword = process.env.ADMIN_PASSWORD || ''
+  if (!pw || !adminPassword || !timingSafeEqual(pw, adminPassword)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

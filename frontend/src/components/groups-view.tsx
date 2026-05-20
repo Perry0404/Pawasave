@@ -28,6 +28,23 @@ export default function GroupsView({ user, wallet }: Props) {
   const [linkCopied, setLinkCopied] = useState(false)
   const [payoutMsg, setPayoutMsg] = useState('')
 
+  // Emergency vote
+  const [showEmergency, setShowEmergency] = useState(false)
+  const [emergencyRequest, setEmergencyRequest] = useState<null | {
+    id: string
+    requester_id: string
+    reason: string
+    amount_kobo: number
+    status: string
+    created_at: string
+    approve_count: number
+    reject_count: number
+    user_voted: boolean
+  }>(null)
+  const [emergencyReason, setEmergencyReason] = useState('')
+  const [emergencyAmount, setEmergencyAmount] = useState('')
+  const [emergencyBusy, setEmergencyBusy] = useState(false)
+
   // Create form
   const [formName, setFormName] = useState('')
   const [formAmount, setFormAmount] = useState('')
@@ -112,6 +129,73 @@ export default function GroupsView({ user, wallet }: Props) {
     await navigator.clipboard.writeText(url)
     setLinkCopied(true)
     setTimeout(() => setLinkCopied(false), 2500)
+  }
+
+  const loadEmergencyData = useCallback(async () => {
+    if (!selected || !user) return
+    const { data: req } = await supabase
+      .from('emergency_requests')
+      .select('*')
+      .eq('group_id', selected.id)
+      .eq('status', 'voting')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (!req) { setEmergencyRequest(null); return }
+    const { data: votes } = await supabase
+      .from('emergency_votes')
+      .select('approve, voter_id')
+      .eq('request_id', req.id)
+    const approveCount = votes?.filter((v) => v.approve).length || 0
+    const rejectCount = votes?.filter((v) => !v.approve).length || 0
+    const userVoted = votes?.some((v) => v.voter_id === user.id) || false
+    setEmergencyRequest({ ...req, approve_count: approveCount, reject_count: rejectCount, user_voted: userVoted })
+  }, [selected, user])
+
+  const submitEmergencyRequest = async () => {
+    if (!user || !selected || !emergencyReason) return
+    const amountKobo = Math.round(parseFloat(emergencyAmount) * 100)
+    if (amountKobo <= 0) return
+    setEmergencyBusy(true)
+    const { data } = await supabase.rpc('request_emergency_payout', {
+      p_group_id: selected.id,
+      p_reason: emergencyReason,
+      p_amount_kobo: amountKobo,
+    })
+    setEmergencyBusy(false)
+    if (data?.ok) {
+      setEmergencyReason('')
+      setEmergencyAmount('')
+      await loadEmergencyData()
+    } else {
+      setFeedback(data?.error || 'Failed to submit request')
+      setTimeout(() => setFeedback(''), 3000)
+    }
+  }
+
+  const castVote = async (approve: boolean) => {
+    if (!user || !emergencyRequest) return
+    setEmergencyBusy(true)
+    const { data } = await supabase.rpc('cast_emergency_vote', {
+      p_request_id: emergencyRequest.id,
+      p_approve: approve,
+    })
+    setEmergencyBusy(false)
+    if (data?.ok) {
+      if (data.disbursed) {
+        setFeedback(`Emergency payout of ${formatNaira(data.amount_kobo)} approved and disbursed!`)
+        setShowEmergency(false)
+        if (selected) openGroup(selected)
+      } else if (data.rejected) {
+        setFeedback('Emergency request was rejected by the group.')
+        setEmergencyRequest(null)
+      } else {
+        await loadEmergencyData()
+      }
+    } else {
+      setFeedback(data?.error || 'Vote failed')
+    }
+    setTimeout(() => setFeedback(''), 4000)
   }
 
   const openGroup = async (group: EsusuGroup) => {
@@ -350,13 +434,104 @@ export default function GroupsView({ user, wallet }: Props) {
               </button>
               <button
                 className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-semibold rounded-lg transition"
-                onClick={() => setFeedback('Emergency vote feature coming soon')}
+                onClick={async () => { if (!showEmergency) await loadEmergencyData(); setShowEmergency(true) }}
               >
                 <ShieldCheck className="w-3.5 h-3.5" /> Emergency Vote
               </button>
             </div>
           </div>
         )}
+
+        {/* Emergency Fund */}
+        <div className="mb-4">
+          <button
+            onClick={async () => {
+              if (!showEmergency) await loadEmergencyData()
+              setShowEmergency((v) => !v)
+            }}
+            className="w-full flex items-center justify-between px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl"
+          >
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-amber-600" />
+              <span className="text-sm font-semibold text-amber-800">Emergency Fund</span>
+              <span className="text-xs font-medium text-amber-600">{formatNaira(selected.emergency_pot_kobo || 0)}</span>
+            </div>
+            <ChevronRight className={`w-4 h-4 text-amber-400 transition-transform ${showEmergency ? 'rotate-90' : ''}`} />
+          </button>
+
+          {showEmergency && (
+            <div className="mt-2 bg-white border border-amber-200 rounded-xl p-4 space-y-3">
+              {emergencyRequest ? (
+                <>
+                  <div>
+                    <p className="text-xs font-bold text-slate-700 mb-1">Active Emergency Request</p>
+                    <p className="text-sm text-slate-600 mb-1">{emergencyRequest.reason}</p>
+                    <p className="text-base font-bold text-amber-600">{formatNaira(emergencyRequest.amount_kobo)}</p>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">{emergencyRequest.approve_count} approve</span>
+                    <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-semibold">{emergencyRequest.reject_count} reject</span>
+                    <span className="text-slate-400">of {members.length} members</span>
+                  </div>
+                  {!emergencyRequest.user_voted ? (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => castVote(true)}
+                        disabled={emergencyBusy}
+                        className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-60 flex items-center justify-center"
+                      >
+                        {emergencyBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Approve'}
+                      </button>
+                      <button
+                        onClick={() => castVote(false)}
+                        disabled={emergencyBusy}
+                        className="flex-1 py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-lg transition disabled:opacity-60 flex items-center justify-center"
+                      >
+                        {emergencyBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reject'}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 text-center">You have voted. Waiting for other members...</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-slate-500">
+                    Request an advance from the group emergency pot (<span className="font-semibold">{formatNaira(selected.emergency_pot_kobo || 0)}</span> available). Requires a simple majority vote from all members.
+                  </p>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Reason</label>
+                    <input
+                      value={emergencyReason}
+                      onChange={(e) => setEmergencyReason(e.target.value)}
+                      placeholder="Medical emergency, school fees..."
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Amount (₦)</label>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      value={emergencyAmount}
+                      onChange={(e) => setEmergencyAmount(e.target.value)}
+                      placeholder={`Max ${formatNaira(selected.emergency_pot_kobo || 0)}`}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    />
+                  </div>
+                  <button
+                    onClick={submitEmergencyRequest}
+                    disabled={emergencyBusy || !emergencyReason || !emergencyAmount}
+                    className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold rounded-lg transition disabled:opacity-60 flex items-center justify-center gap-2"
+                  >
+                    {emergencyBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                    Request Emergency Payout
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Members */}
         <h3 className="text-sm font-semibold text-slate-800 mb-2">Members ({members.length}/{selected.max_members})</h3>

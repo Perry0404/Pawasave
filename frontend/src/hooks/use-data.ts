@@ -516,3 +516,32 @@ export async function getProxyTransfers(limit = 50): Promise<any[]> {
   if (error) throw error
   return data || []
 }
+
+// Register proxy member ID for automatic deposit routing
+export async function registerProxyMember(
+  proxyMemberId: string,
+  provider = 'xend',
+): Promise<any> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  const { data, error } = await supabase.rpc('register_proxy_member', {
+    p_user_id: user.id,
+    p_proxy_member_id: proxyMemberId,
+    p_provider: provider,
+  })
+  if (error) throw error
+  return data
+}
+
+// Get proxy member ID for current user
+export async function getUserProxyMember(): Promise<string | null> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const { data, error } = await supabase.rpc('get_proxy_member_for_user', {
+    p_user_id: user.id,
+  })
+  if (error) return null
+  return data as string | null
+}

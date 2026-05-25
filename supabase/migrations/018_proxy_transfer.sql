@@ -89,9 +89,9 @@ LANGUAGE SQL SECURITY DEFINER AS $$
     pt.amount_usdc_micro,
     pt.description,
     pt.initiated_at,
-    p.email
+    au.email
   FROM public.proxy_transfers pt
-  LEFT JOIN public.profiles p ON pt.initiated_by = p.id
+  LEFT JOIN auth.users au ON pt.initiated_by = au.id
   ORDER BY pt.initiated_at DESC
   LIMIT p_limit;
 $$;

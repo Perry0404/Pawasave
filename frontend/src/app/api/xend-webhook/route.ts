@@ -81,8 +81,29 @@ export async function POST(request: NextRequest) {
         p_user_id: tx.user_id,
         p_usdc_micro: usdcMicro,
       })
+    } else if (memberId) {
+      // No matching transaction found — check if this is a proxy member deposit
+      // Auto-route to the user mapped to this proxy member ID
+      const { data: userId } = await supabase.rpc('get_user_for_proxy_member', {
+        p_proxy_member_id: memberId,
+      })
+
+      if (userId) {
+        // Auto-process proxy deposit
+        const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
+        const usdcMicro = Math.floor((amount || 0) / rate * 1_000_000)
+
+        if (usdcMicro > 0) {
+          await supabase.rpc('process_proxy_deposit', {
+            p_user_id: userId,
+            p_proxy_member_id: memberId,
+            p_amount_usdc_micro: usdcMicro,
+            p_reference: transactionId,
+          })
+        }
+      }
     }
-    // If no pending tx found, this is either already processed (idempotent) or an unknown Xend event — ignore safely.
+    // If no pending tx and no proxy member mapping, ignore (idempotent)
   } else if (status === 'failed' || event.includes('failed')) {
     // Find the pending transaction to refund
     const { data: tx } = await supabase

@@ -319,12 +319,33 @@ export default function VaultView({ wallet, refresh }: Props) {
             <p className="text-xs text-emerald-700 font-medium">{FLEX_APY}% APY · XEND Money Market</p>
           </div>
 
+          {/* Balance breakdown */}
+          <div className="bg-slate-50 rounded-lg p-3 mb-4 space-y-2">
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-600">Available balance:</span>
+              <span className="font-bold text-slate-900">
+                {formatNaira(Math.round(microUsdcToKobo(
+                  (wallet?.usdc_balance_micro || 0) + (wallet?.cngn_pool_micro || 0),
+                  rate
+                )))}
+              </span>
+            </div>
+            <div className="flex justify-between text-xs text-slate-500">
+              <span>Wallet:</span>
+              <span>{formatUsdc(wallet?.usdc_balance_micro || 0)}</span>
+            </div>
+            <div className="flex justify-between text-xs text-slate-500">
+              <span>Yield pool:</span>
+              <span>{formatUsdc(wallet?.cngn_pool_micro || 0)}</span>
+            </div>
+          </div>
+
           <AmountInput
             label={flexAction === 'save' ? 'Amount to save (₦)' : 'Amount to withdraw (₦)'}
             sub={
               flexAction === 'save'
                 ? `Available naira: ${formatNaira(wallet.naira_balance_kobo)}`
-                : `In cNGN vault: ${formatNaira(cngnPoolKobo + savingsKobo)} total`
+                : `Total vault: ${formatNaira(cngnPoolKobo + savingsKobo)}`
             }
           />
           <QuickAmounts />

@@ -330,6 +330,24 @@ export default function GoalsView({ wallet, refresh }: Props) {
 
         {selected.status === 'active' && (
           <div className="space-y-3">
+            {/* Balance info */}
+            {!isTargetMet && (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-xs text-slate-600">Available to contribute:</span>
+                  <span className="text-sm font-bold text-slate-900">
+                    {formatNaira(Math.round(microUsdcToKobo(
+                      (wallet?.usdc_balance_micro || 0) + (wallet?.cngn_pool_micro || 0),
+                      rate
+                    )))}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  • {formatUsdc(wallet?.usdc_balance_micro || 0)} in wallet
+                  <br />• {formatUsdc(wallet?.cngn_pool_micro || 0)} in yield pool
+                </p>
+              </div>
+            )}
             {!isTargetMet ? (
               <button
                 onClick={() => handleContribute(selected)}

@@ -489,3 +489,30 @@ export async function setGoalAutoContribute(goalId: string, enabled: boolean): P
   })
   if (error) throw error
 }
+
+// ── Proxy Transfers ──────────────────────────────────────────────────────────
+// Admin function: Transfer funds between master wallet and proxy member wallets
+
+export async function proxyTransfer(
+  proxyMemberId: string,
+  action: 'CREDIT' | 'DEBIT',
+  amountUsdcMicro: number,
+  description?: string,
+): Promise<any> {
+  const { data, error } = await supabase.rpc('proxy_transfer', {
+    p_proxy_member_id: proxyMemberId,
+    p_action: action,
+    p_amount_usdc_micro: amountUsdcMicro,
+    p_description: description,
+  })
+  if (error) throw error
+  return data
+}
+
+export async function getProxyTransfers(limit = 50): Promise<any[]> {
+  const { data, error } = await supabase.rpc('get_proxy_transfers', {
+    p_limit: limit,
+  })
+  if (error) throw error
+  return data || []
+}

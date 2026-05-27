@@ -81,6 +81,53 @@ export async function POST(request: NextRequest) {
       .eq('reference', reference)
       .single()
     if (existingTx) return NextResponse.json({ ok: true, already_processed: true })
+
+    // No matching transaction found — check if this is a proxy member deposit
+    // Auto-route to the user mapped to this Flipeet reference or proxy member ID
+    // Flipeet may send beneficiary.wallet_address or similar identifier
+    const beneficiaryId = readString(
+      data?.beneficiary?.wallet_address,
+      data?.beneficiary?.id,
+      (body as any).beneficiary?.wallet_address,
+      data?.memberId,
+    )
+
+    if (beneficiaryId && isCompletedStatus(status)) {
+      const { data: userId } = await supabase.rpc('get_user_for_proxy_member', {
+        p_proxy_member_id: beneficiaryId,
+      })
+
+      if (userId) {
+        // Auto-process proxy deposit
+        const destinationUsdcDirect = readNumber(
+          data?.destination?.amount,
+          data?.destination?.amount_usd,
+        )
+        let usdcMicro: number
+        if (destinationUsdcDirect > 0) {
+          usdcMicro = Math.floor(destinationUsdcDirect * 1_000_000)
+        } else {
+          const amountNaira = readNumber(data?.source?.amount, data?.amount, (body as any).amount)
+          if (amountNaira > 0) {
+            const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
+            usdcMicro = Math.floor((amountNaira / rate) * 1_000_000)
+          } else {
+            usdcMicro = 0
+          }
+        }
+
+        if (usdcMicro > 0) {
+          await supabase.rpc('process_proxy_deposit', {
+            p_user_id: userId,
+            p_proxy_member_id: beneficiaryId,
+            p_amount_usdc_micro: usdcMicro,
+            p_reference: reference,
+          })
+        }
+        return NextResponse.json({ ok: true, auto_routed: true })
+      }
+    }
+
     return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
   }
 

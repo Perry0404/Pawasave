@@ -551,19 +551,40 @@ async function runFlipeet(
       .update({ paychant_tx_id: result.reference || null })
       .eq('reference', reference)
 
-    // Send USDC from XEND custody wallet to Flipeet's receiving address.
+    // Extract deposit address from Flipeet response (required for each off-ramp)
     const flipeetDepositAddress = FLIPEET_OFFRAMP_ADDRESS || result.deposit?.address
-    if (flipeetDepositAddress && XEND_CONFIGURED) {
+    if (!flipeetDepositAddress) {
+      console.warn('Flipeet off-ramp initialized but no deposit address in response:', { reference, result })
+      throw new Error('Flipeet provider did not return deposit address. Please contact support.')
+    }
+
+    // Log the deposit address for audit trail
+    await supabase.rpc('set_transaction_deposit_address', {
+      p_reference: reference,
+      p_deposit_address: flipeetDepositAddress,
+    })
+
+    // Send USDC from XEND custody wallet to Flipeet's receiving address.
+    if (XEND_CONFIGURED) {
       const rate = await getNgnUsdRateFromFlint(FLINT_API_KEY)
       const usdcAmount = amount / rate
       const usdcMicro = Math.floor(usdcAmount * 1_000_000)
       try {
-        await merchantWalletWithdraw({
+        const xendResult = await merchantWalletWithdraw({
           destinationAddress: flipeetDepositAddress,
           amount: usdcAmount,
           description: `PawaSave off-ramp ${reference}`,
           reference,
         })
+
+        // Store custody transaction ID for audit trail
+        if (xendResult?.transaction_id) {
+          await supabase.rpc('set_transaction_deposit_address', {
+            p_reference: reference,
+            p_deposit_address: flipeetDepositAddress,
+            p_custody_tx_id: xendResult.transaction_id,
+          })
+        }
       } catch (xendErr: any) {
         // Refund the user since XEND send failed after we debited them
         await supabase.rpc('credit_wallet', {
@@ -572,9 +593,12 @@ async function runFlipeet(
           p_usdc_micro: usdcMicro,
         })
         await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
-        console.error('XEND on-chain withdrawal failed for Flipeet off-ramp:', xendErr)
+        console.error('XEND on-chain withdrawal failed for Flipeet off-ramp:', { reference, xendErr })
         throw new Error('Could not send USDC to off-ramp provider. ' + (xendErr.message || 'Please try again.'))
       }
+    } else {
+      console.warn('XEND not configured but required for Flipeet off-ramp deposit to:', flipeetDepositAddress)
+      throw new Error('Payment provider not configured. Please contact support.')
     }
   }
 

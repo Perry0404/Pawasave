@@ -36,8 +36,7 @@ CREATE OR REPLACE VIEW public.offramp_audit AS
     provider_deposit_address,
     provider_custody_tx_id,
     status,
-    created_at,
-    updated_at
+    created_at
   FROM public.transactions
   WHERE type = 'withdrawal'
   ORDER BY created_at DESC;

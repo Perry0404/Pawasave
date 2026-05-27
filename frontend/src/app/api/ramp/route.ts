@@ -552,17 +552,29 @@ async function runFlipeet(
       .eq('reference', reference)
 
     // Extract deposit address from Flipeet response (required for each off-ramp)
-    const flipeetDepositAddress = FLIPEET_OFFRAMP_ADDRESS || result.deposit?.address
+    // For off-ramps, Flipeet returns the deposit address where we send USDC
+    const flipeetDepositAddress = FLIPEET_OFFRAMP_ADDRESS || result.deposit?.address || result.address
     if (!flipeetDepositAddress) {
-      console.warn('Flipeet off-ramp initialized but no deposit address in response:', { reference, result })
+      console.error('Flipeet off-ramp response missing address:', {
+        reference,
+        result: JSON.stringify(result, null, 2),
+        hasDeposit: !!result.deposit,
+        hasAddress: !!result.address,
+      })
       throw new Error('Flipeet provider did not return deposit address. Please contact support.')
     }
 
-    // Log the deposit address for audit trail
-    await supabase.rpc('set_transaction_deposit_address', {
-      p_reference: reference,
-      p_deposit_address: flipeetDepositAddress,
-    })
+    console.info('Flipeet off-ramp deposit address:', { reference, flipeetDepositAddress: flipeetDepositAddress.substring(0, 10) + '...' })
+
+    // Log the deposit address for audit trail (best-effort; RPC may not exist if migration 021 not run)
+    try {
+      await supabase.rpc('set_transaction_deposit_address', {
+        p_reference: reference,
+        p_deposit_address: flipeetDepositAddress,
+      })
+    } catch (auditErr) {
+      console.warn('Could not log deposit address (migration 021 may not be run):', auditErr)
+    }
 
     // Send USDC from XEND custody wallet to Flipeet's receiving address.
     if (XEND_CONFIGURED) {
@@ -570,6 +582,7 @@ async function runFlipeet(
       const usdcAmount = amount / rate
       const usdcMicro = Math.floor(usdcAmount * 1_000_000)
       try {
+        console.info('Sending USDC via Xend:', { reference, usdcAmount, flipeetDepositAddress: flipeetDepositAddress.substring(0, 10) + '...' })
         const xendResult = await merchantWalletWithdraw({
           destinationAddress: flipeetDepositAddress,
           amount: usdcAmount,
@@ -577,13 +590,17 @@ async function runFlipeet(
           reference,
         })
 
-        // Store custody transaction ID for audit trail
+        // Store custody transaction ID for audit trail (best-effort)
         if (xendResult?.transaction_id) {
-          await supabase.rpc('set_transaction_deposit_address', {
-            p_reference: reference,
-            p_deposit_address: flipeetDepositAddress,
-            p_custody_tx_id: xendResult.transaction_id,
-          })
+          try {
+            await supabase.rpc('set_transaction_deposit_address', {
+              p_reference: reference,
+              p_deposit_address: flipeetDepositAddress,
+              p_custody_tx_id: xendResult.transaction_id,
+            })
+          } catch (auditErr) {
+            console.warn('Could not log custody TX ID (migration 021 may not be run):', auditErr)
+          }
         }
       } catch (xendErr: any) {
         // Refund the user since XEND send failed after we debited them

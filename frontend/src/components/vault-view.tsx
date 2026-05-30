@@ -12,16 +12,17 @@ interface Props {
 }
 
 const LOCK_DURATIONS = [
-  { days: 90, label: '90 Days', apy: 30.0 },
-  { days: 180, label: '6 Months', apy: 49.7 },
-  { days: 365, label: '1 Year', apy: 50.0 },
+  { days: 30, label: '30 Days', apy: 4.14 },
+  { days: 90, label: '90 Days', apy: 12.41 },
+  { days: 180, label: '6 Months', apy: 24.82 },
+  { days: 365, label: '1 Year', apy: 49.7 },
 ]
 
 // Only fixed/locked savings plan
 type SavingsPlan = null | 'fixed'
 type FlexAction = 'save' | 'withdraw'
-const FLEXIBLE_APY = 27   // Default flexible savings (auto-allocated from deposits)
-const FIXED_APY_BASE = 30 // Minimum fixed APY (90 days)
+const FLEXIBLE_APY = 27   // Ajo (flexible savings) — auto-allocated from deposits
+const FIXED_APY_MAX = 49.7 // Maximum fixed APY (annual rate)
 
 export default function VaultView({ wallet, refresh }: Props) {
   const [plan, setPlan] = useState<SavingsPlan>(null)
@@ -138,7 +139,7 @@ export default function VaultView({ wallet, refresh }: Props) {
           <p className="text-amber-100 text-xs font-medium uppercase tracking-wider">Savings Vault</p>
         </div>
         <span className="text-xs font-semibold bg-white/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-          <TrendingUp className="w-3 h-3" /> Up to 50% APY
+          <TrendingUp className="w-3 h-3" /> Up to {FIXED_APY_MAX}% APY
         </span>
       </div>
       <p className="text-3xl font-bold tracking-tight">{formatNaira(cngnTotalKobo)}</p>
@@ -211,7 +212,7 @@ export default function VaultView({ wallet, refresh }: Props) {
 
         <h2 className="text-base font-bold text-slate-900 mb-1">Lock your savings</h2>
         <p className="text-xs text-slate-500 mb-4">
-          All deposits automatically earn 27% APY in flexible savings. Lock additional funds for higher returns (30–50% APY depending on duration).
+          All deposits automatically earn 27% APY in Ajo (flexible savings). Lock additional funds for higher returns (4.14–49.7% effective APY based on duration).
         </p>
 
         {/* Fixed/Locked Savings */}
@@ -229,7 +230,7 @@ export default function VaultView({ wallet, refresh }: Props) {
                 <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-purple-500 transition" />
               </div>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Time-lock your savings for 90 days, 6 months, or 1 year. Earn 30–50% APY (higher for longer locks) — locked until maturity for disciplined savers.
+                Time-lock your savings for 30 days, 90 days, 6 months, or 1 year. Earn 4.14–49.7% effective returns (higher for longer locks) — locked until maturity.
               </p>
               <div className="flex items-center gap-3 mt-3 flex-wrap">
                 {LOCK_DURATIONS.map(d => (

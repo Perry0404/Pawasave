@@ -551,72 +551,11 @@ async function runFlipeet(
       .update({ paychant_tx_id: result.reference || null })
       .eq('reference', reference)
 
-    // Extract deposit address from Flipeet response (required for each off-ramp)
-    // For off-ramps, Flipeet returns the deposit address where we send USDC
-    const flipeetDepositAddress = FLIPEET_OFFRAMP_ADDRESS || result.deposit?.address || result.address
-    if (!flipeetDepositAddress) {
-      console.error('Flipeet off-ramp response missing address:', {
-        reference,
-        result: JSON.stringify(result, null, 2),
-        hasDeposit: !!result.deposit,
-        hasAddress: !!result.address,
-      })
-      throw new Error('Flipeet provider did not return deposit address. Please contact support.')
-    }
-
-    console.info('Flipeet off-ramp deposit address:', { reference, flipeetDepositAddress: flipeetDepositAddress.substring(0, 10) + '...' })
-
-    // Log the deposit address for audit trail (best-effort; RPC may not exist if migration 021 not run)
-    try {
-      await supabase.rpc('set_transaction_deposit_address', {
-        p_reference: reference,
-        p_deposit_address: flipeetDepositAddress,
-      })
-    } catch (auditErr) {
-      console.warn('Could not log deposit address (migration 021 may not be run):', auditErr)
-    }
-
-    // Send USDC from XEND custody wallet to Flipeet's receiving address.
-    if (XEND_CONFIGURED) {
-      const rate = await getNgnUsdRateFromFlint(FLINT_API_KEY)
-      const usdcAmount = amount / rate
-      const usdcMicro = Math.floor(usdcAmount * 1_000_000)
-      try {
-        console.info('Sending USDC via Xend:', { reference, usdcAmount, flipeetDepositAddress: flipeetDepositAddress.substring(0, 10) + '...' })
-        const xendResult = await merchantWalletWithdraw({
-          destinationAddress: flipeetDepositAddress,
-          amount: usdcAmount,
-          description: `PawaSave off-ramp ${reference}`,
-          reference,
-        })
-
-        // Store custody transaction ID for audit trail (best-effort)
-        if (xendResult?.transaction_id) {
-          try {
-            await supabase.rpc('set_transaction_deposit_address', {
-              p_reference: reference,
-              p_deposit_address: flipeetDepositAddress,
-              p_custody_tx_id: xendResult.transaction_id,
-            })
-          } catch (auditErr) {
-            console.warn('Could not log custody TX ID (migration 021 may not be run):', auditErr)
-          }
-        }
-      } catch (xendErr: any) {
-        // Refund the user since XEND send failed after we debited them
-        await supabase.rpc('credit_wallet', {
-          p_user_id: userId,
-          p_naira_kobo: 0,
-          p_usdc_micro: usdcMicro,
-        })
-        await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
-        console.error('XEND on-chain withdrawal failed for Flipeet off-ramp:', { reference, xendErr })
-        throw new Error('Could not send USDC to off-ramp provider. ' + (xendErr.message || 'Please try again.'))
-      }
-    } else {
-      console.warn('XEND not configured but required for Flipeet off-ramp deposit to:', flipeetDepositAddress)
-      throw new Error('Payment provider not configured. Please contact support.')
-    }
+    // NOTE: Flipeet generates its own deposit address dynamically per transaction.
+    // We do NOT send USDC ourselves. Instead, we wait for Flipeet's webhook to confirm
+    // that they've processed the off-ramp (received NGN payment from user's bank and
+    // credited our custody address). Then our webhook marks the transaction completed.
+    console.info('Flipeet off-ramp initialized:', { reference, flipeetReference: result.reference })
   }
 
   // Only record fee AFTER debit succeeds — prevents phantom revenue from failed txs

@@ -32,6 +32,8 @@ export default function VaultView({ wallet, refresh }: Props) {
   const [busy, setBusy] = useState(false)
   const [lockDuration, setLockDuration] = useState(90)
   const [liveRate, setLiveRate] = useState<number>(getRate())
+  const [showLockConsent, setShowLockConsent] = useState(false)
+  const [lockConsented, setLockConsented] = useState(false)
   const { locks, loading: locksLoading, refresh: refreshLocks } = useSavingsLocks()
 
   useEffect(() => {
@@ -93,6 +95,11 @@ export default function VaultView({ wallet, refresh }: Props) {
   }
 
   const executeFixed = async () => {
+    if (!lockConsented) {
+      setShowLockConsent(true)
+      return
+    }
+
     const naira = parseFloat(amount)
     if (!naira || naira < 100) { flash('Minimum ₦100'); return }
     const kobo = Math.round(naira * 100)
@@ -106,6 +113,7 @@ export default function VaultView({ wallet, refresh }: Props) {
       refreshLocks()
       setAmount('')
       refresh()
+      setLockConsented(false)
     } catch (e: any) {
       flash(e.message || 'Operation failed')
     } finally {
@@ -397,6 +405,72 @@ export default function VaultView({ wallet, refresh }: Props) {
                 </div>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Consent Modal for Locking */}
+      {showLockConsent && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-200 p-5">
+              <h2 className="text-lg font-bold text-slate-900">Confirm Lock Agreement</h2>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
+                <p className="text-sm font-semibold text-purple-900 mb-2">Lock Terms</p>
+                <p className="text-xs text-purple-800 leading-relaxed">
+                  You are about to lock <strong>{formatUsdc(lockUsdc)}</strong> for <strong>{lockDuration} days</strong> at <strong>{selectedAPY}%</strong> interest.
+                </p>
+              </div>
+
+              <div className="bg-slate-50 rounded-xl p-4 space-y-3">
+                <p className="text-sm font-semibold text-slate-900">Terms & Conditions:</p>
+                <ul className="text-xs text-slate-600 space-y-2">
+                  <li>✓ <strong>Your funds are locked until {new Date(Date.now() + lockDuration * 86400000).toLocaleDateString()}.</strong></li>
+                  <li>✓ You cannot withdraw before this date.</li>
+                  <li>✓ If you attempt early withdrawal, you forfeit <strong>ALL interest earned</strong>.</li>
+                  <li>✓ The forfeited interest will be credited to PawaSave as platform revenue.</li>
+                  <li>✓ You will receive your principal amount minus a 0.5% early withdrawal penalty.</li>
+                  <li>✓ Upon maturity, you receive principal + all accrued interest.</li>
+                </ul>
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="checkbox"
+                  checked={lockConsented}
+                  onChange={(e) => setLockConsented(e.target.checked)}
+                  className="w-4 h-4 mt-1"
+                />
+                <p className="text-xs text-slate-600">
+                  I understand the lock terms and accept that my funds are locked until maturity. I also understand that early withdrawal forfeits all interest.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border-t border-slate-200 p-5 flex gap-3">
+              <button
+                onClick={() => {
+                  setShowLockConsent(false)
+                  setLockConsented(false)
+                }}
+                className="flex-1 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowLockConsent(false)
+                  executeFixed()
+                }}
+                disabled={!lockConsented}
+                className="flex-1 py-2.5 text-sm font-semibold text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition disabled:opacity-50"
+              >
+                Lock & Confirm
+              </button>
+            </div>
           </div>
         </div>
       )}

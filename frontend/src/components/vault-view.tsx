@@ -108,7 +108,7 @@ export default function VaultView({ wallet, refresh }: Props) {
     try {
       const selectedDuration = LOCK_DURATIONS.find(d => d.days === lockDuration)
       const selectedAPY = selectedDuration?.apy || LOCK_DURATIONS[0].apy
-      await lockSavings(usdc, kobo, lockDuration, selectedAPY)
+      await lockSavings(usdc, kobo, lockDuration, selectedAPY, true)
       flash(`Locked ${formatUsdc(usdc)} for ${lockDuration} days at ${selectedAPY}% APY`)
       refreshLocks()
       setAmount('')

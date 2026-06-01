@@ -71,7 +71,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
 
     setBusy(true)
     try {
-      await createSavingsGoal(pendingGoalData)
+      await createSavingsGoal({ ...pendingGoalData, userConsentAccepted: true })
       setTitle(''); setTargetAmount(''); setContributionAmount('')
       await refreshGoals()
       setView('list')

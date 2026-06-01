@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import { formatNaira, formatUsdc } from '@/lib/format'
 import type { AdminFeeSummary, AdminUserStats, AdminTxVolume, PlatformFee } from '@/lib/types'
-import { Shield, DollarSign, Users, Activity, TrendingUp, Loader2, Lock, AlertTriangle, ArrowUpRight, ArrowDownLeft, Eye, EyeOff, LogOut, Banknote, ChevronDown } from 'lucide-react'
+import { Shield, DollarSign, Users, Activity, TrendingUp, Loader2, Lock, AlertTriangle, ArrowUpRight, ArrowDownLeft, Eye, EyeOff, LogOut, Banknote, ChevronDown, BarChart3 } from 'lucide-react'
+import Link from 'next/link'
 
 const ADMIN_STORAGE_KEY = 'pawa_admin_auth'
 
@@ -187,9 +188,14 @@ export default function AdminView() {
           <Shield className="w-5 h-5 text-emerald-600" />
           <h1 className="text-lg font-bold text-slate-900">Admin Dashboard</h1>
         </div>
-        <button onClick={handleLogout} className="text-slate-400 hover:text-slate-600 p-2 transition">
-          <LogOut className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          <Link href="/admin/revenue" className="text-slate-400 hover:text-slate-600 p-2 transition" title="Revenue Analytics">
+            <BarChart3 className="w-4 h-4" />
+          </Link>
+          <button onClick={handleLogout} className="text-slate-400 hover:text-slate-600 p-2 transition">
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {dashboardError && (

@@ -279,7 +279,7 @@ export function useSavingsLocks() {
   return { locks, loading, refresh }
 }
 
-export async function lockSavings(usdcMicro: number, kobo: number, durationDays: number, apy: number) {
+export async function lockSavings(usdcMicro: number, kobo: number, durationDays: number, apy: number, userConsentAccepted: boolean = true) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
@@ -289,6 +289,7 @@ export async function lockSavings(usdcMicro: number, kobo: number, durationDays:
     p_kobo: kobo,
     p_duration_days: durationDays,
     p_apy: apy,
+    p_user_consent_accepted: userConsentAccepted,
   })
   if (error) throw error
   return data
@@ -297,6 +298,30 @@ export async function lockSavings(usdcMicro: number, kobo: number, durationDays:
 export async function withdrawLock(lockId: string, early: boolean = false) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
+
+  // If early withdrawal, record the forfeiture
+  if (early) {
+    // Fetch lock details to calculate forfeited interest
+    const { data: lock } = await supabase
+      .from('savings_locks')
+      .select('id, amount_usdc_micro, effective_rate_at_creation, created_at')
+      .eq('id', lockId)
+      .single()
+    
+    if (lock) {
+      const daysHeld = Math.floor((Date.now() - new Date(lock.created_at).getTime()) / 86400000)
+      const rate = lock.effective_rate_at_creation || 50
+      const forfeited = Math.floor((lock.amount_usdc_micro * rate * daysHeld) / (100 * 365))
+      
+      if (forfeited > 0) {
+        await supabase.rpc('record_lock_forfeiture', {
+          p_lock_id: lockId,
+          p_user_id: user.id,
+          p_forfeited_interest_usdc_micro: forfeited,
+        })
+      }
+    }
+  }
 
   const { data: ok, error } = await supabase.rpc('withdraw_lock', {
     p_user_id: user.id,
@@ -400,6 +425,7 @@ export async function createSavingsGoal(opts: {
   frequency: 'daily' | 'weekly' | 'monthly'
   contribKobo: number
   contribUsdc: number
+  userConsentAccepted?: boolean
 }) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
@@ -411,6 +437,8 @@ export async function createSavingsGoal(opts: {
     frequency:               opts.frequency,
     contribution_naira_kobo: opts.contribKobo,
     contribution_usdc_micro: opts.contribUsdc,
+    user_consent_accepted:   opts.userConsentAccepted ?? true,
+    consent_accepted_at:     opts.userConsentAccepted ? new Date().toISOString() : null,
   })
   if (error) throw error
 }
@@ -475,6 +503,27 @@ export async function completeSavingsGoal(goalId: string): Promise<number> {
 export async function breakSavingsGoal(goalId: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
+
+  // Fetch goal details to calculate forfeited interest
+  const { data: goal } = await supabase
+    .from('savings_goals')
+    .select('id, saved_usdc_micro, started_at')
+    .eq('id', goalId)
+    .single()
+  
+  if (goal) {
+    const daysHeld = Math.floor((Date.now() - new Date(goal.started_at).getTime()) / 86400000)
+    const forfeited = Math.floor((goal.saved_usdc_micro * 50 * daysHeld) / (100 * 365))
+    
+    if (forfeited > 0) {
+      await supabase.rpc('record_goal_forfeiture', {
+        p_goal_id: goalId,
+        p_user_id: user.id,
+        p_forfeited_interest_usdc_micro: forfeited,
+      })
+    }
+  }
+
   const { error } = await supabase.rpc('break_savings_goal', {
     p_goal_id: goalId,
     p_user_id: user.id,

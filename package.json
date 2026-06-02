@@ -14,6 +14,10 @@
     "deploy:local": "hardhat run scripts/deploy-pauto.ts --network localhost",
     "deploy:sepolia": "hardhat run scripts/deploy-pauto.ts --network baseSepolia",
     "deploy:mainnet": "hardhat run scripts/deploy-pauto.ts --network baseMainnet",
+    "deploy:lend:local": "hardhat run scripts/deploy-lend.ts --network localhost",
+    "deploy:lend:sepolia": "hardhat run scripts/deploy-lend.ts --network baseSepolia",
+    "deploy:lend:mainnet": "hardhat run scripts/deploy-lend.ts --network baseMainnet",
+    "oracle:keeper": "ts-node scripts/oracle-keeper.ts",
     "verify": "hardhat verify",
     "clean": "hardhat clean"
   },

@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/auto-contribute",
       "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron/harvest-vault",
+      "schedule": "0 */6 * * *"
     }
   ]
 }

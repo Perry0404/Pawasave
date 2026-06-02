@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/cron/harvest-vault",
-      "schedule": "0 */6 * * *"
+      "schedule": "0 2 * * *"
     }
   ]
 }

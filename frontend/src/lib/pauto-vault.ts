@@ -1,5 +1,6 @@
 import { ethers } from "ethers"
 import type { Contract, Signer, TransactionResponse } from "ethers"
+import { CONTRACTS } from "./contracts"
 
 /**
  * P-AUTO Vault Frontend Integration Library
@@ -363,7 +364,7 @@ export class PAutoVaultManager {
  * Initialize P-AUTO vault manager (browser-compatible)
  */
 export async function initPAutoManager(
-  vaultAddress: string
+  vaultAddress: string = CONTRACTS.PAUTO_VAULT
 ): Promise<PAutoVaultManager> {
   if (!window.ethereum) throw new Error("MetaMask not detected")
 

@@ -1,0 +1,48 @@
+{
+  "name": "pawasave-pauto",
+  "version": "1.0.0",
+  "description": "Pawasave P-AUTO Smart Contract Testing & Deployment",
+  "main": "hardhat.config.ts",
+  "scripts": {
+    "test": "hardhat test",
+    "test:watch": "hardhat test --watch",
+    "test:gas": "REPORT_GAS=true hardhat test",
+    "test:coverage": "hardhat coverage",
+    "test:grep": "hardhat test --grep",
+    "node": "hardhat node",
+    "compile": "hardhat compile",
+    "deploy:local": "hardhat run scripts/deploy-pauto.ts --network localhost",
+    "deploy:sepolia": "hardhat run scripts/deploy-pauto.ts --network baseSepolia",
+    "deploy:mainnet": "hardhat run scripts/deploy-pauto.ts --network baseMainnet",
+    "verify": "hardhat verify",
+    "clean": "hardhat clean"
+  },
+  "keywords": [
+    "ethereum",
+    "solidity",
+    "vault",
+    "erc4626",
+    "yield",
+    "base"
+  ],
+  "author": "Pawasave",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@nomiclabs/hardhat-ethers": "^2.2.3",
+    "@openzeppelin/contracts": "^4.9.0",
+    "@types/chai": "^4.3.5",
+    "@types/mocha": "^10.0.1",
+    "@types/node": "^20.0.0",
+    "chai": "^4.3.7",
+    "dotenv": "^16.0.3",
+    "ethers": "^6.7.1",
+    "hardhat": "^2.17.0",
+    "hardhat-gas-reporter": "^1.0.9",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.1.6"
+  },
+  "dependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.0.5",
+    "ethers": "^6.10.0"
+  }
+}

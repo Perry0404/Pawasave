@@ -39,12 +39,14 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
   const [error,    setError]    = useState<string | null>(null)
 
   const readProvider = new ethers.JsonRpcProvider(BASE_RPC)
-  const lendRO  = new ethers.Contract(ADDRESSES.LEND,  LEND_ABI,  readProvider)
+  const lendRO  = ADDRESSES.LEND ? new ethers.Contract(ADDRESSES.LEND, LEND_ABI,  readProvider) : null
   const cngnRO  = new ethers.Contract(ADDRESSES.CNGN,  ERC20_ABI, readProvider)
   const usdcRO  = new ethers.Contract(ADDRESSES.USDC,  ERC20_ABI, readProvider)
 
+  const b = (v: any): bigint => BigInt(v ?? 0)
+
   const fetchStats = useCallback(async () => {
-    if (!ADDRESSES.LEND) return
+    if (!lendRO) return
     try {
       const [assets, borrows, cash, supplyAPY, borrowAPR, rate, rf, cf, of, paused] =
         await Promise.all([
@@ -59,19 +61,24 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
           lendRO.originationFeeMantissa(),
           lendRO.paused(),
         ])
-      const util = assets > 0n ? Number((borrows * 100n) / assets) : 0
-      setStats({ totalAssets: assets, totalBorrows: borrows, cash, supplyAPY, borrowAPR,
-        utilization: util, exchangeRate: rate, reserveFactor: rf, collatFactor: cf,
-        originationFee: of, paused })
+      const ba = b(assets), bb = b(borrows)
+      const util = ba > 0n ? Number((bb * 100n) / ba) : 0
+      setStats({
+        totalAssets: ba, totalBorrows: bb, cash: b(cash),
+        supplyAPY: b(supplyAPY), borrowAPR: b(borrowAPR),
+        utilization: util, exchangeRate: b(rate),
+        reserveFactor: b(rf), collatFactor: b(cf),
+        originationFee: b(of), paused: Boolean(paused),
+      })
     } catch (e: any) {
       console.error("fetchStats error:", e)
     }
   }, [])
 
   const fetchPosition = useCallback(async () => {
-    if (!address || !ADDRESSES.LEND) return
+    if (!address || !lendRO) return
     try {
-      const [shares, debt, usdcCol, colVal, limit, healthy, cngnBal, usdcBal, rate] =
+      const [shares, debt, usdcCol, colVal, limit, healthy, cngnBal, usdcBal] =
         await Promise.all([
           lendRO.balanceOf(address),
           lendRO.borrowBalanceCurrent(address),
@@ -81,13 +88,18 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
           lendRO.isHealthy(address),
           cngnRO.balanceOf(address),
           usdcRO.balanceOf(address),
-          lendRO.exchangeRate(),
         ])
-      const total = await lendRO.totalSupply()
-      const suppliedValue = total > 0n ? (shares * (await lendRO.totalPoolAssets())) / total : 0n
-      setPosition({ psNgnShares: shares, suppliedValue, borrowDebt: debt,
-        usdcCollateral: usdcCol, collateralValue: colVal, borrowLimit: limit,
-        healthy, cngnBalance: cngnBal, usdcBalance: usdcBal })
+      const total      = b(await lendRO.totalSupply())
+      const poolAssets = b(await lendRO.totalPoolAssets())
+      const bShares    = b(shares)
+      const suppliedValue = total > 0n ? (bShares * poolAssets) / total : 0n
+      setPosition({
+        psNgnShares: bShares, suppliedValue,
+        borrowDebt: b(debt), usdcCollateral: b(usdcCol),
+        collateralValue: b(colVal), borrowLimit: b(limit),
+        healthy: Boolean(healthy),
+        cngnBalance: b(cngnBal), usdcBalance: b(usdcBal),
+      })
     } catch (e: any) {
       console.error("fetchPosition error:", e)
     }
@@ -179,7 +191,7 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
 
   async function repayFull() {
     await run(async () => {
-      const debt = await lendRO.borrowBalanceCurrent(address!)
+      const debt = await lendRO!.borrowBalanceCurrent(address!)
       const buffer = debt / 1000n + 1000n
       await ensureApproval(ADDRESSES.CNGN, ADDRESSES.LEND, debt + buffer)
       const tx = await lendRW().repay(address!, 2n ** 256n - 1n)

@@ -4,6 +4,13 @@ import "./globals.css"
 export const metadata: Metadata = {
   title: "PawaSave Protocol — cNGN Lending Pool",
   description: "The first cNGN lending pool on Base. Supply cNGN to earn yield. Borrow cNGN against USDC collateral.",
+  metadataBase: new URL("https://protocol.pawasave.xyz"),
+  openGraph: {
+    title: "PawaSave Protocol",
+    description: "The first cNGN lending pool on Base.",
+    url: "https://protocol.pawasave.xyz",
+    siteName: "PawaSave Protocol",
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

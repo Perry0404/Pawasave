@@ -35,10 +35,11 @@ async function main() {
     console.log("✓ MockERC20 deployed to:", tokenAddress)
   }
 
-  // Strategy addresses (can be EOAs for testing, real contracts in production)
-  const primaryStrategy = process.env.PRIMARY_STRATEGY_ADDRESS || deployer.address
+  // PRIMARY_STRATEGY_ADDRESS = PawasaveLend contract (deploy-lend.ts first)
+  // FALLBACK_STRATEGY_ADDRESS = XEND X-AUTO bridge or secondary lending pool
+  const primaryStrategy  = process.env.PRIMARY_STRATEGY_ADDRESS  || deployer.address
   const fallbackStrategy = process.env.FALLBACK_STRATEGY_ADDRESS || deployer.address
-  const feeRecipient = process.env.FEE_RECIPIENT_ADDRESS || deployer.address
+  const feeRecipient     = process.env.FEE_RECIPIENT_ADDRESS     || deployer.address
 
   console.log("\n📋 Deployment Configuration:")
   console.log("  Token:", tokenAddress)

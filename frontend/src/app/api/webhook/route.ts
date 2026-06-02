@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
         .update({ amount_usdc_micro: userUsdcMicro })
         .eq('id', tx.id)
 
-      // Allocate 90% of deposited USDC into the cNGN yield pool (earns 33% APY)
+      // Allocate 90% of deposited USDC into the cNGN yield pool (earns 27% APY via P-AUTO)
       // This is the correct call — save_to_vault moves naira→usdc and is NOT for this purpose
       await supabase.rpc('allocate_cngn_pool', {
         p_user_id: tx.user_id,

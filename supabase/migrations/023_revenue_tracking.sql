@@ -8,8 +8,8 @@ ADD COLUMN IF NOT EXISTS user_consent_accepted BOOLEAN DEFAULT FALSE,
 ADD COLUMN IF NOT EXISTS consent_accepted_at TIMESTAMP,
 ADD COLUMN IF NOT EXISTS interest_forfeited_usdc_micro BIGINT DEFAULT 0;
 
--- Add consent tracking to goals
-ALTER TABLE public.goals
+-- Add consent tracking to savings goals
+ALTER TABLE public.savings_goals
 ADD COLUMN IF NOT EXISTS user_consent_accepted BOOLEAN DEFAULT FALSE,
 ADD COLUMN IF NOT EXISTS consent_accepted_at TIMESTAMP,
 ADD COLUMN IF NOT EXISTS interest_forfeited_usdc_micro BIGINT DEFAULT 0;
@@ -58,7 +58,7 @@ LANGUAGE plpgsql SECURITY DEFINER
 AS $$
 BEGIN
   -- Update goal record
-  UPDATE public.goals
+  UPDATE public.savings_goals
   SET interest_forfeited_usdc_micro = p_forfeited_interest_usdc_micro
   WHERE id = p_goal_id;
   
@@ -124,7 +124,7 @@ CREATE OR REPLACE VIEW public.platform_metrics AS
   SELECT
     (SELECT COUNT(DISTINCT id) FROM auth.users) AS total_users,
     (SELECT COUNT(*) FROM public.savings_locks WHERE status = 'active') AS active_locks,
-    (SELECT COUNT(*) FROM public.goals WHERE status = 'active') AS active_goals,
+    (SELECT COUNT(*) FROM public.savings_goals WHERE status = 'active') AS active_goals,
     (SELECT COUNT(*) FROM public.transactions WHERE status = 'completed') AS completed_transactions,
     (SELECT ROUND(SUM(amount_usdc_micro) / 1000000.0, 2) FROM public.revenue_journal) AS total_revenue_usdc;
 
@@ -133,4 +133,4 @@ CREATE INDEX IF NOT EXISTS idx_revenue_journal_type ON public.revenue_journal(re
 CREATE INDEX IF NOT EXISTS idx_revenue_journal_user ON public.revenue_journal(user_id);
 CREATE INDEX IF NOT EXISTS idx_revenue_journal_date ON public.revenue_journal(created_at);
 CREATE INDEX IF NOT EXISTS idx_savings_locks_consent ON public.savings_locks(user_consent_accepted);
-CREATE INDEX IF NOT EXISTS idx_goals_consent ON public.goals(user_consent_accepted);
+CREATE INDEX IF NOT EXISTS idx_savings_goals_consent ON public.savings_goals(user_consent_accepted);

@@ -234,7 +234,7 @@ export default function VaultView({ wallet, refresh }: Props) {
             </div>
             <div className="flex-1">
               <div className="flex items-center justify-between">
-                <p className="font-bold text-slate-900">Locked Savings (X Auto)</p>
+                <p className="font-bold text-slate-900">Locked Savings (P Auto)</p>
                 <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-purple-500 transition" />
               </div>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
@@ -285,7 +285,7 @@ export default function VaultView({ wallet, refresh }: Props) {
       <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-4">
         <div className="flex items-center gap-2 mb-4 bg-purple-50 border border-purple-200 rounded-xl px-3 py-2">
           <TrendingUp className="w-3.5 h-3.5 text-purple-600 flex-shrink-0" />
-          <p className="text-xs text-purple-700 font-medium">{selectedAPY}% APY · X Auto (Locked)</p>
+          <p className="text-xs text-purple-700 font-medium">{selectedAPY}% APY · P Auto (Locked)</p>
         </div>
 
         <AmountInput
@@ -337,7 +337,7 @@ export default function VaultView({ wallet, refresh }: Props) {
               </div>
             </div>
             <p className="text-[10px] text-purple-400 mt-2 text-center">
-              {selectedAPY}% APY · {lockDuration} days · XEND X Auto
+              {selectedAPY}% APY · {lockDuration} days · P Auto
             </p>
           </div>
         )}

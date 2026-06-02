@@ -12,9 +12,9 @@ contract MockERC20 is ERC20, Ownable {
     constructor(
         string memory name,
         string memory symbol,
-        uint8 decimals
-    ) ERC20(name, symbol) Ownable(msg.sender) {
-        // Set decimals via internal mechanism if needed
+        uint8 _decimals
+    ) ERC20(name, symbol) Ownable() {
+        // Decimals fixed at 6 via override
     }
 
     function mint(address to, uint256 amount) external onlyOwner {
@@ -25,7 +25,7 @@ contract MockERC20 is ERC20, Ownable {
         _burn(msg.sender, amount);
     }
 
-    function decimals() public view override returns (uint8) {
+    function decimals() public pure override returns (uint8) {
         return 6;
     }
 }

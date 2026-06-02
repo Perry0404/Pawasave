@@ -1,5 +1,6 @@
 import { HardhatUserConfig } from "hardhat/config"
-import "@nomiclabs/hardhat-ethers"
+import "@nomicfoundation/hardhat-ethers"
+import "@nomicfoundation/hardhat-chai-matchers"
 import "hardhat-gas-reporter"
 import * as dotenv from "dotenv"
 

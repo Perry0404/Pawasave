@@ -116,7 +116,7 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
         address _primaryStrategy,
         address _fallbackStrategy,
         address _feeRecipient
-    ) ERC4626(_asset) ERC20("Pawasave Auto", "pAUTO") Ownable(msg.sender) {
+    ) ERC4626(_asset) ERC20("Pawasave Auto", "pAUTO") Ownable() {
         assetToken = _asset;
         primaryStrategy = _primaryStrategy;
         fallbackStrategy = _fallbackStrategy;
@@ -142,14 +142,14 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
         require(assets > 0, "Zero deposit");
         require(receiver != address(0), "Invalid receiver");
 
-        // Transfer assets from user to vault
-        assetToken.safeTransferFrom(msg.sender, address(this), assets);
+        // Calculate shares BEFORE assets move (ERC4626 virtual price uses pre-deposit state)
+        shares = previewDeposit(assets);
 
-        // Route to strategy
+        // Transfer assets from user to vault then forward to strategy
+        assetToken.safeTransferFrom(msg.sender, address(this), assets);
         _depositToStrategy(assets, primaryStrategy);
 
         // Mint shares
-        shares = previewDeposit(assets);
         _mint(receiver, shares);
 
         // Track deposit
@@ -186,14 +186,14 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
         require(receiver != address(0), "Invalid receiver");
         require(isValidLockPeriod(lockDays), "Invalid lock period");
 
-        // Transfer assets
-        assetToken.safeTransferFrom(msg.sender, address(this), assets);
+        // Calculate shares BEFORE assets move (ERC4626 virtual price uses pre-deposit state)
+        shares = previewDeposit(assets);
 
-        // Route to high-yield strategy
+        // Transfer assets from user to vault then forward to strategy
+        assetToken.safeTransferFrom(msg.sender, address(this), assets);
         _depositToStrategy(assets, primaryStrategy);
 
         // Mint shares
-        shares = previewDeposit(assets);
         _mint(receiver, shares);
 
         // Determine deposit type and unlock time
@@ -230,7 +230,7 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
         assetToken.forceApprove(strategy, assets);
         
         // Generic ERC4626 deposit call
-        (bool success, bytes memory data) = strategy.call(
+        (bool success, ) = strategy.call(
             abi.encodeWithSignature("deposit(uint256,address)", assets, address(this))
         );
         
@@ -329,9 +329,7 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
      */
     function _harvestFromStrategy(address strategy) internal {
         // Call harvest on strategy (customize based on actual strategy interface)
-        (bool success, ) = strategy.call(
-            abi.encodeWithSignature("harvest()")
-        );
+        strategy.call(abi.encodeWithSignature("harvest()"));
         
         // Silently continue if harvest not supported
         // This allows flexibility for different strategy types
@@ -373,9 +371,7 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
      * @return balance Balance of assets
      */
     function _getStrategyBalance(address strategy) internal view returns (uint256) {
-        // This should be customized based on actual strategy
-        // For ERC4626, it's the balance of this vault's shares
-        return IERC20(strategy).balanceOf(address(this));
+        return assetToken.balanceOf(strategy);
     }
 
     /**
@@ -436,11 +432,11 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
 
     /**
      * @notice Validate lock period
-     * @param days Lock period in days
+     * @param lockDays Lock period in days
      * @return isValid True if valid lock period
      */
-    function isValidLockPeriod(uint256 days) public pure returns (bool) {
-        return days == 30 || days == 90 || days == 180 || days == 365;
+    function isValidLockPeriod(uint256 lockDays) public pure returns (bool) {
+        return lockDays == 30 || lockDays == 90 || lockDays == 180 || lockDays == 365;
     }
 
     /**
@@ -545,9 +541,23 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
      * @return Total assets
      */
     function totalAssets() public view override returns (uint256) {
-        // Sum of vault balance + balances in strategies
+        return assetToken.balanceOf(address(this))
+            + assetToken.balanceOf(primaryStrategy)
+            + assetToken.balanceOf(fallbackStrategy);
+    }
+
+    function _withdraw(
+        address caller,
+        address receiver,
+        address owner,
+        uint256 assets,
+        uint256 shares
+    ) internal override {
         uint256 vaultBalance = assetToken.balanceOf(address(this));
-        return vaultBalance; // Customize to add strategy balances
+        if (vaultBalance < assets) {
+            _withdrawFromStrategy(primaryStrategy, assets - vaultBalance);
+        }
+        super._withdraw(caller, receiver, owner, assets, shares);
     }
 
     /**

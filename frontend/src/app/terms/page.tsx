@@ -93,7 +93,7 @@ export default function TermsPage() {
           <h2 className="text-xl font-bold text-emerald-400 mb-3">7. Fixed Savings Locks</h2>
           <div className="space-y-4 text-slate-300">
             <p className="leading-relaxed">
-              Fixed Savings Locks allow you to lock funds for 30 to 365 days via the XEND Finance X Auto product. You earn <span className="text-white font-medium">50% APY</span> on the locked amount, paid at maturity.
+              Fixed Savings Locks allow you to lock funds for 30 to 365 days via the P Auto product. You earn up to <span className="text-white font-medium">49.7% APY</span> on the locked amount, paid at maturity.
             </p>
             <p className="leading-relaxed">
               <span className="text-white font-semibold">Early withdrawal:</span> You may withdraw a fixed lock before maturity, but you forfeit all accrued interest and incur a <span className="text-white font-medium">0.5% penalty</span> on the principal. The penalty is retained by PawaSave as a platform fee.
@@ -108,7 +108,7 @@ export default function TermsPage() {
           <h2 className="text-xl font-bold text-emerald-400 mb-3">8. Savings Goals</h2>
           <div className="space-y-4 text-slate-300">
             <p className="leading-relaxed">
-              Savings Goals allow you to set a target amount, choose a contribution frequency (daily, weekly, or monthly), and contribute regularly until the target is reached. Contributions to active goals are locked and earn <span className="text-white font-medium">50% APY</span> (via XEND X Auto) until the goal is completed.
+              Savings Goals allow you to set a target amount, choose a contribution frequency (daily, weekly, or monthly), and contribute regularly until the target is reached. Contributions to active goals are locked and earn up to <span className="text-white font-medium">49.7% APY</span> (via P Auto) until the goal is completed.
             </p>
             <p className="leading-relaxed">
               <span className="text-white font-semibold">Auto-scheduling:</span> If you enable auto-contributions, PawaSave will automatically deduct the scheduled contribution from your wallet balance at the configured frequency. Ensure your wallet has sufficient balance before each scheduled date. Auto-contributions that fail due to insufficient funds are skipped — no partial deductions occur.

@@ -30,7 +30,7 @@ async function main() {
     console.log("📦 Deploying MockERC20 token...")
     const MockERC20 = await ethers.getContractFactory("MockERC20")
     const token = await MockERC20.deploy("Crypto NGN", "cNGN", 6)
-    await token.deployed()
+    await token.waitForDeployment()
     tokenAddress = await token.getAddress()
     console.log("✓ MockERC20 deployed to:", tokenAddress)
   }

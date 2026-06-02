@@ -366,9 +366,10 @@ export class PAutoVaultManager {
 export async function initPAutoManager(
   vaultAddress: string = CONTRACTS.PAUTO_VAULT
 ): Promise<PAutoVaultManager> {
-  if (!window.ethereum) throw new Error("MetaMask not detected")
+  const eth = (window as any).ethereum
+  if (!eth) throw new Error("MetaMask not detected")
 
-  const provider = new ethers.BrowserProvider(window.ethereum)
+  const provider = new ethers.BrowserProvider(eth)
   const signer = await provider.getSigner()
 
   return new PAutoVaultManager(vaultAddress, provider, signer)

@@ -1,23 +1,23 @@
 "use client"
 import { useWallet }    from "@/hooks/use-wallet"
 import { useLendPool }  from "@/hooks/use-lend-pool"
-import { Header }       from "@/components/header"
-import { StatsBar }     from "@/components/stats-bar"
-import { SupplyPanel }  from "@/components/supply-panel"
-import { BorrowPanel }  from "@/components/borrow-panel"
-import { PositionsPanel } from "@/components/positions-panel"
+import { Header }       from "@/components/protocol/header"
+import { StatsBar }     from "@/components/protocol/stats-bar"
+import { SupplyPanel }  from "@/components/protocol/supply-panel"
+import { BorrowPanel }  from "@/components/protocol/borrow-panel"
+import { PositionsPanel } from "@/components/protocol/positions-panel"
 import { RefreshCw, ExternalLink } from "lucide-react"
 import { ADDRESSES }    from "@/lib/contracts"
 import { shortAddr }    from "@/lib/format"
 
-export default function Home() {
+export default function ProtocolPage() {
   const wallet = useWallet()
   const pool   = useLendPool(wallet.address, wallet.signer)
 
   const connected = !!wallet.address && !wallet.wrongChain
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-gray-950 text-gray-100">
       <Header
         address={wallet.address}
         wrongChain={wallet.wrongChain}
@@ -31,18 +31,17 @@ export default function Home() {
 
         {/* Hero */}
         <div className="text-center mb-10">
-          <div className="inline-flex items-center gap-2 bg-brand-900/40 border border-brand-800 text-brand-400 text-xs font-semibold px-3 py-1.5 rounded-full mb-4">
-            <div className="w-1.5 h-1.5 bg-brand-400 rounded-full animate-pulse" />
+          <div className="inline-flex items-center gap-2 bg-green-900/40 border border-green-800 text-green-400 text-xs font-semibold px-3 py-1.5 rounded-full mb-4">
+            <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
             First cNGN Lending Pool on Base
           </div>
           <h1 className="text-4xl font-bold text-white mb-3">
-            Lend & Borrow <span className="text-brand-400">cNGN</span>
+            Lend & Borrow <span className="text-green-400">cNGN</span>
           </h1>
           <p className="text-gray-400 max-w-xl mx-auto text-lg">
             Supply cNGN to earn yield from Nigerian borrowers.
             Borrow cNGN against USDC collateral at market rates.
           </p>
-
           {ADDRESSES.LEND && (
             <a
               href={`https://basescan.org/address/${ADDRESSES.LEND}`}
@@ -56,7 +55,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* Pool stats */}
+        {/* Stats */}
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Pool Stats</h2>
           <button
@@ -70,15 +69,7 @@ export default function Home() {
         </div>
         <StatsBar stats={pool.stats} loading={pool.loading} />
 
-        {/* Not deployed yet banner */}
-        {!ADDRESSES.LEND && (
-          <div className="bg-orange-950/30 border border-orange-900/50 rounded-2xl p-6 text-center mb-8">
-            <p className="text-orange-300 font-semibold mb-1">Lending pool not deployed yet</p>
-            <p className="text-orange-400/70 text-sm">Contract address will appear here once deployed to Base mainnet.</p>
-          </div>
-        )}
-
-        {/* Main panels */}
+        {/* Panels */}
         <div className="grid md:grid-cols-3 gap-5 mb-8">
           <SupplyPanel
             stats={pool.stats}
@@ -112,27 +103,24 @@ export default function Home() {
         </div>
 
         {/* How it works */}
-        <div className="card">
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-6">
           <h2 className="font-bold text-white mb-5 text-lg">How it works</h2>
           <div className="grid md:grid-cols-3 gap-6">
             {[
               {
-                step: "01",
+                step: "01", color: "text-green-400",
                 title: "Supply cNGN",
-                desc: "Deposit cNGN into the pool and receive psNGN yield-bearing shares. Your balance grows automatically as borrowers pay interest.",
-                color: "text-brand-400",
+                desc: "Deposit cNGN to receive psNGN yield-bearing shares. Your balance grows automatically as borrowers pay interest.",
               },
               {
-                step: "02",
+                step: "02", color: "text-orange-400",
                 title: "Post Collateral & Borrow",
-                desc: "Deposit USDC as collateral (75% LTV). Borrow cNGN at the current market rate. Use it anywhere — pay suppliers, trade, off-ramp to naira.",
-                color: "text-orange-400",
+                desc: "Deposit USDC as collateral (75% LTV). Borrow cNGN at the current market rate. Use it anywhere.",
               },
               {
-                step: "03",
+                step: "03", color: "text-purple-400",
                 title: "Repay & Withdraw",
-                desc: "Repay your cNGN debt anytime to unlock your collateral. Suppliers redeem psNGN shares for cNGN + accrued interest whenever they need liquidity.",
-                color: "text-purple-400",
+                desc: "Repay cNGN debt to unlock your collateral. Suppliers redeem psNGN for cNGN + accrued interest anytime.",
               },
             ].map(item => (
               <div key={item.step}>
@@ -144,9 +132,8 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Risk disclaimer */}
-        <p className="text-center text-xs text-gray-600 mt-6 max-w-2xl mx-auto">
-          PawaSave Protocol is experimental software. Smart contracts may contain bugs. Positions can be liquidated if collateral value falls below the liquidation threshold. Do not deposit funds you cannot afford to lose.
+        <p className="text-center text-xs text-gray-600 max-w-2xl mx-auto">
+          PawaSave Protocol is experimental software. Positions can be liquidated if collateral value falls below the liquidation threshold. Do not deposit funds you cannot afford to lose.
         </p>
       </main>
     </div>

@@ -42,7 +42,7 @@ export function BorrowPanel({ stats, position, connected, txPending, error,
   }
 
   return (
-    <div className="card">
+    <div className="proto-card">
       <div className="flex items-center justify-between mb-5">
         <h2 className="font-bold text-white text-lg">Borrow cNGN</h2>
         {stats && (
@@ -107,7 +107,7 @@ export function BorrowPanel({ stats, position, connected, txPending, error,
                 MAX {action === "deposit" ? fmtUsdc(maxColDeposit) : fmtUsdc(maxColWithdraw)}
               </button>
             </label>
-            <input className="input" placeholder="0.00" value={amount}
+            <input className="proto-input" placeholder="0.00" value={amount}
               onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} />
           </div>
         </>
@@ -140,7 +140,7 @@ export function BorrowPanel({ stats, position, connected, txPending, error,
                 MAX {fmtCngn(available)}
               </button>
             </label>
-            <input className="input" placeholder="0.00" value={amount}
+            <input className="proto-input" placeholder="0.00" value={amount}
               onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} />
           </div>
 
@@ -158,7 +158,7 @@ export function BorrowPanel({ stats, position, connected, txPending, error,
       <button
         onClick={handleSubmit}
         disabled={!connected || !amount || txPending}
-        className="btn-primary w-full flex items-center justify-center gap-2"
+        className="proto-btn w-full flex items-center justify-center gap-2"
       >
         {txPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowDownCircle className="w-4 h-4" />}
         {!connected ? "Connect wallet" : txPending ? "Processing…"

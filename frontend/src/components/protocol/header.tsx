@@ -38,7 +38,7 @@ export function Header({ address, wrongChain, connecting, onConnect, onSwitch, o
             <button
               onClick={onConnect}
               disabled={connecting}
-              className="btn-primary flex items-center gap-2 text-sm"
+              className="proto-btn flex items-center gap-2 text-sm"
             >
               <Wallet className="w-4 h-4" />
               {connecting ? "Connecting…" : "Connect Wallet"}

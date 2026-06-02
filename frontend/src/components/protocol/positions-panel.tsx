@@ -26,7 +26,7 @@ export function PositionsPanel({ position, connected, txPending, error,
 
   if (!connected) {
     return (
-      <div className="card flex flex-col items-center justify-center py-12 text-center">
+      <div className="proto-card flex flex-col items-center justify-center py-12 text-center">
         <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center mb-3">
           <RefreshCw className="w-6 h-6 text-gray-500" />
         </div>
@@ -38,7 +38,7 @@ export function PositionsPanel({ position, connected, txPending, error,
 
   if (!hasSupply && !hasDebt && !hasCollat) {
     return (
-      <div className="card flex flex-col items-center justify-center py-10 text-center">
+      <div className="proto-card flex flex-col items-center justify-center py-10 text-center">
         <p className="text-gray-400 font-medium">No open positions</p>
         <p className="text-gray-600 text-sm mt-1">Supply cNGN to earn yield or borrow against USDC</p>
       </div>
@@ -46,7 +46,7 @@ export function PositionsPanel({ position, connected, txPending, error,
   }
 
   return (
-    <div className="card space-y-5">
+    <div className="proto-card space-y-5">
       <h2 className="font-bold text-white text-lg">Your Positions</h2>
 
       {/* Supply position */}
@@ -61,7 +61,7 @@ export function PositionsPanel({ position, connected, txPending, error,
           <button
             onClick={() => onWithdrawSupply(position.psNgnShares)}
             disabled={txPending}
-            className="btn-outline text-sm mt-3 w-full"
+            className="proto-outline text-sm mt-3 w-full"
           >
             {txPending ? <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" /> : "Withdraw All"}
           </button>
@@ -113,7 +113,7 @@ export function PositionsPanel({ position, connected, txPending, error,
             <div className="space-y-2">
               <div className="flex gap-2">
                 <input
-                  className="input text-sm flex-1"
+                  className="proto-input text-sm flex-1"
                   placeholder="Repay amount"
                   value={repayAmt}
                   onChange={e => setRepayAmt(e.target.value.replace(/[^0-9.]/g, ""))}
@@ -121,7 +121,7 @@ export function PositionsPanel({ position, connected, txPending, error,
                 <button
                   onClick={() => onRepay(parse6(repayAmt))}
                   disabled={!repayAmt || txPending}
-                  className="btn-outline text-sm px-3"
+                  className="proto-outline text-sm px-3"
                 >
                   {txPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Repay"}
                 </button>
@@ -129,7 +129,7 @@ export function PositionsPanel({ position, connected, txPending, error,
               <button
                 onClick={onRepayFull}
                 disabled={txPending}
-                className="btn-primary w-full text-sm"
+                className="proto-btn w-full text-sm"
               >
                 {txPending ? <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" /> : "Repay Full + Reclaim Collateral"}
               </button>
@@ -140,7 +140,7 @@ export function PositionsPanel({ position, connected, txPending, error,
             <button
               onClick={() => onWithdrawCollateral(position.usdcCollateral)}
               disabled={txPending}
-              className="btn-outline w-full text-sm"
+              className="proto-outline w-full text-sm"
             >
               Withdraw Collateral
             </button>

@@ -33,6 +33,36 @@ export function getRate(): number {
   return RATE
 }
 
+// ── Protocol (bigint) formatters ──────────────────────────────────────────────
+
+export function fmt6(n: bigint, decimals = 2): string {
+  const whole = n / 1_000_000n
+  const frac  = n % 1_000_000n
+  return `${whole.toLocaleString()}.${frac.toString().padStart(6, "0").slice(0, decimals)}`
+}
+
+export function fmtCngn(micro: bigint): string {
+  return `${fmt6(micro)} cNGN`
+}
+
+export function fmtUsdc(micro: bigint): string {
+  return `$${fmt6(micro)}`
+}
+
+export function fmtPct(mantissa: bigint): string {
+  return `${(Number(mantissa) / 1e16).toFixed(2)}%`
+}
+
+export function parse6(value: string): bigint {
+  const [whole, frac = ""] = value.split(".")
+  return BigInt(whole || "0") * 1_000_000n + BigInt(frac.padEnd(6, "0").slice(0, 6) || "0")
+}
+
+export function shortAddr(addr: string): string {
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`
+}
+
+// ── Time ───────────────────────────────────────────────────────────────────────
 export function timeAgo(ts: string | number): string {
   const date = typeof ts === 'string' ? new Date(ts).getTime() : ts
   const diff = Date.now() - date

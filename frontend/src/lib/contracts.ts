@@ -32,4 +32,44 @@ export const ERC20_ABI = [
   "function allowance(address owner, address spender) external view returns (uint256)",
   "function balanceOf(address account) external view returns (uint256)",
   "function decimals() external view returns (uint8)",
+  "function symbol() external view returns (string)",
 ] as const
+
+/** ADDRESSES alias for protocol components (same values as CONTRACTS) */
+export const ADDRESSES = {
+  LEND:   (process.env.NEXT_PUBLIC_LEND_ADDRESS || "0x5ec3a2a7a273e8fb43fa9840c1382b7287c5f532") as `0x${string}`,
+  CNGN:   CONTRACTS.CNGN,
+  USDC:   CONTRACTS.USDC,
+  ORACLE: (process.env.NEXT_PUBLIC_ORACLE_ADDRESS || "") as `0x${string}`,
+}
+
+/** PawasaveLend ABI */
+export const LEND_ABI = [
+  "function supply(uint256 cngnAmount) external returns (uint256 shares)",
+  "function withdraw(uint256 shares) external returns (uint256 cngnAmount)",
+  "function depositCollateral(address token, uint256 amount) external",
+  "function withdrawCollateral(address token, uint256 amount) external",
+  "function borrow(uint256 cngnAmount) external",
+  "function repay(address borrower, uint256 cngnAmount) external",
+  "function liquidate(address borrower, uint256 repayAmount, address collateralToken) external",
+  "function totalBorrows() view returns (uint256)",
+  "function totalReserves() view returns (uint256)",
+  "function totalPoolAssets() view returns (uint256)",
+  "function exchangeRate() view returns (uint256)",
+  "function borrowBalanceCurrent(address borrower) view returns (uint256)",
+  "function totalCollateralValue(address borrower) view returns (uint256)",
+  "function borrowLimit(address borrower) view returns (uint256)",
+  "function collateralBalance(address borrower, address token) view returns (uint256)",
+  "function isHealthy(address borrower) view returns (bool)",
+  "function currentBorrowAPR() view returns (uint256)",
+  "function currentSupplyAPY() view returns (uint256)",
+  "function getCash() view returns (uint256)",
+  "function reserveFactorMantissa() view returns (uint256)",
+  "function collateralFactorMantissa() view returns (uint256)",
+  "function originationFeeMantissa() view returns (uint256)",
+  "function paused() view returns (bool)",
+  "function balanceOf(address account) view returns (uint256)",
+  "function totalSupply() view returns (uint256)",
+] as const
+
+export const CHAIN_ID = CHAIN.id

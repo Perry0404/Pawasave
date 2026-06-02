@@ -30,7 +30,7 @@ export function SupplyPanel({ stats, position, connected, txPending, error, onSu
   }
 
   return (
-    <div className="card">
+    <div className="proto-card">
       <div className="flex items-center justify-between mb-5">
         <h2 className="font-bold text-white text-lg">Earn Yield</h2>
         {stats && (
@@ -76,7 +76,7 @@ export function SupplyPanel({ stats, position, connected, txPending, error, onSu
           )}
         </label>
         <input
-          className="input"
+          className="proto-input"
           placeholder="0.00"
           value={amount}
           onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
@@ -102,7 +102,7 @@ export function SupplyPanel({ stats, position, connected, txPending, error, onSu
       <button
         onClick={handleSubmit}
         disabled={!connected || !amount || txPending}
-        className="btn-primary w-full flex items-center justify-center gap-2"
+        className="proto-btn w-full flex items-center justify-center gap-2"
       >
         {txPending ? <Loader2 className="w-4 h-4 animate-spin" /> : tab === "supply" ? <ArrowDownCircle className="w-4 h-4" /> : <ArrowUpCircle className="w-4 h-4" />}
         {!connected ? "Connect wallet" : txPending ? "Processing…" : tab === "supply" ? "Supply cNGN" : "Withdraw"}

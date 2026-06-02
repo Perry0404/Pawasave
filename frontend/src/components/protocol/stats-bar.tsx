@@ -37,7 +37,7 @@ export function StatsBar({ stats, loading }: { stats: PoolStats | null; loading:
   return (
     <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
       {items.map((item) => (
-        <div key={item.label} className="card flex flex-col gap-2">
+        <div key={item.label} className="proto-card flex flex-col gap-2">
           <div className="flex items-center gap-2 text-gray-400">
             {item.icon}
             <span className="text-xs">{item.label}</span>

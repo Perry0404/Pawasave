@@ -53,22 +53,30 @@ async function main() {
   }
 
   // ── PawasaveLend ───────────────────────────────────────────────────────────
-  const treasuryAddress = process.env.FEE_RECIPIENT_ADDRESS || deployer.address
+  const treasuryAddress     = process.env.FEE_RECIPIENT_ADDRESS    || deployer.address
+  const insuranceFundAddress = process.env.INSURANCE_FUND_ADDRESS  || deployer.address
+
   const LF   = await ethers.getContractFactory("PawasaveLend")
   const lend = await LF.deploy(
     cngnAddress,
     await irm.getAddress(),
     await oracle.getAddress(),
     treasuryAddress,
+    insuranceFundAddress,
   )
   await lend.waitForDeployment()
   console.log("✓ PawasaveLend:", await lend.getAddress())
 
-  // Add USDC as accepted collateral
+  // Add USDC as accepted collateral — 75% LTV (most liquid, dollar-stable)
   if (usdcAddress) {
-    await lend.addCollateral(usdcAddress, 6)
-    console.log("✓ USDC added as collateral")
+    await lend.addCollateral(usdcAddress, 6, ethers.parseEther("0.75"))
+    console.log("✓ USDC added as collateral (75% LTV)")
   }
+
+  // Add cNGN as self-collateral — 60% LTV (naira-pegged, more volatile)
+  // This is PawaSave's biggest differentiation: first protocol to allow cNGN as collateral
+  await lend.addCollateral(cngnAddress, 6, ethers.parseEther("0.60"))
+  console.log("✓ cNGN added as collateral (60% LTV) — first on Base!")
 
   // ── Verify ────────────────────────────────────────────────────────────────
   console.log("\n📋 Deployment summary:")
@@ -77,6 +85,7 @@ async function main() {
   console.log("  PriceOracle:      ", await oracle.getAddress())
   console.log("  PawasaveLend:     ", await lend.getAddress())
   console.log("  Treasury:         ", treasuryAddress)
+  console.log("  Insurance Fund:   ", insuranceFundAddress)
   console.log("  Oracle Keeper:    ", keeperAddress)
 
   // ── Save deployment ────────────────────────────────────────────────────────

@@ -74,18 +74,21 @@ describe("PawasaveLend", function () {
     await oracle.waitForDeployment()
     await oracle.connect(keeper).setPrice(await usdc.getAddress(), USDC_PRICE)
 
-    // Deploy PawasaveLend
+    // Deploy PawasaveLend (treasury acts as insurance fund in tests)
     const LF = await ethers.getContractFactory("PawasaveLend")
     lend = await LF.deploy(
       await cNGN.getAddress(),
       await irm.getAddress(),
       await oracle.getAddress(),
       treasury.address,
+      treasury.address, // insurance fund = treasury in tests
     )
     await lend.waitForDeployment()
 
-    // Add USDC as collateral (6 decimals)
-    await lend.addCollateral(await usdc.getAddress(), 6)
+    // Add USDC as collateral — 75% LTV
+    await lend.addCollateral(await usdc.getAddress(), 6, parseEther("0.75"))
+    // Add cNGN as self-collateral — 60% LTV
+    await lend.addCollateral(await cNGN.getAddress(), 6, parseEther("0.60"))
 
     console.log("✓ PawasaveLend deployed")
   })
@@ -201,8 +204,12 @@ describe("PawasaveLend", function () {
     })
 
     it("rejects unaccepted collateral token", async () => {
+      // Deploy a random ERC20 that was never added as collateral
+      const RandERC20 = await ethers.getContractFactory("MockERC20")
+      const rand = await RandERC20.deploy("Random", "RND", 18)
+      await rand.waitForDeployment()
       await expect(
-        lend.connect(borrower1).depositCollateral(await cNGN.getAddress(), 1000n)
+        lend.connect(borrower1).depositCollateral(await rand.getAddress(), 1000n)
       ).to.be.revertedWith("Collateral not accepted")
     })
 

@@ -9,3 +9,5 @@ coverage/
 *.pem
 private_key*
 public_key*
+.vercel
+.env*.local

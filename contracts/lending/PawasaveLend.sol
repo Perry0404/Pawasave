@@ -38,14 +38,16 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     PriceOracle       public immutable oracle;
 
     // ── Protocol parameters (owner-adjustable) ───────────────────────────────
-    uint256 public reserveFactorMantissa = 0.10e18;  // 10%
-    uint256 public originationFeeMantissa = 0.005e18; // 0.5%
-    uint256 public liquidationBonusMantissa = 0.10e18; // 10% bonus to liquidator
-    uint256 public liquidationProtocolFeeMantissa = 0.02e18; // 2% of bonus → protocol
-    uint256 public collateralFactorMantissa = 0.75e18; // 75% LTV
-    uint256 public closeFactor = 0.50e18;             // max 50% of debt per liquidation
+    uint256 public reserveFactorMantissa = 0.10e18;          // 10% of interest → reserves
+    uint256 public insuranceShareMantissa = 0.20e18;         // 20% of reserves → insurance fund
+    uint256 public originationFeeMantissa = 0.005e18;        // 0.5% flat on every new loan
+    uint256 public liquidationBonusMantissa = 0.10e18;       // 10% bonus to liquidator
+    uint256 public liquidationProtocolFeeMantissa = 0.02e18; // 2% of liquidation bonus → protocol
+    uint256 public closeFactor = 0.50e18;                    // max 50% of debt per liquidation
 
     address public treasury;
+    address public insuranceFund;          // separate address for bad-debt insurance pool
+    uint256 public totalInsuranceAccrued;  // total cNGN in insurance fund
 
     // ── Pool state ───────────────────────────────────────────────────────────
     uint256 public totalBorrows;       // total cNGN borrowed (principal + accrued)
@@ -57,6 +59,7 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     struct CollateralInfo {
         bool    accepted;
         uint8   decimals;
+        uint256 collateralFactor; // per-token LTV (e.g. 0.75e18 = 75% for USDC, 0.60e18 = 60% for cNGN)
     }
     mapping(address => CollateralInfo) public collaterals;
     address[] public collateralList;
@@ -88,22 +91,25 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         address collateralToken,
         uint256 collateralSeized
     );
-    event ReservesCollected(uint256 amount);
+    event ReservesCollected(uint256 treasuryAmount, uint256 insuranceAmount);
     event InterestAccrued(uint256 borrowIndex, uint256 totalBorrows, uint256 totalReserves);
-    event CollateralAdded(address indexed token, uint8 decimals);
+    event CollateralAdded(address indexed token, uint8 decimals, uint256 collateralFactor);
     event CollateralRemoved(address indexed token);
+    event CollateralFactorUpdated(address indexed token, uint256 newFactor);
 
     // ── Constructor ──────────────────────────────────────────────────────────
     constructor(
         address _cNGN,
         address _irm,
         address _oracle,
-        address _treasury
+        address _treasury,
+        address _insuranceFund
     ) ERC20("PawaSave Lending cNGN", "psNGN") Ownable() {
-        cNGN      = IERC20(_cNGN);
-        irm       = InterestRateModel(_irm);
-        oracle    = PriceOracle(_oracle);
-        treasury  = _treasury;
+        cNGN          = IERC20(_cNGN);
+        irm           = InterestRateModel(_irm);
+        oracle        = PriceOracle(_oracle);
+        treasury      = _treasury;
+        insuranceFund = _insuranceFund != address(0) ? _insuranceFund : _treasury;
         borrowIndex      = BASE;
         accrualBlockTime = block.timestamp;
     }
@@ -345,7 +351,7 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         return positions[borrower].collateralBalances[token];
     }
 
-    /** @notice Total collateral value for a borrower in cNGN */
+    /** @notice Raw cNGN value of all collateral (no LTV applied) */
     function totalCollateralValue(address borrower) public view returns (uint256 totalValue) {
         for (uint256 i = 0; i < collateralList.length; i++) {
             address token = collateralList[i];
@@ -355,9 +361,18 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         }
     }
 
-    /** @notice Max cNGN a borrower can borrow given their collateral */
-    function borrowLimit(address borrower) public view returns (uint256) {
-        return (totalCollateralValue(borrower) * collateralFactorMantissa) / BASE;
+    /**
+     * @notice Max cNGN a borrower can borrow — applies per-token collateral factor.
+     * Each collateral token has its own LTV: USDC=75%, cNGN=60%, T-bills=70% etc.
+     */
+    function borrowLimit(address borrower) public view returns (uint256 limit) {
+        for (uint256 i = 0; i < collateralList.length; i++) {
+            address token = collateralList[i];
+            uint256 bal   = positions[borrower].collateralBalances[token];
+            if (bal == 0) continue;
+            uint256 tokenValue = oracle.collateralToCngn(token, bal, collaterals[token].decimals);
+            limit += (tokenValue * collaterals[token].collateralFactor) / BASE;
+        }
     }
 
     /** @notice True if position health factor >= 1 */
@@ -385,11 +400,18 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     //  ADMIN
     // ══════════════════════════════════════════════════════════════════════════
 
-    function addCollateral(address token, uint8 decimals_) external onlyOwner {
+    /**
+     * @notice Add a collateral token with its own LTV.
+     * @param token            ERC-20 collateral address
+     * @param decimals_        Token decimals
+     * @param collateralFactor LTV mantissa (e.g. 0.75e18 = 75%, 0.60e18 = 60%)
+     */
+    function addCollateral(address token, uint8 decimals_, uint256 collateralFactor) external onlyOwner {
         require(!collaterals[token].accepted, "Already added");
-        collaterals[token] = CollateralInfo({ accepted: true, decimals: decimals_ });
+        require(collateralFactor <= 0.85e18, "Max CF 85%");
+        collaterals[token] = CollateralInfo({ accepted: true, decimals: decimals_, collateralFactor: collateralFactor });
         collateralList.push(token);
-        emit CollateralAdded(token, decimals_);
+        emit CollateralAdded(token, decimals_, collateralFactor);
     }
 
     function removeCollateral(address token) external onlyOwner {
@@ -398,9 +420,22 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         emit CollateralRemoved(token);
     }
 
+    /** @notice Update the LTV for an existing collateral token */
+    function setCollateralFactor(address token, uint256 newFactor) external onlyOwner {
+        require(collaterals[token].accepted, "Not accepted");
+        require(newFactor <= 0.85e18, "Max 85%");
+        collaterals[token].collateralFactor = newFactor;
+        emit CollateralFactorUpdated(token, newFactor);
+    }
+
     function setReserveFactor(uint256 newFactor) external onlyOwner {
         require(newFactor <= 0.30e18, "Max 30%");
         reserveFactorMantissa = newFactor;
+    }
+
+    function setInsuranceShare(uint256 newShare) external onlyOwner {
+        require(newShare <= 0.50e18, "Max 50% of reserves");
+        insuranceShareMantissa = newShare;
     }
 
     function setOriginationFee(uint256 newFee) external onlyOwner {
@@ -408,24 +443,35 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         originationFeeMantissa = newFee;
     }
 
-    function setCollateralFactor(uint256 newFactor) external onlyOwner {
-        require(newFactor <= 0.85e18, "Max 85%");
-        collateralFactorMantissa = newFactor;
-    }
-
     function setTreasury(address newTreasury) external onlyOwner {
         require(newTreasury != address(0), "Zero address");
         treasury = newTreasury;
     }
 
-    /** @notice Collect accrued reserves to treasury */
+    function setInsuranceFund(address newFund) external onlyOwner {
+        require(newFund != address(0), "Zero address");
+        insuranceFund = newFund;
+    }
+
+    /**
+     * @notice Collect accrued reserves — splits between treasury and insurance fund.
+     * Default: 80% treasury, 20% insurance fund.
+     */
     function collectReserves() external onlyOwner {
         accrueInterest();
         uint256 amount = _availableReserves();
         require(amount > 0, "No reserves");
         totalReserves -= amount;
-        cNGN.safeTransfer(treasury, amount);
-        emit ReservesCollected(amount);
+
+        uint256 insuranceCut = (amount * insuranceShareMantissa) / BASE;
+        uint256 treasuryCut  = amount - insuranceCut;
+
+        if (insuranceCut > 0) {
+            totalInsuranceAccrued += insuranceCut;
+            cNGN.safeTransfer(insuranceFund, insuranceCut);
+        }
+        cNGN.safeTransfer(treasury, treasuryCut);
+        emit ReservesCollected(treasuryCut, insuranceCut);
     }
 
     function pausePool() external onlyOwner { _pause(); }

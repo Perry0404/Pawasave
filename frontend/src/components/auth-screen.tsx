@@ -8,7 +8,7 @@ import { Mail, Lock, User, ArrowRight, Loader2, Eye, EyeOff, ArrowLeft } from 'l
 
 export default function AuthScreen() {
   const { signUp, signIn, resetPassword } = useAuth()
-  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('register')
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
@@ -18,6 +18,7 @@ export default function AuthScreen() {
   const [busy, setBusy] = useState(false)
   const [showPw, setShowPw] = useState(false)
   const [resetSent, setResetSent] = useState(false)
+  const [signupEmailSent, setSignupEmailSent] = useState(false)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -50,13 +51,21 @@ export default function AuthScreen() {
       if (mode === 'register') {
         const pinHash = await hashValue(pin)
         await signUp(email, password, name || email.split('@')[0], pinHash)
+        setSignupEmailSent(true) // Show "check your email" screen
       } else {
         await signIn(email, password)
       }
     } catch (e: any) {
       const msg = e?.message || 'Something went wrong'
       if (/Database error saving new user/i.test(msg)) {
-        setErr('Signup is temporarily unavailable. Please ask support to run the latest Supabase migration and try again.')
+        setErr('Signup unavailable — please contact support or try again shortly.')
+      } else if (/email not confirmed/i.test(msg)) {
+        setErr('Please confirm your email before signing in. Check your inbox for a confirmation link.')
+      } else if (/invalid login credentials/i.test(msg) || /invalid_credentials/i.test(msg)) {
+        setErr('Incorrect email or password. If you just signed up, check your email to confirm your account first.')
+      } else if (/user already registered/i.test(msg)) {
+        setErr('An account with this email already exists. Sign in instead.')
+        setMode('login')
       } else {
         setErr(msg)
       }
@@ -76,7 +85,24 @@ export default function AuthScreen() {
       </div>
 
       <div className="bg-white rounded-t-3xl px-6 pt-8 pb-10">
-        {mode === 'forgot' ? (
+        {/* After signup — prompt to confirm email */}
+        {signupEmailSent ? (
+          <div className="text-center py-4">
+            <div className="w-14 h-14 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Mail className="w-7 h-7 text-emerald-600" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-900 mb-2">Check Your Email</h2>
+            <p className="text-sm text-slate-500 mb-4 max-w-xs mx-auto">
+              We sent a confirmation link to <strong className="text-slate-700">{email}</strong>. Click it to activate your account, then sign in.
+            </p>
+            <button
+              onClick={() => { setSignupEmailSent(false); setMode('login'); setPassword(''); }}
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition"
+            >
+              Go to Sign In
+            </button>
+          </div>
+        ) : mode === 'forgot' ? (
           <>
             <button
               onClick={() => { setMode('login'); setErr(''); setResetSent(false) }}
@@ -260,6 +286,7 @@ export default function AuthScreen() {
             </form>
           </>
         )}
+        {/* closes signupEmailSent ternary */}
 
         <p className="text-center text-xs text-slate-400 mt-6">
           Powered by Supabase &middot; FlintAPI &middot; Base L2

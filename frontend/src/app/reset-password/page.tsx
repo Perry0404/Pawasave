@@ -18,13 +18,27 @@ export default function ResetPasswordPage() {
   const supabase = createClient()
 
   useEffect(() => {
-    const check = async () => {
-      const { data } = await supabase.auth.getSession()
-      setSessionReady(!!data.session)
+    // onAuthStateChange fires PASSWORD_RECOVERY when Supabase detects a recovery
+    // token in the URL hash (#access_token=...). This handles the fragment-based flow.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setSessionReady(true)
+        setCheckingSession(false)
+      } else if (event === 'SIGNED_IN' && session) {
+        setSessionReady(true)
+        setCheckingSession(false)
+      }
+    })
+
+    // Also check for session already set by callback route (PKCE / token_hash flow)
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) setSessionReady(true)
       setCheckingSession(false)
-    }
-    check()
-  }, [supabase.auth])
+    })
+
+    return () => subscription.unsubscribe()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -66,7 +66,10 @@ export async function POST(request: NextRequest) {
     { auth: { persistSession: false } },
   )
 
-  const { data: tx, error: txErr } = await supabase
+  // Look up by PawaSave's reference first, then fall back to Flipeet's reference
+  // (stored in paychant_tx_id). Flipeet webhooks often send their own reference,
+  // not the one we passed — this fallback is the core fix for missed credits.
+  let { data: tx, error: txErr } = await supabase
     .from('transactions')
     .select('*')
     .eq('reference', reference)
@@ -74,11 +77,25 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (txErr || !tx) {
+    // Try Flipeet's own reference stored in paychant_tx_id
+    const { data: txByPaychant } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('paychant_tx_id', reference)
+      .eq('status', 'pending')
+      .single()
+    if (txByPaychant) {
+      tx = txByPaychant
+      txErr = null
+    }
+  }
+
+  if (txErr || !tx) {
     // Return 200 if already processed so Flipeet stops retrying
     const { data: existingTx } = await supabase
       .from('transactions')
       .select('status')
-      .eq('reference', reference)
+      .or(`reference.eq.${reference},paychant_tx_id.eq.${reference}`)
       .single()
     if (existingTx) return NextResponse.json({ ok: true, already_processed: true })
 
@@ -138,32 +155,34 @@ export async function POST(request: NextRequest) {
       .eq('id', tx.id)
 
     if (tx.type === 'deposit') {
-      // Prefer destination USDC amount (handles both NGN and USD on-ramps correctly).
-      // destination.amount is the USDC the user actually receives — no rate conversion needed.
-      // Fallback: convert source NGN amount using live rate (for providers that don't send destination).
-      const destinationUsdcDirect = readNumber(
-        data?.destination?.amount,
-        data?.destination?.amount_usd,
+      // Route to cNGN: user deposits NGN → credited as cNGN (1 NGN = 1 cNGN).
+      // Source amount in NGN maps directly to cNGN micro (6 decimals).
+      // Fallback: if cNGN amount not available, use destination USDC * NGN rate.
+      const amountNaira = readNumber(
+        data?.source?.amount,
+        data?.amount,
+        (body as any).amount,
+        tx.amount_kobo / 100,
       )
-      let grossUsdcMicro: number
-      if (destinationUsdcDirect > 0) {
-        grossUsdcMicro = Math.floor(destinationUsdcDirect * 1_000_000)
-      } else {
-        const amountNaira = readNumber(
-          data?.source?.amount,
-          data?.amount,
-          (body as any).amount,
-          tx.amount_kobo / 100,
-        )
-        const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
-        grossUsdcMicro = Math.floor((amountNaira / rate) * 1_000_000)
-      }
       const feeKobo = Number(tx.platform_fee_kobo || 0)
-      // Fee is already baked into destination amount when using direct USDC; only deduct for NGN fallback
-      const feeUsdcMicro = (destinationUsdcDirect <= 0 && feeKobo > 0)
-        ? Math.floor((feeKobo / 100 / (await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY))) * 1_000_000)
-        : 0
-      const userUsdcMicro = Math.max(0, grossUsdcMicro - feeUsdcMicro)
+      const feeNaira = feeKobo / 100
+      const userNaira = Math.max(0, amountNaira - feeNaira)
+
+      // cNGN is 1:1 with NGN — convert naira to cNGN micro (6 decimals)
+      let cngnMicro = Math.floor(userNaira * 1_000_000)
+
+      // Fallback: if no NGN amount, derive from USDC destination using live rate
+      if (cngnMicro === 0) {
+        const destinationUsdcDirect = readNumber(data?.destination?.amount, data?.destination?.amount_usd)
+        if (destinationUsdcDirect > 0) {
+          const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
+          cngnMicro = Math.floor(destinationUsdcDirect * rate * 1_000_000)
+        }
+      }
+
+      // Keep usdc_micro column updated for backwards compatibility
+      const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
+      const userUsdcMicro = Math.floor((userNaira / rate) * 1_000_000)
 
       await supabase.rpc('credit_wallet', {
         p_user_id: tx.user_id,

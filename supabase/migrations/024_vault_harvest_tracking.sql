@@ -1,101 +1,57 @@
--- Migration 024: P-AUTO Vault Harvest Tracking
--- Tracks on-chain yield harvests from PawasaveAutoVault
--- and distributes yield proportionally to active savings_locks holders
+-- Migration 024: vault harvest tracking + distribute_vault_yield RPC
 
--- ── vault_harvests table ──────────────────────────────────────────────────────
-create table if not exists vault_harvests (
-  id                   uuid primary key default gen_random_uuid(),
-  tx_hash              text not null unique,
-  total_yield_micro    bigint not null default 0,  -- total cNGN yield (6 dec)
-  platform_fee_micro   bigint not null default 0,  -- 6% platform cut
-  user_yield_micro     bigint not null default 0,  -- distributed to users
-  harvested_at         timestamptz not null default now()
+CREATE TABLE IF NOT EXISTS vault_harvests (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tx_hash              TEXT NOT NULL UNIQUE,
+  total_yield_micro    BIGINT NOT NULL DEFAULT 0,
+  platform_fee_micro   BIGINT NOT NULL DEFAULT 0,
+  user_yield_micro     BIGINT NOT NULL DEFAULT 0,
+  harvested_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-alter table vault_harvests enable row level security;
+ALTER TABLE vault_harvests ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "service_only" ON vault_harvests
+  USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
 
--- Admins can read harvest history
-create policy "admins_read_harvests"
-  on vault_harvests for select
-  using (
-    exists (
-      select 1 from profiles
-      where profiles.id = auth.uid()
-      and profiles.is_admin = true
-    )
-  );
+ALTER TABLE savings_locks
+  ADD COLUMN IF NOT EXISTS accrued_yield_micro BIGINT NOT NULL DEFAULT 0;
 
--- Only service role can insert (called by harvest cron)
-create policy "service_insert_harvests"
-  on vault_harvests for insert
-  with check (true);
+CREATE INDEX IF NOT EXISTS idx_savings_locks_active
+  ON savings_locks (status) WHERE status = 'active';
 
--- ── distribute_vault_yield RPC ────────────────────────────────────────────────
--- Distributes harvested yield proportionally to all active savings_locks
--- holders based on their locked amount relative to total locked.
-create or replace function distribute_vault_yield(p_yield_micro bigint)
-returns void
-language plpgsql
-security definer
-as $$
-declare
-  v_total_locked      bigint;
-  v_lock              record;
-  v_user_share        bigint;
-begin
-  if p_yield_micro <= 0 then
-    return;
-  end if;
+CREATE OR REPLACE FUNCTION distribute_vault_yield(p_yield_micro BIGINT)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_total_locked BIGINT;
+  v_distributed  BIGINT := 0;
+  v_lock         RECORD;
+  v_share        BIGINT;
+BEGIN
+  IF p_yield_micro <= 0 THEN
+    RETURN jsonb_build_object('distributed', 0, 'locks_updated', 0);
+  END IF;
 
-  -- Sum of all active locked savings
-  select coalesce(sum(amount_usdc_micro), 0)
-    into v_total_locked
-    from savings_locks
-   where status = 'active';
+  SELECT COALESCE(SUM(amount_usdc_micro), 0) INTO v_total_locked
+  FROM savings_locks WHERE status = 'active';
 
-  if v_total_locked = 0 then
-    return;
-  end if;
+  IF v_total_locked = 0 THEN
+    RETURN jsonb_build_object('distributed', 0, 'reason', 'no_active_locks');
+  END IF;
 
-  -- Distribute proportionally to each active lock
-  for v_lock in
-    select id, user_id, amount_usdc_micro
-      from savings_locks
-     where status = 'active'
-  loop
-    -- Share = yield × (user_locked / total_locked)
-    v_user_share := (p_yield_micro::numeric * v_lock.amount_usdc_micro / v_total_locked)::bigint;
+  FOR v_lock IN
+    SELECT id, amount_usdc_micro FROM savings_locks WHERE status = 'active'
+  LOOP
+    v_share := (v_lock.amount_usdc_micro::NUMERIC * p_yield_micro / v_total_locked)::BIGINT;
+    IF v_share > 0 THEN
+      UPDATE savings_locks
+      SET accrued_yield_micro = COALESCE(accrued_yield_micro, 0) + v_share
+      WHERE id = v_lock.id;
+      v_distributed := v_distributed + v_share;
+    END IF;
+  END LOOP;
 
-    if v_user_share > 0 then
-      -- Credit yield to user's wallet
-      update wallets
-         set usdc_micro = usdc_micro + v_user_share,
-             updated_at = now()
-       where user_id = v_lock.user_id;
-
-      -- Record the yield credit as a transaction
-      insert into transactions (
-        user_id, type, amount_kobo, amount_usdc_micro,
-        status, description, created_at
-      ) values (
-        v_lock.user_id,
-        'yield',
-        0,
-        v_user_share,
-        'completed',
-        'P-AUTO vault yield distribution',
-        now()
-      );
-    end if;
-  end loop;
-end;
+  RETURN jsonb_build_object('distributed', v_distributed, 'total_locked', v_total_locked);
+END;
 $$;
-
--- Grant execute to service role
-grant execute on function distribute_vault_yield(bigint) to service_role;
-
-comment on table vault_harvests is
-  'On-chain yield harvest events from PawasaveAutoVault (called every 24h by Vercel cron)';
-
-comment on function distribute_vault_yield is
-  'Distributes P-AUTO vault yield proportionally to all active savings_locks holders';

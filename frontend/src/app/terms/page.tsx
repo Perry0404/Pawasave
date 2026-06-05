@@ -12,7 +12,7 @@ export default function TermsPage() {
       <header className="px-6 pt-14 pb-8 max-w-2xl mx-auto">
         <Link href="/" className="inline-block mb-6 text-emerald-400 text-sm font-medium hover:underline">&larr; Back to App</Link>
         <h1 className="text-4xl font-bold tracking-tight mb-2">Terms of Service</h1>
-        <p className="text-slate-400 text-sm">Last updated: May 11, 2026</p>
+        <p className="text-slate-400 text-sm">Last updated: June 3, 2026</p>
       </header>
 
       <main className="max-w-2xl mx-auto px-6 pb-20 space-y-10">
@@ -78,13 +78,13 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">6. Flexible Savings (Yield Vault)</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">6. Flexible Savings — Ajo (Yield Vault)</h2>
           <div className="space-y-4 text-slate-300">
             <p className="leading-relaxed">
-              Funds saved to the Flexible Vault are deployed into the XEND Finance Money Market protocol. Users receive <span className="text-white font-medium">33% APY</span> on their flexible vault balance, credited daily. This rate is subject to change based on underlying protocol performance.
+              Funds saved to the Flexible Vault (Ajo) are supplied to the PawasaveLend protocol on Base L2. The indicative supply APY is <span className="text-white font-medium">~27%</span> at target pool utilization. This rate is variable and depends on borrowing demand in the lending pool — it may be higher or lower at any time.
             </p>
             <p className="leading-relaxed">
-              Flexible vault funds can be withdrawn at any time with no penalty. However, yield is credited daily — withdrawals made before the daily accrual may not include that day&apos;s yield.
+              Flexible vault funds can be withdrawn at any time subject to available pool liquidity. In the unlikely event that the lending pool has insufficient liquidity, withdrawals may be temporarily delayed until repayments restore liquidity.
             </p>
           </div>
         </section>
@@ -93,13 +93,13 @@ export default function TermsPage() {
           <h2 className="text-xl font-bold text-emerald-400 mb-3">7. Fixed Savings Locks</h2>
           <div className="space-y-4 text-slate-300">
             <p className="leading-relaxed">
-              Fixed Savings Locks allow you to lock funds for 30 to 365 days via the P Auto product. You earn up to <span className="text-white font-medium">49.7% APY</span> on the locked amount, paid at maturity.
+              Fixed Savings Locks allow you to lock cNGN for 30 to 365 days via the P Auto vault. Indicative APY rates are: 30 days — <span className="text-white font-medium">15%</span>, 90 days — <span className="text-white font-medium">22%</span>, 180 days — <span className="text-white font-medium">30%</span>, 365 days — <span className="text-white font-medium">40%</span>. Rates are variable and depend on PawasaveLend pool utilization; advertised rates are targets, not guarantees.
             </p>
             <p className="leading-relaxed">
               <span className="text-white font-semibold">Early withdrawal:</span> You may withdraw a fixed lock before maturity, but you forfeit all accrued interest and incur a <span className="text-white font-medium">0.5% penalty</span> on the principal. The penalty is retained by PawaSave as a platform fee.
             </p>
             <p className="leading-relaxed">
-              Yield rates advertised reflect the user rate. PawaSave retains a spread between the protocol rate and the user rate as platform revenue.
+              A 6% platform fee is deducted from harvested yield before distribution to lockers. Yield rates advertised reflect the post-fee user rate.
             </p>
           </div>
         </section>
@@ -108,7 +108,7 @@ export default function TermsPage() {
           <h2 className="text-xl font-bold text-emerald-400 mb-3">8. Savings Goals</h2>
           <div className="space-y-4 text-slate-300">
             <p className="leading-relaxed">
-              Savings Goals allow you to set a target amount, choose a contribution frequency (daily, weekly, or monthly), and contribute regularly until the target is reached. Contributions to active goals are locked and earn up to <span className="text-white font-medium">49.7% APY</span> (via P Auto) until the goal is completed.
+              Savings Goals allow you to set a target amount, choose a contribution frequency (daily, weekly, or monthly), and contribute regularly until the target is reached. Contributions to active goals are locked and earn up to <span className="text-white font-medium">40% APY</span> (via P Auto) until the goal is completed.
             </p>
             <p className="leading-relaxed">
               <span className="text-white font-semibold">Auto-scheduling:</span> If you enable auto-contributions, PawaSave will automatically deduct the scheduled contribution from your wallet balance at the configured frequency. Ensure your wallet has sufficient balance before each scheduled date. Auto-contributions that fail due to insufficient funds are skipped — no partial deductions occur.
@@ -123,7 +123,7 @@ export default function TermsPage() {
           <h2 className="text-xl font-bold text-emerald-400 mb-3">9. Esusu Group Savings</h2>
           <div className="space-y-4 text-slate-300">
             <p className="leading-relaxed">
-              Esusu is a cooperative savings product where a group of members contribute a fixed amount per round and each member receives the pooled amount in rotation. While funds are held in the Esusu pool, they earn <span className="text-white font-medium">33% APY</span> via the XEND Money Market.
+              Esusu is a cooperative savings product where a group of members contribute a fixed amount per round and each member receives the pooled amount in rotation. While funds are held in the Esusu pool, they earn <span className="text-white font-medium">~27% APY</span> via the PawasaveLend protocol.
             </p>
             <p className="leading-relaxed">
               PawaSave does not guarantee the behaviour of other Esusu group members. Members who fail to contribute on time may be removed from the group at the admin&apos;s discretion. PawaSave is not liable for losses arising from member defaults within a group.
@@ -132,17 +132,33 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">10. Risk Disclosures</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">10. PawaSave Protocol (Lending)</h2>
+          <div className="space-y-4 text-slate-300">
+            <p className="leading-relaxed">
+              The PawaSave Protocol is an on-chain lending pool on Base L2 accessible at <span className="text-white">pawasave.xyz/protocol</span>. Users may supply cNGN to earn yield or borrow cNGN against collateral (USDC or cNGN). By using the Protocol you acknowledge:
+            </p>
+            <ul className="space-y-2 list-none">
+              <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> Positions may be partially liquidated if collateral value falls below the liquidation threshold.</li>
+              <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> Smart contracts have not undergone a full external security audit. Funds are at risk.</li>
+              <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> Protocol rates are variable and not guaranteed.</li>
+              <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> A 10% reserve factor and 0.5% origination fee apply to all borrowing activity.</li>
+            </ul>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">11. Risk Disclosures</h2>
           <ul className="space-y-3 text-slate-300">
-            <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Exchange rate risk:</span> The NGN/USDC rate fluctuates. The naira value of your savings may go up or down relative to the USDC value.</span></li>
-            <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Yield rate risk:</span> APY rates depend on the performance of the underlying XEND Finance protocols. Rates may decrease, potentially to zero, in adverse market conditions.</span></li>
-            <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Smart contract risk:</span> USDC and the XEND protocols operate on blockchain infrastructure. Smart contract bugs or exploits could result in loss of funds. PawaSave is not liable for losses caused by third-party protocol failures.</span></li>
-            <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Regulatory risk:</span> Nigerian regulations on crypto assets are evolving. Regulatory changes could affect the availability of features or the platform as a whole.</span></li>
+            <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Exchange rate risk:</span> The NGN/cNGN rate and NGN/USD rate fluctuate. The naira value of your savings may change.</span></li>
+            <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Yield rate risk:</span> APY rates depend on PawasaveLend pool utilization. Rates may decrease, potentially to zero, if borrowing demand falls.</span></li>
+            <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Smart contract risk:</span> On-chain contracts may contain undiscovered vulnerabilities. PawaSave is not liable for losses caused by smart contract failures.</span></li>
+            <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Liquidation risk:</span> Borrowers in the Protocol risk liquidation if collateral value drops. PawaSave bears no liability for liquidated positions.</span></li>
+            <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Regulatory risk:</span> Nigerian regulations on crypto assets are evolving. Regulatory changes could affect the availability of features or the platform.</span></li>
           </ul>
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">11. Prohibited Uses</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">12. Prohibited Uses</h2>
           <p className="text-slate-300 leading-relaxed mb-3">You agree not to use PawaSave to:</p>
           <ul className="space-y-2 text-slate-300">
             <li className="flex gap-2"><span className="text-red-400 flex-shrink-0">✕</span> Launder money, fund terrorism, or finance any illegal activity.</li>
@@ -157,7 +173,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">12. Fees Schedule</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">13. Fees Schedule</h2>
           <div className="rounded-xl border border-slate-700 overflow-hidden">
             <table className="w-full text-sm text-slate-300">
               <thead className="bg-slate-800 text-slate-400 text-xs uppercase">
@@ -179,28 +195,28 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">13. Limitation of Liability</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">14. Limitation of Liability</h2>
           <p className="text-slate-300 leading-relaxed">
             To the maximum extent permitted by Nigerian law, PawaSave and its operators shall not be liable for any indirect, incidental, special, consequential, or punitive damages, including loss of profits or data, arising out of your use of the Platform. Our total liability to you for any claim shall not exceed the total fees you paid to PawaSave in the 30 days preceding the claim.
           </p>
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">14. Termination</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">15. Termination</h2>
           <p className="text-slate-300 leading-relaxed">
             You may close your account at any time by contacting support, provided all funds are first withdrawn. PawaSave reserves the right to suspend or terminate accounts that violate these terms, with or without notice. Upon termination, any outstanding funds will be returned to your verified bank account after applicable compliance checks.
           </p>
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">15. Governing Law</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">16. Governing Law</h2>
           <p className="text-slate-300 leading-relaxed">
             These Terms are governed by and construed in accordance with the laws of the Federal Republic of Nigeria. Any disputes arising from these Terms shall be subject to the exclusive jurisdiction of the courts of Lagos State, Nigeria.
           </p>
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">16. Contact Us</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">17. Contact Us</h2>
           <p className="text-slate-300 leading-relaxed">
             If you have questions about these Terms, please contact us at{' '}
             <a href="mailto:support@pawasave.com" className="text-emerald-400 hover:underline">support@pawasave.com</a>.

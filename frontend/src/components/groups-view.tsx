@@ -250,7 +250,7 @@ export default function GroupsView({ user, wallet }: Props) {
       if (error) { setFeedback(error.message) } else {
         setFeedback('Crypto contribution recorded!')
         openGroup(selected)
-        // Fire-and-forget: deploy pot to XEND MM (33% APY)
+        // Fire-and-forget: deploy pot to PawasaveLend (27% APY)
         fetch('/api/esusu/yield', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -321,7 +321,7 @@ export default function GroupsView({ user, wallet }: Props) {
     if (error) { setFeedback(error.message) } else {
       setFeedback('Contribution sent!')
       openGroup(selected)
-      // Fire-and-forget: deploy pot to XEND MM (33% APY)
+      // Fire-and-forget: deploy pot to PawasaveLend (27% APY)
       fetch('/api/esusu/yield', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -387,7 +387,7 @@ export default function GroupsView({ user, wallet }: Props) {
             </div>
             <div className="flex flex-col items-end gap-1">
               <span className="text-[10px] font-bold bg-emerald-400/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-400/30">
-                33% APY
+                27% APY
               </span>
               {selected.creator_incentive_percent > 0 && (
                 <span className="text-[10px] font-bold bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-400/30">
@@ -802,7 +802,7 @@ export default function GroupsView({ user, wallet }: Props) {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">33% APY</span>
+                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">27% APY</span>
                 {g.owner_id === user?.id && <Crown className="w-3.5 h-3.5 text-amber-400" />}
                 <ChevronRight className="w-4 h-4 text-slate-400" />
               </div>
@@ -814,7 +814,7 @@ export default function GroupsView({ user, wallet }: Props) {
       <div className="flex items-start gap-2.5 mt-6 bg-purple-50 rounded-xl px-4 py-3">
         <AlertCircle className="w-4 h-4 text-purple-400 mt-0.5 flex-shrink-0" />
         <p className="text-xs text-purple-600 leading-relaxed">
-          Esusu is a traditional group savings system. Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot. <span className="font-semibold text-emerald-600">The pot earns 33% APY</span> via Xend Money Market while members save.
+          Esusu is a traditional group savings system. Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot. <span className="font-semibold text-emerald-600">The pot earns 27% APY</span> via PawasaveLend while members save.
         </p>
       </div>
     </div>

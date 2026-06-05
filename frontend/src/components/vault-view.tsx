@@ -12,17 +12,17 @@ interface Props {
 }
 
 const LOCK_DURATIONS = [
-  { days: 30, label: '30 Days', apy: 4.14 },
-  { days: 90, label: '90 Days', apy: 12.41 },
-  { days: 180, label: '6 Months', apy: 24.82 },
-  { days: 365, label: '1 Year', apy: 49.7 },
+  { days: 30,  label: '30 Days',  apy: 15 },
+  { days: 90,  label: '90 Days',  apy: 22 },
+  { days: 180, label: '6 Months', apy: 30 },
+  { days: 365, label: '1 Year',   apy: 40 },
 ]
 
 // Only fixed/locked savings plan
 type SavingsPlan = null | 'fixed'
 type FlexAction = 'save' | 'withdraw'
-const FLEXIBLE_APY = 27   // Ajo (flexible savings) — auto-allocated from deposits
-const FIXED_APY_MAX = 49.7 // Maximum fixed APY (annual rate)
+const FLEXIBLE_APY = 27  // Ajo (flexible savings) — supplied to PawasaveLend at ~80% utilization
+const FIXED_APY_MAX = 40 // Maximum fixed APY (1-year lock)
 
 export default function VaultView({ wallet, refresh }: Props) {
   const [plan, setPlan] = useState<SavingsPlan>(null)
@@ -220,7 +220,7 @@ export default function VaultView({ wallet, refresh }: Props) {
 
         <h2 className="text-base font-bold text-slate-900 mb-1">Lock your savings</h2>
         <p className="text-xs text-slate-500 mb-4">
-          All deposits automatically earn 27% APY in Ajo (flexible savings). Lock additional funds for higher returns (4.14–49.7% effective APY based on duration).
+          All deposits automatically earn 27% APY in Ajo (flexible savings). Lock additional funds for higher returns (15–40% APY based on duration).
         </p>
 
         {/* Fixed/Locked Savings */}
@@ -238,7 +238,7 @@ export default function VaultView({ wallet, refresh }: Props) {
                 <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-purple-500 transition" />
               </div>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Time-lock your savings for 30 days, 90 days, 6 months, or 1 year. Earn 4.14–49.7% effective returns (higher for longer locks) — locked until maturity.
+                Time-lock your savings for 30 days, 90 days, 6 months, or 1 year. Earn 15–40% APY (higher for longer locks) — locked until maturity.
               </p>
               <div className="flex items-center gap-3 mt-3 flex-wrap">
                 {LOCK_DURATIONS.map(d => (

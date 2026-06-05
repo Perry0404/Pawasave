@@ -164,7 +164,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
         </button>
         <h2 className="text-xl font-bold text-slate-900 mb-1">New Savings Goal</h2>
         <p className="text-sm text-slate-500 mb-6">
-          Your money is locked until you hit the target — earning 49.7% APY the whole way.
+          Your money is locked until you hit the target — earning 40% APY the whole way.
         </p>
 
         <div className="space-y-5">
@@ -253,7 +253,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
             <p className="text-xs font-bold text-emerald-800 mb-1.5">How it works</p>
             <ul className="text-xs text-emerald-700 space-y-1">
               <li>• Each contribution is locked until you reach your target</li>
-              <li>• Locked savings earn 49.7% APY automatically</li>
+              <li>• Locked savings earn 40% APY automatically</li>
               <li>• Break early to get your principal back (no interest)</li>
             </ul>
           </div>
@@ -296,7 +296,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
               <p className="text-emerald-100 text-xs font-medium uppercase tracking-wider">Savings Goal</p>
             </div>
             <span className="text-xs font-semibold bg-white/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-              <TrendingUp className="w-3 h-3" /> 49.7% APY
+              <TrendingUp className="w-3 h-3" /> 40% APY
             </span>
           </div>
 
@@ -442,7 +442,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
       <div className="flex items-center justify-between mb-5">
         <div>
           <h2 className="text-xl font-bold text-slate-900">Savings Goals</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Lock money, earn 49.7% APY, unlock at target</p>
+          <p className="text-xs text-slate-500 mt-0.5">Lock money, earn 40% APY, unlock at target</p>
         </div>
         <button
           onClick={() => setView('create')}
@@ -467,7 +467,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
           </div>
           <p className="font-bold text-slate-800 text-lg mb-1">No goals yet</p>
           <p className="text-sm text-slate-500 mb-6 max-w-xs mx-auto">
-            Set a target, contribute regularly, and watch your savings grow with 49.7% APY interest.
+            Set a target, contribute regularly, and watch your savings grow with 40% APY interest.
           </p>
           <button
             onClick={() => setView('create')}
@@ -564,7 +564,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
                 <p className="text-sm font-semibold text-emerald-900 mb-2">Goal Terms</p>
                 <p className="text-xs text-emerald-800 leading-relaxed">
-                  You are creating a goal to save <strong>{formatNaira(pendingGoalData.targetKobo)}</strong> contributing <strong>{formatNaira(pendingGoalData.contribKobo)}</strong> {FREQ_LABELS[pendingGoalData.frequency].toLowerCase()} at <strong>49.7%</strong> interest.
+                  You are creating a goal to save <strong>{formatNaira(pendingGoalData.targetKobo)}</strong> contributing <strong>{formatNaira(pendingGoalData.contribKobo)}</strong> {FREQ_LABELS[pendingGoalData.frequency].toLowerCase()} at <strong>40%</strong> interest.
                 </p>
               </div>
 
@@ -572,7 +572,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
                 <p className="text-sm font-semibold text-slate-900">Terms & Conditions:</p>
                 <ul className="text-xs text-slate-600 space-y-2">
                   <li>✓ <strong>Your savings are locked until you reach your target amount.</strong></li>
-                  <li>✓ Each contribution is automatically locked and earns 49.7% APY.</li>
+                  <li>✓ Each contribution is automatically locked and earns 40% APY.</li>
                   <li>✓ If you break the goal before reaching the target, you forfeit <strong>ALL interest earned</strong>.</li>
                   <li>✓ The forfeited interest becomes PawaSave platform revenue.</li>
                   <li>✓ You will only receive your principal amount if you break early.</li>

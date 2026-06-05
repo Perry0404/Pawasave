@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 /**
  * POST /api/esusu/yield
  *
- * Manages the 33% APY yield position for an Esusu group pot.
+ * Manages the 27% APY yield position for an Esusu group pot.
  * Contributions are held in the PawaSave merchant wallet.
  * Yield is calculated by the DB (esusu_claim_mm_position) and credited
  * from platform reserves on payout — no external XEND MM call needed.
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
         type:        'esusu_payout',
         direction:   'credit',
         amount_kobo: yieldKobo,
-        description: `Ajo yield bonus – 33% APY over ${days} days`,
+        description: `Ajo yield bonus – 27% APY over ${days} days`,
         status:      'completed',
       })
     }

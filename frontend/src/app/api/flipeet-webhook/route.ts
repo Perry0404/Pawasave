@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
-import { depositToXendMoneyMarket } from '@/lib/xend'
+import { getNgnUsdRateFromFlipeet, ngnToCngnMicro } from '@/lib/ramp-rate'
+import { supplyToLend } from '@/lib/custody'
 
 function readString(...values: unknown[]) {
   for (const value of values) {
@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
         } else {
           const amountNaira = readNumber(data?.source?.amount, data?.amount, (body as any).amount)
           if (amountNaira > 0) {
-            const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
+            const rate = await getNgnUsdRateFromFlipeet()
             usdcMicro = Math.floor((amountNaira / rate) * 1_000_000)
           } else {
             usdcMicro = 0
@@ -168,22 +168,13 @@ export async function POST(request: NextRequest) {
       const feeNaira = feeKobo / 100
       const userNaira = Math.max(0, amountNaira - feeNaira)
 
-      // cNGN is 1:1 with NGN — convert naira to cNGN micro (6 decimals)
-      let cngnMicro = Math.floor(userNaira * 1_000_000)
+      // Use Flipeet's live NGN/USD rate for USDC accounting + cNGN official rate for cNGN amount
+      const flipeetRate = await getNgnUsdRateFromFlipeet()
+      const cngnMicroBig = await ngnToCngnMicro(userNaira) // official cNGN rate (≈1:1 NGN)
+      const cngnMicro = Number(cngnMicroBig)
+      const userUsdcMicro = Math.floor((userNaira / flipeetRate) * 1_000_000)
 
-      // Fallback: if no NGN amount, derive from USDC destination using live rate
-      if (cngnMicro === 0) {
-        const destinationUsdcDirect = readNumber(data?.destination?.amount, data?.destination?.amount_usd)
-        if (destinationUsdcDirect > 0) {
-          const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
-          cngnMicro = Math.floor(destinationUsdcDirect * rate * 1_000_000)
-        }
-      }
-
-      // Keep usdc_micro column updated for backwards compatibility
-      const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
-      const userUsdcMicro = Math.floor((userNaira / rate) * 1_000_000)
-
+      // Credit user's Supabase balance
       await supabase.rpc('credit_wallet', {
         p_user_id: tx.user_id,
         p_naira_kobo: 0,
@@ -200,26 +191,22 @@ export async function POST(request: NextRequest) {
         p_usdc_micro: userUsdcMicro,
       })
 
-      // Deploy 90% pool portion to Xend money market (best-effort)
-      const poolUsdc = Math.floor(userUsdcMicro * 0.9) / 1_000_000
-      if (poolUsdc >= 0.01) {
-        Promise.resolve(
-          supabase
-            .from('profiles')
-            .select('xend_member_id')
-            .eq('id', tx.user_id)
-            .single()
-        ).then(({ data: prof }) => {
-          if (prof?.xend_member_id) {
-            return depositToXendMoneyMarket({
-              proxyMemberId: prof.xend_member_id,
-              amount: poolUsdc,
-              description: `PawaSave deposit pool – tx ${tx.id}`,
-            })
-          }
-        }).catch((err: unknown) => {
-          console.warn('Xend money market deposit skipped:', err)
-        })
+      // Supply cNGN to PawasaveLend for yield (flexible savings)
+      // Done async so webhook returns fast — failure logged but does not block credit
+      if (cngnMicro > 0) {
+        Promise.resolve(supplyToLend(BigInt(cngnMicro)))
+          .then(({ txHash, shares }) => {
+            console.info(`Supplied ${cngnMicro} cNGN to PawasaveLend — tx: ${txHash}, shares: ${shares}`)
+            // Record shares in Supabase for proportional yield tracking
+            return supabase.from('flexible_pool_positions').upsert({
+              user_id: tx.user_id,
+              cngn_deposited_micro: cngnMicro,
+              last_supply_tx: txHash,
+            }, { onConflict: 'user_id', ignoreDuplicates: false })
+          })
+          .catch((err: unknown) => {
+            console.warn('PawasaveLend supply skipped (funds still credited):', err)
+          })
       }
     }
   } else if (isFailedStatus(status)) {
@@ -229,8 +216,8 @@ export async function POST(request: NextRequest) {
       .eq('id', tx.id)
 
     if (tx.type === 'withdrawal') {
-      const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
-      const usdcMicro = Math.floor((tx.amount_kobo / 100 / rate) * 1_000_000)
+      const flipeetRate = await getNgnUsdRateFromFlipeet()
+      const usdcMicro = Math.floor((tx.amount_kobo / 100 / flipeetRate) * 1_000_000)
       await supabase.rpc('credit_wallet', {
         p_user_id: tx.user_id,
         p_naira_kobo: 0,

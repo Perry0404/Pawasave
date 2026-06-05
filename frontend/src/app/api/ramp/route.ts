@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
-import { validatePosInvoice, processPosInvoice, registerProxyMember, merchantWalletWithdraw, validateMerchantWalletWithdraw, proxyCryptoToFiatTransfer, proxyFundsTransfer } from '@/lib/xend'
+import { validatePosInvoice, processPosInvoice, registerProxyMember, proxyCryptoToFiatTransfer, proxyFundsTransfer } from '@/lib/xend'
 import {
   FlipeetApiError,
   FlipeetInitResult,
@@ -11,6 +11,7 @@ import {
   initializeFlipeetOnRamp,
 } from '@/lib/flipeet'
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
+import { sendCngn, cngnToShares, withdrawFromLend } from '@/lib/custody'
 
 const FLINT_API_KEY = process.env.FLINT_API_KEY || ''
 const FLINT_BASE = 'https://stables.flintapi.io/v1'
@@ -23,9 +24,8 @@ const CUSTODY_ADDRESS =
 const FLIPEET_CUSTODY_ADDRESS =
   process.env.FLIPEET_CUSTODY_ADDRESS
   || CUSTODY_ADDRESS
-// Fixed offramp receiving addresses from each provider — whitelist these in XEND dashboard.
-// Flipeet: USDC is sent here (whitelisted) before Flipeet pays NGN to user's bank.
-const FLIPEET_OFFRAMP_ADDRESS = process.env.FLIPEET_OFFRAMP_ADDRESS || ''
+// Flipeet generates a dynamic deposit address per off-ramp transaction.
+// The custody wallet (CUSTODY_PRIVATE_KEY) sends cNGN to that address on-chain.
 const DEFAULT_FEE_PERCENT = 1.5
 const DEFAULT_XEND_ESTIMATED_FEE = 120
 const DEFAULT_FLIPEET_ESTIMATED_FEE = 100
@@ -545,17 +545,46 @@ async function runFlipeet(
       status: 'pending',
     })
   } else {
-    // Off-ramp: update the pre-inserted tx with the provider's reference
+    // Off-ramp: Flipeet gives a dynamic deposit address per transaction.
+    // We must send cNGN to that address — custody wallet signs the on-chain transfer.
     await supabase
       .from('transactions')
       .update({ paychant_tx_id: result.reference || null })
       .eq('reference', reference)
 
-    // NOTE: Flipeet generates its own deposit address dynamically per transaction.
-    // We do NOT send USDC ourselves. Instead, we wait for Flipeet's webhook to confirm
-    // that they've processed the off-ramp (received NGN payment from user's bank and
-    // credited our custody address). Then our webhook marks the transaction completed.
-    console.info('Flipeet off-ramp initialized:', { reference, flipeetReference: result.reference })
+    const depositAddress = result.deposit?.address
+
+    if (depositAddress) {
+      try {
+        // Convert NGN amount → cNGN micro (1 NGN = 1 cNGN, 6 decimals)
+        // First pull from PawasaveLend if needed, then send to Flipeet
+        const cngnMicro = BigInt(Math.floor(amount * 1_000_000))
+
+        // Withdraw from PawasaveLend back to custody (releases yield-bearing position)
+        const shares = await cngnToShares(cngnMicro)
+        if (shares > 0n) {
+          await withdrawFromLend(shares)
+        }
+
+        // Send cNGN from custody to Flipeet's dynamic address
+        const onChainTxHash = await sendCngn(depositAddress, cngnMicro)
+
+        await supabase
+          .from('transactions')
+          .update({ description: `Sent via Flipeet — on-chain: ${onChainTxHash}` })
+          .eq('reference', reference)
+
+        console.info('Flipeet off-ramp: sent cNGN on-chain', { reference, depositAddress, onChainTxHash })
+      } catch (sendErr: unknown) {
+        // If the on-chain send fails, refund user and mark failed
+        console.error('Flipeet off-ramp on-chain transfer failed:', sendErr)
+        await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: Math.floor((amount / await getNgnUsdRateFromFlint(FLINT_API_KEY)) * 1_000_000) })
+        await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+        throw new Error('Failed to send withdrawal on-chain — balance refunded')
+      }
+    } else {
+      console.warn('Flipeet off-ramp: no deposit address in response', result)
+    }
   }
 
   // Only record fee AFTER debit succeeds — prevents phantom revenue from failed txs

@@ -2,12 +2,13 @@
 import { useState } from "react"
 import { ArrowDownCircle, Loader2, Info, ChevronDown } from "lucide-react"
 import type { PoolStats, UserPosition, CollateralEntry } from "@/hooks/use-lend-pool"
-import { CONFIGURED_COLLATERAL } from "@/lib/contracts"
+import { COLLATERAL_TOKENS } from "@/lib/contracts"
 import { fmtCngn, fmtUnits, fmtToken, fmtPct, parseUnits } from "@/lib/format"
 
 interface Props {
   stats:    PoolStats | null
   position: UserPosition | null
+  collateralStatus: Record<string, boolean>  // token key → accepted on-chain
   connected: boolean
   txPending: boolean
   error: string | null
@@ -16,27 +17,41 @@ interface Props {
   onBorrow: (amount: bigint) => Promise<void>
 }
 
-// Fallback list (disconnected): show tokens with zero balances
-const FALLBACK: CollateralEntry[] = CONFIGURED_COLLATERAL.map(t => ({
-  ...t, deposited: 0n, walletBalance: 0n,
-}))
+/** A row for the selector: every known collateral, enriched with live data. */
+type DisplayToken = CollateralEntry & { live: boolean }
 
-export function BorrowPanel({ stats, position, connected, txPending, error,
+export function BorrowPanel({ stats, position, collateralStatus, connected, txPending, error,
   onDepositCollateral, onWithdrawCollateral, onBorrow }: Props) {
 
   const [step,   setStep]   = useState<"collateral" | "borrow">("collateral")
   const [action, setAction] = useState<"deposit" | "withdraw">("deposit")
   const [amount, setAmount] = useState("")
-  const [tokenKey, setTokenKey] = useState(CONFIGURED_COLLATERAL[0]?.key ?? "usdc")
+  const [tokenKey, setTokenKey] = useState(COLLATERAL_TOKENS[0]?.key ?? "usdc")
 
-  const tokens = position?.collaterals?.length ? position.collaterals : FALLBACK
-  const token  = tokens.find(t => t.key === tokenKey) ?? tokens[0]
+  // Merge the full token catalogue with live balances + on-chain accepted status.
+  // A token is "live" only if it has an address AND is accepted on the pool.
+  const liveByKey = new Map((position?.collaterals ?? []).map(c => [c.key, c]))
+  const tokens: DisplayToken[] = COLLATERAL_TOKENS.map(t => {
+    const live = liveByKey.get(t.key)
+    return {
+      ...t,
+      deposited:     live?.deposited     ?? 0n,
+      walletBalance: live?.walletBalance ?? 0n,
+      live: !!t.address && collateralStatus[t.key] === true,
+    }
+  })
+  const token = tokens.find(t => t.key === tokenKey) ?? tokens[0]
+  const tokenLive = token?.live ?? false
 
   const maxColDeposit  = token?.walletBalance ?? 0n
   const maxColWithdraw = token?.deposited     ?? 0n
   const maxBorrow      = position?.borrowLimit ?? 0n
   const currentDebt    = position?.borrowDebt  ?? 0n
   const available      = maxBorrow > currentDebt ? maxBorrow - currentDebt : 0n
+
+  // Block deposits into a not-yet-live token (would revert "Collateral not accepted").
+  // Withdraw stays allowed so anyone with a balance can always exit.
+  const blockedAction = step === "collateral" && action === "deposit" && !tokenLive
 
   async function handleSubmit() {
     if (!amount || !token?.address) return
@@ -88,15 +103,19 @@ export function BorrowPanel({ stats, position, connected, txPending, error,
             >
               {tokens.map(t => (
                 <option key={t.key} value={t.key}>
-                  {t.symbol} — {t.ltv}% LTV
+                  {t.symbol} — {t.ltv}% LTV{t.live ? "" : " (coming soon)"}
                 </option>
               ))}
             </select>
             <ChevronDown className="w-4 h-4 text-gray-500 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
-          {token?.note && (
+          {!tokenLive ? (
+            <p className="text-xs text-amber-400/90 mb-3 -mt-1">
+              {token?.symbol} isn’t live yet — coming soon.{token?.note ? ` ${token.note}` : ""}
+            </p>
+          ) : token?.note ? (
             <p className="text-xs text-gray-500 mb-3 -mt-1">{token.note}</p>
-          )}
+          ) : null}
 
           <div className="flex gap-1 mb-4">
             {(["deposit", "withdraw"] as const).map(a => (
@@ -186,11 +205,12 @@ export function BorrowPanel({ stats, position, connected, txPending, error,
 
       <button
         onClick={handleSubmit}
-        disabled={!connected || !amount || txPending}
+        disabled={!connected || !amount || txPending || blockedAction}
         className="proto-btn w-full flex items-center justify-center gap-2"
       >
         {txPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowDownCircle className="w-4 h-4" />}
         {!connected ? "Connect wallet" : txPending ? "Processing…"
+          : blockedAction ? `${token?.symbol ?? "Asset"} coming soon`
           : step === "collateral" ? `${action === "deposit" ? "Deposit" : "Withdraw"} ${token?.symbol ?? "Collateral"}`
           : "Borrow cNGN"}
       </button>

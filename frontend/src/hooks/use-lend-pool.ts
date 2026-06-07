@@ -42,6 +42,10 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
   const [loading,  setLoading]  = useState(false)
   const [txPending, setTxPending] = useState(false)
   const [error,    setError]    = useState<string | null>(null)
+  // Per-token on-chain status: token key → accepted as collateral on the pool.
+  // Fetched independently of the connected wallet so the UI can show live vs
+  // "coming soon" before connecting.
+  const [collateralStatus, setCollateralStatus] = useState<Record<string, boolean>>({})
 
   const readProvider = new ethers.JsonRpcProvider(BASE_RPC)
   const lendRO  = ADDRESSES.LEND ? new ethers.Contract(ADDRESSES.LEND, LEND_ABI,  readProvider) : null
@@ -76,6 +80,26 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
       })
     } catch (e: any) {
       console.error("fetchStats error:", e)
+    }
+  }, [])
+
+  // Which configured tokens are actually accepted as collateral on-chain.
+  const fetchCollateralStatus = useCallback(async () => {
+    if (!lendRO) return
+    try {
+      const entries = await Promise.all(
+        CONFIGURED_COLLATERAL.map(async (tok) => {
+          try {
+            const info = await lendRO.collaterals(tok.address)
+            return [tok.key, Boolean(info.accepted)] as const
+          } catch {
+            return [tok.key, false] as const
+          }
+        })
+      )
+      setCollateralStatus(Object.fromEntries(entries))
+    } catch (e: any) {
+      console.error("fetchCollateralStatus error:", e)
     }
   }, [])
 
@@ -126,9 +150,13 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    await Promise.all([fetchStats(), address ? fetchPosition() : Promise.resolve()])
+    await Promise.all([
+      fetchStats(),
+      fetchCollateralStatus(),
+      address ? fetchPosition() : Promise.resolve(),
+    ])
     setLoading(false)
-  }, [fetchStats, fetchPosition, address])
+  }, [fetchStats, fetchCollateralStatus, fetchPosition, address])
 
   useEffect(() => { refresh() }, [address])
 
@@ -218,6 +246,6 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
     })
   }
 
-  return { stats, position, loading, txPending, error, refresh,
+  return { stats, position, collateralStatus, loading, txPending, error, refresh,
     supply, withdrawSupply, depositCollateral, withdrawCollateral, borrow, repay, repayFull }
 }

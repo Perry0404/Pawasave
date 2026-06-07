@@ -89,11 +89,39 @@ function rateToOraclePrice(ngnUsdRate: number): bigint {
   return BigInt(price)
 }
 
+/** Push a USD-stable price for one token, skipping if within 0.5% of on-chain. */
+async function updateStableToken(
+  oracle: ethers.Contract,
+  label: string,
+  tokenAddr: string,
+  price: bigint,
+) {
+  const currentPrice: bigint = await oracle.prices(tokenAddr)
+  const priceDiff = currentPrice > 0n
+    ? (price > currentPrice
+        ? ((price - currentPrice) * 10000n) / currentPrice
+        : ((currentPrice - price) * 10000n) / currentPrice)
+    : 10000n
+
+  console.log(`[oracle-keeper] ${label}: on-chain ${currentPrice.toString()} → new ${price.toString()} (${Number(priceDiff)/100}% diff)`)
+
+  if (priceDiff < 50n && currentPrice > 0n) {
+    console.log(`[oracle-keeper] ${label}: within 0.5% — skipping`)
+    return
+  }
+
+  const tx = await oracle.setPrice(tokenAddr, price)
+  const receipt = await tx.wait()
+  console.log(`[oracle-keeper] ✓ ${label} updated — 1 ${label} = ${Number(price) / 1e6} cNGN — tx: ${receipt.hash}`)
+}
+
 async function main() {
   const rpcUrl      = process.env.BASE_MAINNET_RPC_URL
   const privateKey  = process.env.ORACLE_KEEPER_PRIVATE_KEY
   const oracleAddr  = process.env.PRICE_ORACLE_ADDRESS
   const usdcAddr    = process.env.USDC_TOKEN_ADDRESS
+  // USDT (USD₮0) on Base — same USD peg as USDC. Optional; defaults to Base USDT.
+  const usdtAddr    = process.env.USDT_TOKEN_ADDRESS || "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2"
 
   if (!rpcUrl || !privateKey || !oracleAddr || !usdcAddr) {
     console.error("Missing required env vars: BASE_MAINNET_RPC_URL, ORACLE_KEEPER_PRIVATE_KEY, PRICE_ORACLE_ADDRESS, USDC_TOKEN_ADDRESS")
@@ -106,31 +134,27 @@ async function main() {
 
   console.log(`[oracle-keeper] Keeper: ${keeper.address}`)
   console.log(`[oracle-keeper] Oracle: ${oracleAddr}`)
-  console.log(`[oracle-keeper] USDC:   ${usdcAddr}`)
 
-  // Fetch rate
+  // Fetch the NGN/USD rate once — USDC and USDT share the same USD peg.
   const ngnUsdRate = await fetchNgnUsdRate()
   const price      = rateToOraclePrice(ngnUsdRate)
+  console.log(`[oracle-keeper] NGN per USD: ${Math.round(1 / ngnUsdRate)} → price ${price.toString()}`)
 
-  // Read current on-chain price
-  const currentPrice = await oracle.prices(usdcAddr)
-  const priceDiff    = price > currentPrice
-    ? ((price - currentPrice) * 10000n) / currentPrice
-    : ((currentPrice - price) * 10000n) / currentPrice
+  // USD-stable collateral tokens to keep priced. RWAs/T-bills are NOT here —
+  // they have a drifting NAV and need their own per-asset price source.
+  const stableTokens: Array<{ label: string; addr?: string }> = [
+    { label: "USDC", addr: usdcAddr },
+    { label: "USDT", addr: usdtAddr },
+  ]
 
-  console.log(`[oracle-keeper] On-chain price : ${currentPrice.toString()} cNGN/USDC`)
-  console.log(`[oracle-keeper] New price      : ${price.toString()} cNGN/USDC (${Number(priceDiff)/100}% diff)`)
-
-  // Only update if price moved more than 0.5% (saves gas on stable days)
-  if (priceDiff < 50n && currentPrice > 0n) {
-    console.log("[oracle-keeper] Price within 0.5% — skipping update")
-    return
+  for (const t of stableTokens) {
+    if (!t.addr) continue
+    try {
+      await updateStableToken(oracle, t.label, t.addr, price)
+    } catch (e: any) {
+      console.error(`[oracle-keeper] ${t.label} update failed:`, e?.message || e)
+    }
   }
-
-  const tx = await oracle.setPrice(usdcAddr, price)
-  const receipt = await tx.wait()
-  console.log(`[oracle-keeper] ✓ Price updated — tx: ${receipt.hash}`)
-  console.log(`[oracle-keeper] New rate: 1 USDC = ${Number(price) / 1e6} cNGN (₦${Math.round(1e6 / Number(price) * 1e6)} per $1)`)
 }
 
 main().catch((e) => {

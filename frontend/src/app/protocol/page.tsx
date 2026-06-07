@@ -94,6 +94,7 @@ export default function ProtocolPage() {
           <BorrowPanel
             stats={pool.stats}
             position={pool.position}
+            collateralStatus={pool.collateralStatus}
             connected={connected}
             txPending={pool.txPending}
             error={pool.error}

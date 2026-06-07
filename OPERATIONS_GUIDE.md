@@ -140,8 +140,39 @@ USDC (75%) and cNGN (60%) are live. To add more:
      npx hardhat run scripts/add-collateral.ts --network baseMainnet
    ```
 
-Until a token is both (a) given a frontend address and (b) listed on-chain with a
-price, it simply won't appear / won't be depositable in the protocol UI.
+### What makes a collateral "live" (and the UI gating)
+A token is usable only when **all three** are true:
+1. **Frontend address** — `NEXT_PUBLIC_*_TOKEN_ADDRESS` set (so it appears in the selector).
+2. **Listed on-chain** — `addCollateral(token, decimals, LTV)` done (via the script).
+3. **Fresh oracle price** — a price exists and is < 1h old (or the contract reverts).
+
+The borrow panel now reads each token's on-chain `collaterals()` status and shows
+**"(coming soon)"** + disables Deposit for any token that isn't live yet — so users
+never hit a confusing "Collateral not accepted" revert. Withdraw stays enabled.
+
+The **oracle keeper now prices USDC *and* USDT automatically** (same USD peg). So
+to make **USDT** fully live you only need to run `add-collateral.ts` once; the
+keeper keeps it fresh thereafter.
+
+### ⚠️ Do NOT self-issue fake T-bills/RWAs
+An RWA token's value comes **entirely from the real assets backing it**, not the
+contract. A token you mint yourself with no backing is worthless and dangerous as
+collateral (you'd be lending real cNGN against printed money — instant insolvency
+risk, and misleading to users). A *legitimate* PawaSave-issued RWA would require a
+legal entity, a regulated custodian holding the real assets, audits/attestations,
+KYC and securities compliance — a months-long project, not a code change.
+
+### The real path: partner with an issuer (e.g. the cNGN team)
+For genuine T-bill/RWA collateral, partner with an issuer who has already done the
+legal + custody work, and have them:
+1. **Allowlist the pool** `0x5ec3a2a7a273e8fb43fa9840c1382b7287c5f532` so it can
+   hold the (usually permissioned) token — otherwise `depositCollateral` reverts.
+2. Allowlist liquidators (or pre-agree a liquidation path) so unhealthy positions
+   can still be closed.
+3. Provide a **price/NAV feed** for the asset, which we wire into the keeper.
+
+Once those are in place it's a 2-minute job: set the env address + run
+`add-collateral.ts`.
 
 > **Note on "funding the wallet" with USDT/RWA/T-bills:** the protocol uses these as
 > *collateral to borrow cNGN*. They are **not** used to fund the consumer app — the
@@ -163,12 +194,11 @@ Savings are **denominated in cNGN/naira — there is no USD anywhere** in the
 consumer balance. The live Flipeet rate is only ever used for fiat pricing, never
 to value a saved balance.
 
-> **Still to do (next pass):** the Vault, Goals, Activity, Groups and Admin
-> screens still carry "USDC"/"$" *labels* (their underlying math is already 1:1
-> cNGN via the shared `format.ts` helpers). Re-labelling those is a contained
-> follow-up. If you have existing test balances created under the old USD model,
-> they'll read low until re-based — easiest is to reset test data pre-launch, or
-> ask for a one-off SQL re-denomination script.
+The Vault, Goals, Activity, Groups and Admin screens are now relabelled to
+cNGN/₦ (the shared `format.ts` helpers render naira). If you have existing test
+balances created under the old USD model, run the one-off re-denomination
+migration **[027_redenominate_cngn.sql](supabase/migrations/027_redenominate_cngn.sql)**
+(edit `v_rate` first; it's run-once and guarded), or just reset test data pre-launch.
 
 ---
 

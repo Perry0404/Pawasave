@@ -6,7 +6,9 @@ import { StatsBar }     from "@/components/protocol/stats-bar"
 import { SupplyPanel }  from "@/components/protocol/supply-panel"
 import { BorrowPanel }  from "@/components/protocol/borrow-panel"
 import { PositionsPanel } from "@/components/protocol/positions-panel"
-import { RefreshCw, ExternalLink } from "lucide-react"
+import { RefreshCw, ExternalLink, FileText } from "lucide-react"
+import Link from "next/link"
+import Logo from "@/components/logo"
 import { ADDRESSES }    from "@/lib/contracts"
 import { shortAddr }    from "@/lib/format"
 
@@ -30,29 +32,38 @@ export default function ProtocolPage() {
       <main className="max-w-6xl mx-auto px-4 py-8">
 
         {/* Hero */}
-        <div className="text-center mb-10">
+        <div className="text-center mb-8 sm:mb-10">
           <div className="inline-flex items-center gap-2 bg-green-900/40 border border-green-800 text-green-400 text-xs font-semibold px-3 py-1.5 rounded-full mb-4">
             <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
             First cNGN Lending Pool on Base
           </div>
-          <h1 className="text-4xl font-bold text-white mb-3">
-            Lend & Borrow <span className="text-green-400">cNGN</span>
+          <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3">
+            Lend & Borrow <span className="text-brand-400">cNGN</span>
           </h1>
-          <p className="text-gray-400 max-w-xl mx-auto text-lg">
+          <p className="text-gray-400 max-w-xl mx-auto text-base sm:text-lg px-2">
             Supply cNGN to earn yield from Nigerian borrowers.
-            Borrow cNGN against USDC collateral at market rates.
+            Borrow cNGN against USDC, USDT, cNGN, tokenized T-bills & RWAs at market rates.
           </p>
-          {ADDRESSES.LEND && (
-            <a
-              href={`https://basescan.org/address/${ADDRESSES.LEND}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition mt-3"
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 mt-4">
+            <Link
+              href="/whitepaper"
+              className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition font-medium"
             >
-              <ExternalLink className="w-3 h-3" />
-              {shortAddr(ADDRESSES.LEND)} on Basescan
-            </a>
-          )}
+              <FileText className="w-3.5 h-3.5" />
+              Read the Whitepaper
+            </Link>
+            {ADDRESSES.LEND && (
+              <a
+                href={`https://basescan.org/address/${ADDRESSES.LEND}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition"
+              >
+                <ExternalLink className="w-3 h-3" />
+                {shortAddr(ADDRESSES.LEND)} on Basescan
+              </a>
+            )}
+          </div>
         </div>
 
         {/* Stats */}
@@ -136,6 +147,26 @@ export default function ProtocolPage() {
           PawaSave Protocol is experimental software. Positions can be liquidated if collateral value falls below the liquidation threshold. Do not deposit funds you cannot afford to lose.
         </p>
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-gray-800 mt-8">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <Logo size={28} />
+            <div className="text-sm">
+              <span className="font-bold text-white">PawaSave</span>
+              <span className="text-gray-500"> Protocol</span>
+            </div>
+          </div>
+          <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm">
+            <Link href="/whitepaper" className="text-gray-400 hover:text-white transition">Whitepaper</Link>
+            <Link href="/about" className="text-gray-400 hover:text-white transition">About</Link>
+            <Link href="/" className="text-gray-400 hover:text-white transition">Savings App</Link>
+            <a href="https://basescan.org" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-white transition">Basescan</a>
+          </nav>
+          <p className="text-xs text-gray-600">© {new Date().getFullYear()} PawaSave · Base L2</p>
+        </div>
+      </footer>
     </div>
   )
 }

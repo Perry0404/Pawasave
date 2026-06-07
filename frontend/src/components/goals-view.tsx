@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Target, Plus, ArrowLeft, CheckCircle2, TrendingUp, Loader2, ChevronRight, XCircle } from 'lucide-react'
-import { formatNaira, formatUsdc, koboToMicroUsdc, microUsdcToKobo, getRate } from '@/lib/format'
+import { formatNaira, formatCngn, koboToMicroUsdc, microUsdcToKobo, getRate } from '@/lib/format'
 import { useSavingsGoals, createSavingsGoal, contributeToGoal, completeSavingsGoal, breakSavingsGoal, setGoalAutoContribute } from '@/hooks/use-data'
 import type { Wallet, SavingsGoal } from '@/lib/types'
 
@@ -110,7 +110,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
     setBusy(true)
     try {
       const interest = await completeSavingsGoal(goal.id)
-      flash(`Goal completed! You earned ${formatUsdc(interest)} in interest. 🎉`)
+      flash(`Goal completed! You earned ${formatCngn(interest)} in interest. 🎉`)
       await refreshGoals()
       refresh()
       setView('list')
@@ -324,12 +324,12 @@ export default function GoalsView({ wallet, refresh }: Props) {
           {/* Stats row */}
           <div className="flex items-center gap-4 mt-4 pt-3 border-t border-white/10 text-xs">
             <div>
-              <p className="text-emerald-200">Saved (USDC)</p>
-              <p className="font-semibold mt-0.5">{formatUsdc(selected.saved_usdc_micro)}</p>
+              <p className="text-emerald-200">Saved (cNGN)</p>
+              <p className="font-semibold mt-0.5">{formatCngn(selected.saved_usdc_micro)}</p>
             </div>
             <div>
               <p className="text-emerald-200">Interest accrued</p>
-              <p className="font-bold mt-0.5 text-emerald-300">~{formatUsdc(projectedInterest)}</p>
+              <p className="font-bold mt-0.5 text-emerald-300">~{formatCngn(projectedInterest)}</p>
             </div>
             <div>
               <p className="text-emerald-200">Frequency</p>
@@ -357,8 +357,8 @@ export default function GoalsView({ wallet, refresh }: Props) {
                   </span>
                 </div>
                 <p className="text-xs text-slate-500">
-                  • {formatUsdc(wallet?.usdc_balance_micro || 0)} in wallet
-                  <br />• {formatUsdc(wallet?.cngn_pool_micro || 0)} in yield pool
+                  • {formatCngn(wallet?.usdc_balance_micro || 0)} in wallet
+                  <br />• {formatCngn(wallet?.cngn_pool_micro || 0)} in yield pool
                 </p>
               </div>
             )}
@@ -417,7 +417,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
             <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto mb-2" />
             <p className="font-bold text-emerald-900 text-lg">Goal achieved!</p>
             <p className="text-sm text-emerald-700 mt-1">
-              You earned {formatUsdc(selected.interest_earned_micro)} in interest
+              You earned {formatCngn(selected.interest_earned_micro)} in interest
             </p>
           </div>
         )}
@@ -537,7 +537,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
                       <p className="font-semibold text-slate-700">{goal.title}</p>
                       <p className="text-xs text-slate-400 mt-0.5">
                         {goal.status === 'completed'
-                          ? `Completed · Earned ${formatUsdc(goal.interest_earned_micro)} interest`
+                          ? `Completed · Earned ${formatCngn(goal.interest_earned_micro)} interest`
                           : 'Broken early · Principal returned'}
                       </p>
                     </div>

@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react'
 import { ArrowLeft, TrendingUp, Users, Lock, Target, DollarSign, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
-import { formatUsdc } from '@/lib/format'
 
 const supabase = createClient()
 
@@ -137,7 +136,7 @@ export default function RevenuePage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-slate-500 text-xs font-medium mb-1">Total Revenue</p>
-                  <p className="text-2xl font-bold text-slate-900">${(metrics.total_revenue_usdc || 0).toFixed(2)}</p>
+                  <p className="text-2xl font-bold text-slate-900">₦{(metrics.total_revenue_usdc || 0).toFixed(2)}</p>
                 </div>
                 <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center">
                   <DollarSign className="w-6 h-6 text-emerald-600" />
@@ -207,7 +206,7 @@ export default function RevenuePage() {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600">Type</th>
                   <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600">Count</th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600">Total (USDC)</th>
+                  <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600">Total (cNGN)</th>
                   <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600">Average</th>
                 </tr>
               </thead>
@@ -219,9 +218,9 @@ export default function RevenuePage() {
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-600 text-right">{row.count}</td>
                     <td className="px-6 py-4 text-sm font-semibold text-slate-900 text-right">
-                      ${row.total_usdc.toFixed(2)}
+                      ₦{row.total_usdc.toFixed(2)}
                     </td>
-                    <td className="px-6 py-4 text-sm text-slate-600 text-right">${row.avg_usdc.toFixed(4)}</td>
+                    <td className="px-6 py-4 text-sm text-slate-600 text-right">₦{row.avg_usdc.toFixed(4)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -242,7 +241,7 @@ export default function RevenuePage() {
                   <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600">Month</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600">Type</th>
                   <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600">Count</th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600">Total (USDC)</th>
+                  <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600">Total (cNGN)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
@@ -254,7 +253,7 @@ export default function RevenuePage() {
                     <td className="px-6 py-4 text-sm text-slate-600">{formatRevenueType(row.revenue_type)}</td>
                     <td className="px-6 py-4 text-sm text-slate-600 text-right">{row.count}</td>
                     <td className="px-6 py-4 text-sm font-semibold text-slate-900 text-right">
-                      ${row.total_usdc.toFixed(2)}
+                      ₦{row.total_usdc.toFixed(2)}
                     </td>
                   </tr>
                 ))}
@@ -276,7 +275,7 @@ export default function RevenuePage() {
                   <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600">Date</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600">Type</th>
                   <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600">Count</th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600">Total (USDC)</th>
+                  <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600">Total (cNGN)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
@@ -288,7 +287,7 @@ export default function RevenuePage() {
                     <td className="px-6 py-4 text-sm text-slate-600">{formatRevenueType(row.revenue_type)}</td>
                     <td className="px-6 py-4 text-sm text-slate-600 text-right">{row.count}</td>
                     <td className="px-6 py-4 text-sm font-semibold text-slate-900 text-right">
-                      ${row.total_usdc.toFixed(2)}
+                      ₦{row.total_usdc.toFixed(2)}
                     </td>
                   </tr>
                 ))}

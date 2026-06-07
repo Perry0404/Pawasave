@@ -35,13 +35,74 @@ export const ERC20_ABI = [
   "function symbol() external view returns (string)",
 ] as const
 
+/** USDT (USD₮0) on Base — 6 decimals */
+export const USDT_ADDRESS =
+  (process.env.NEXT_PUBLIC_USDT_TOKEN_ADDRESS ||
+    "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2") as `0x${string}`
+
 /** ADDRESSES alias for protocol components (same values as CONTRACTS) */
 export const ADDRESSES = {
   LEND:   (process.env.NEXT_PUBLIC_LEND_ADDRESS || "0x5ec3a2a7a273e8fb43fa9840c1382b7287c5f532") as `0x${string}`,
   CNGN:   CONTRACTS.CNGN,
   USDC:   CONTRACTS.USDC,
+  USDT:   USDT_ADDRESS,
   ORACLE: (process.env.NEXT_PUBLIC_ORACLE_ADDRESS || "") as `0x${string}`,
 }
+
+/**
+ * Collateral token registry for the lending protocol.
+ *
+ * A token is usable as collateral only once it is (1) added on-chain via
+ * `addCollateral(token, decimals, factor)` AND (2) given a price on the
+ * PriceOracle. USDC and cNGN are live today. USDT is wired but must be added
+ * on-chain. Tokenized T-bills and RWAs become selectable as soon as their
+ * NEXT_PUBLIC_*_TOKEN_ADDRESS env var is set and they are listed on-chain.
+ *
+ * `ltv` is for display only — the borrow limit is always read from the
+ * contract's per-token `collateralFactorMantissa`.
+ */
+export interface CollateralToken {
+  key:      string
+  symbol:   string
+  name:     string
+  address:  `0x${string}` | ""
+  decimals: number
+  ltv:      number   // display LTV %, should mirror the on-chain factor
+  note:     string
+}
+
+export const COLLATERAL_TOKENS: CollateralToken[] = [
+  {
+    key: "usdc", symbol: "USDC", name: "USD Coin",
+    address: CONTRACTS.USDC, decimals: 6, ltv: 75,
+    note: "Most liquid, dollar-stable. Highest LTV.",
+  },
+  {
+    key: "usdt", symbol: "USDT", name: "Tether USD",
+    address: USDT_ADDRESS, decimals: 6, ltv: 75,
+    note: "Dollar-stable. Add on-chain + set oracle price to enable.",
+  },
+  {
+    key: "cngn", symbol: "cNGN", name: "Compliant Naira",
+    address: CONTRACTS.CNGN, decimals: 6, ltv: 60,
+    note: "Naira self-collateral — first on Base.",
+  },
+  {
+    key: "tbill", symbol: "T-Bills", name: "Tokenized Treasury Bills",
+    address: (process.env.NEXT_PUBLIC_TBILL_TOKEN_ADDRESS || "") as `0x${string}` | "",
+    decimals: Number(process.env.NEXT_PUBLIC_TBILL_DECIMALS || 18), ltv: 70,
+    note: "Yield-bearing T-bill RWA. Set token address to enable.",
+  },
+  {
+    key: "rwa", symbol: "RWA", name: "Real-World Asset",
+    address: (process.env.NEXT_PUBLIC_RWA_TOKEN_ADDRESS || "") as `0x${string}` | "",
+    decimals: Number(process.env.NEXT_PUBLIC_RWA_DECIMALS || 18), ltv: 65,
+    note: "Tokenized real-world asset. Set token address to enable.",
+  },
+]
+
+/** Tokens that have an address configured in the frontend (selectable in UI) */
+export const CONFIGURED_COLLATERAL = COLLATERAL_TOKENS.filter(t => !!t.address)
 
 /** PawasaveLend ABI */
 export const LEND_ABI = [

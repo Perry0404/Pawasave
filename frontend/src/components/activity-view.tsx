@@ -1,7 +1,7 @@
 ﻿'use client'
 
 import { useState } from 'react'
-import { formatNaira, formatUsdc, timeAgo } from '@/lib/format'
+import { formatNaira, formatCngn, timeAgo } from '@/lib/format'
 import { ArrowDownLeft, ArrowUpRight, Shield, RefreshCw, Users, AlertTriangle, X, Copy, Check, FileText, Target } from 'lucide-react'
 import type { Transaction, Wallet, Profile } from '@/lib/types'
 
@@ -41,7 +41,7 @@ function generateStatement(transactions: Transaction[], wallet: Wallet | null | 
   const totalIn  = transactions.filter(t => CREDIT_TYPES.includes(t.type) && t.status === 'completed').reduce((s, t) => s + t.amount_kobo, 0)
   const totalOut = transactions.filter(t => !CREDIT_TYPES.includes(t.type) && t.status === 'completed').reduce((s, t) => s + t.amount_kobo, 0)
   const naira = (k: number) => '\u20a6' + (k / 100).toLocaleString('en-NG', { minimumFractionDigits: 2 })
-  const usdc  = (m: number) => '$' + (m / 1_000_000).toFixed(4)
+  const usdc  = (m: number) => '₦' + (m / 1_000_000).toLocaleString('en-NG', { minimumFractionDigits: 2 })
 
   const rows = transactions.map(tx => {
     const isCredit = CREDIT_TYPES.includes(tx.type)
@@ -119,7 +119,7 @@ function generateStatement(transactions: Transaction[], wallet: Wallet | null | 
       <div class="stat-value">${naira(wallet?.naira_balance_kobo || 0)}</div>
     </div>
     <div class="stat">
-      <div class="stat-label">USDC Balance</div>
+      <div class="stat-label">cNGN Balance</div>
       <div class="stat-value">${usdc(wallet?.usdc_balance_micro || 0)}</div>
     </div>
     <div class="stat">
@@ -140,7 +140,7 @@ function generateStatement(transactions: Transaction[], wallet: Wallet | null | 
         <th>Type</th>
         <th>Description</th>
         <th style="text-align:right">Amount (NGN)</th>
-        <th style="text-align:right">Amount (USDC)</th>
+        <th style="text-align:right">Amount (cNGN)</th>
         <th style="text-align:center">Status</th>
         <th>Reference</th>
       </tr>
@@ -267,7 +267,7 @@ function TransactionModal({ tx, onClose }: { tx: Transaction; onClose: () => voi
             {isCredit ? '+' : '-'}{formatNaira(tx.amount_kobo)}
           </p>
           {tx.amount_usdc_micro && tx.amount_usdc_micro > 0 && (
-            <p className="text-sm text-slate-400 mt-1">{formatUsdc(tx.amount_usdc_micro)}</p>
+            <p className="text-sm text-slate-400 mt-1">{formatCngn(tx.amount_usdc_micro)}</p>
           )}
           <div className="mt-2">{statusBadge(tx.status)}</div>
         </div>
@@ -367,7 +367,7 @@ export default function ActivityView({ transactions, wallet, profile }: Props) {
                         {isCredit ? '+' : '-'}{formatNaira(tx.amount_kobo)}
                       </p>
                       {tx.amount_usdc_micro && tx.amount_usdc_micro > 0 && (
-                        <p className="text-xs text-slate-400">{formatUsdc(tx.amount_usdc_micro)}</p>
+                        <p className="text-xs text-slate-400">{formatCngn(tx.amount_usdc_micro)}</p>
                       )}
                       {tx.status === 'pending' && (
                         <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">Pending</span>

@@ -1,7 +1,10 @@
 const BASE_URL = process.env.FLIPEET_BASE_URL || 'https://api.pay.flipeet.io/api/v1/public'
 const API_KEY = process.env.FLIPEET_API_KEY || ''
 const DEFAULT_COUNTRY = process.env.FLIPEET_COUNTRY_CODE || 'NG'
-const DEFAULT_ASSET = process.env.FLIPEET_ASSET || 'usdc'
+// PawaSave on/off-ramps settle in cNGN end-to-end: Flipeet delivers cNGN to the
+// custody wallet on-ramp, and expects cNGN at its deposit address on off-ramp
+// (custody sends cNGN via sendCngn). Never USDC.
+const DEFAULT_ASSET = process.env.FLIPEET_ASSET || 'cngn'
 const DEFAULT_NETWORK = process.env.FLIPEET_NETWORK || 'base'
 const DEFAULT_CURRENCY = process.env.FLIPEET_FIAT_CURRENCY || 'NGN'
 

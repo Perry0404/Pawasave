@@ -80,7 +80,7 @@ export default function AuthScreen() {
         <Logo size={56} className="mb-5" />
         <h1 className="text-3xl font-bold text-white tracking-tight">PawaSave</h1>
         <p className="text-slate-400 mt-2 text-center text-sm leading-relaxed max-w-xs">
-          Collect naira. Save in dollars.<br />Withdraw anytime. For everyone.
+          Collect naira. Save in cNGN.<br />Earn yield. Withdraw anytime.
         </p>
       </div>
 

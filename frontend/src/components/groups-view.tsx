@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { formatNaira, formatUsdc, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
+import { formatNaira, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
 import { Users, Plus, ChevronRight, Loader2, AlertCircle, ArrowLeft, Send, Vault, Wallet, Copy, Check, Share2, Crown, Bell, ShieldCheck } from 'lucide-react'
 import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
@@ -267,9 +267,9 @@ export default function GroupsView({ user, wallet }: Props) {
     }
 
     if (paymentMethod === 'usdc') {
-      // First withdraw from USDC vault to naira, then contribute.
+      // Pay from savings: withdraw from the cNGN vault to naira, then contribute.
       // Must free cNGN pool funds first (same as withdrawFromVault in use-data.ts),
-      // because most USDC sits in cngn_pool_micro (not usdc_balance_micro) after deposit.
+      // because most savings sit in cngn_pool_micro (not usdc_balance_micro) after deposit.
       const rate = getRate()
       const usdcMicro = koboToMicroUsdc(selected.contribution_amount_kobo, rate)
 
@@ -277,7 +277,7 @@ export default function GroupsView({ user, wallet }: Props) {
       const cngnPool = wallet?.cngn_pool_micro || 0
 
       if (usdcMicro > freeUsdc + cngnPool) {
-        setFeedback('Insufficient USDC vault balance')
+        setFeedback('Insufficient cNGN balance')
         setBusy(false)
         setTimeout(() => setFeedback(''), 3000)
         return
@@ -304,7 +304,7 @@ export default function GroupsView({ user, wallet }: Props) {
         p_usdc_micro: usdcMicro,
       })
       if (vaultErr || !vaultOk) {
-        setFeedback(vaultErr?.message || 'Insufficient USDC vault balance')
+        setFeedback(vaultErr?.message || 'Insufficient cNGN balance')
         setBusy(false)
         setTimeout(() => setFeedback(''), 3000)
         return
@@ -559,7 +559,7 @@ export default function GroupsView({ user, wallet }: Props) {
                 paymentMethod === 'usdc' ? 'bg-white text-cyan-700 shadow-sm' : 'text-slate-500'
               }`}
             >
-              <Vault className="w-3 h-3" /> USDC
+              <Vault className="w-3 h-3" /> cNGN Savings
             </button>
             <button
               onClick={() => setPaymentMethod('naira')}
@@ -616,7 +616,7 @@ export default function GroupsView({ user, wallet }: Props) {
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           Contribute {formatNaira(selected.contribution_amount_kobo)}
-          {paymentMethod === 'usdc' && <span className="text-purple-200 text-xs ml-1">(USDC)</span>}
+          {paymentMethod === 'usdc' && <span className="text-purple-200 text-xs ml-1">(from savings)</span>}
           {paymentMethod === 'crypto' && <span className="text-purple-200 text-xs ml-1">(cNGN)</span>}
         </button>
 

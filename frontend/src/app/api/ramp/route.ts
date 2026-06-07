@@ -15,7 +15,7 @@ import { sendCngn, cngnToShares, withdrawFromLend } from '@/lib/custody'
 
 const FLINT_API_KEY = process.env.FLINT_API_KEY || ''
 const FLINT_BASE = 'https://stables.flintapi.io/v1'
-// Custody address where on-ramped USDC is received. Shared across providers.
+// Custody address where on-ramped cNGN is received. Shared across providers.
 const CUSTODY_ADDRESS =
   process.env.FLINT_CUSTODY_ADDRESS
   || process.env.XEND_CUSTODY_ADDRESS
@@ -29,11 +29,13 @@ const FLIPEET_CUSTODY_ADDRESS =
 const DEFAULT_FEE_PERCENT = 1.5
 const DEFAULT_XEND_ESTIMATED_FEE = 120
 const DEFAULT_FLIPEET_ESTIMATED_FEE = 100
-// Providers auto-enable when credentials are present — no manual flag needed
-const FLINT_CONFIGURED = Boolean(FLINT_API_KEY)
+// PawaSave uses Flipeet only (cNGN end-to-end). Flint and Xend are disabled
+// until explicitly re-enabled with FLINT_ENABLED=true / XEND_ENABLED=true —
+// even if their API keys are present. This keeps them easy to switch back on.
+const FLINT_CONFIGURED = Boolean(FLINT_API_KEY) && process.env.FLINT_ENABLED === 'true'
 const XEND_CONFIGURED = Boolean(
   process.env.XEND_MERCHANT_ID && process.env.XEND_API_KEY && process.env.XEND_PRIVATE_KEY,
-)
+) && process.env.XEND_ENABLED === 'true'
 const FLIPEET_CONFIGURED = Boolean(
   process.env.FLIPEET_API_KEY && FLIPEET_CUSTODY_ADDRESS,
 )
@@ -184,17 +186,17 @@ async function maybeDebitForWithdrawal(
   amountNaira: number,
   reference: string,
 ): Promise<NextResponse | null> {
-  const rate = await getNgnUsdRateFromFlint(FLINT_API_KEY)
-  const usdcMicro = Math.floor((amountNaira / rate) * 1_000_000)
+  // cNGN balance: 1 NGN = 1 cNGN. Debit the naira value as cNGN micro (no rate).
+  const cngnMicro = Math.floor(amountNaira * 1_000_000)
   const { data: ok } = await supabase.rpc('debit_wallet', {
     p_user_id: userId,
     p_naira_kobo: 0,
-    p_usdc_micro: usdcMicro,
+    p_usdc_micro: cngnMicro,
   })
 
   if (!ok) {
     await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
-    return NextResponse.json({ error: 'Insufficient USDC balance' }, { status: 400 })
+    return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 })
   }
 
   return null
@@ -522,10 +524,9 @@ async function runFlipeet(
       })
   } catch (apiErr: unknown) {
     if (type === 'off') {
-      // Refund the user — balance was debited before this API call
-      const rate = await getNgnUsdRateFromFlint(FLINT_API_KEY)
-      const usdcMicro = Math.floor((amount / rate) * 1_000_000)
-      await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: usdcMicro })
+      // Refund the user — balance was debited before this API call (cNGN 1:1)
+      const cngnMicro = Math.floor(amount * 1_000_000)
+      await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: cngnMicro })
       await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
     }
     throw apiErr
@@ -578,7 +579,7 @@ async function runFlipeet(
       } catch (sendErr: unknown) {
         // If the on-chain send fails, refund user and mark failed
         console.error('Flipeet off-ramp on-chain transfer failed:', sendErr)
-        await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: Math.floor((amount / await getNgnUsdRateFromFlint(FLINT_API_KEY)) * 1_000_000) })
+        await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: Math.floor(amount * 1_000_000) })
         await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
         throw new Error('Failed to send withdrawal on-chain — balance refunded')
       }

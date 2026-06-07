@@ -14,8 +14,18 @@ export default function ResetPasswordPage() {
   const [done, setDone] = useState(false)
   const [sessionReady, setSessionReady] = useState(false)
   const [checkingSession, setCheckingSession] = useState(true)
+  const [linkError, setLinkError] = useState('')
 
   const supabase = createClient()
+
+  useEffect(() => {
+    // Surface Supabase error params (?error=... or #error=...) e.g. expired link
+    const search = new URLSearchParams(window.location.search)
+    const hash   = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    const e = search.get('error_description') || search.get('error')
+          || hash.get('error_description')   || hash.get('error')
+    if (e) setLinkError(decodeURIComponent(e).replace(/\+/g, ' '))
+  }, [])
 
   useEffect(() => {
     // onAuthStateChange fires PASSWORD_RECOVERY when Supabase detects a recovery
@@ -76,7 +86,7 @@ export default function ResetPasswordPage() {
         <Logo size={48} className="mb-5" />
         <h1 className="text-xl font-bold text-white mb-2">Reset Link Invalid or Expired</h1>
         <p className="text-slate-400 text-sm text-center max-w-xs mb-6">
-          Request another reset email from the login screen and open the latest link.
+          {linkError || 'Request another reset email from the login screen and open the latest link.'}
         </p>
         <a
           href="/"

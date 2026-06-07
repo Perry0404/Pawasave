@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { formatNaira, formatUsdc, koboToMicroUsdc, microUsdcToKobo, getRate } from '@/lib/format'
+import { formatNaira, formatCngn, koboToMicroUsdc, microUsdcToKobo, getRate } from '@/lib/format'
 import { saveToVault, withdrawFromVault, lockSavings, withdrawLock, useSavingsLocks } from '@/hooks/use-data'
 import { Shield, ArrowDown, ArrowUp, Info, Loader2, Lock, Unlock, TrendingUp, AlertTriangle, Zap, ChevronRight } from 'lucide-react'
 import type { Wallet, SavingsLock } from '@/lib/types'
@@ -80,7 +80,7 @@ export default function VaultView({ wallet, refresh }: Props) {
     try {
       if (flexAction === 'save') {
         await saveToVault(kobo, usdc)
-        flash(`Saved ${formatUsdc(usdc)} to flexible vault`)
+        flash(`Saved ${formatCngn(usdc)} to flexible vault`)
       } else {
         await withdrawFromVault(kobo, usdc)
         flash(`Withdrew ${formatNaira(kobo)} from vault`)
@@ -109,7 +109,7 @@ export default function VaultView({ wallet, refresh }: Props) {
       const selectedDuration = LOCK_DURATIONS.find(d => d.days === lockDuration)
       const selectedAPY = selectedDuration?.apy || LOCK_DURATIONS[0].apy
       await lockSavings(usdc, kobo, lockDuration, selectedAPY, true)
-      flash(`Locked ${formatUsdc(usdc)} for ${lockDuration} days at ${selectedAPY}% APY`)
+      flash(`Locked ${formatCngn(usdc)} for ${lockDuration} days at ${selectedAPY}% APY`)
       refreshLocks()
       setAmount('')
       refresh()
@@ -151,7 +151,7 @@ export default function VaultView({ wallet, refresh }: Props) {
         </span>
       </div>
       <p className="text-3xl font-bold tracking-tight">{formatNaira(cngnTotalKobo)}</p>
-      <p className="text-amber-100 text-sm mt-0.5">{(cngnTotalMicro / 1_000_000).toFixed(4)} USDC total value</p>
+      <p className="text-amber-100 text-sm mt-0.5">{(cngnTotalMicro / 1_000_000).toFixed(2)} cNGN total</p>
       <div className="flex items-center gap-4 mt-4 pt-3 border-t border-white/10 text-xs">
         <div>
           <p className="text-amber-100">Principal</p>
@@ -159,11 +159,11 @@ export default function VaultView({ wallet, refresh }: Props) {
         </div>
         <div>
           <p className="text-amber-200">Yield Earned</p>
-          <p className="font-bold mt-0.5 text-amber-200">{formatUsdc(cngnYieldMicro)}</p>
+          <p className="font-bold mt-0.5 text-amber-200">{formatCngn(cngnYieldMicro)}</p>
         </div>
         <div>
-          <p className="text-amber-100">Liquid USDC</p>
-          <p className="font-semibold mt-0.5">{formatUsdc(wallet.usdc_balance_micro)}</p>
+          <p className="text-amber-100">Liquid cNGN</p>
+          <p className="font-semibold mt-0.5">{formatCngn(wallet.usdc_balance_micro)}</p>
         </div>
         <div>
           <p className="text-amber-100">Locked</p>
@@ -192,7 +192,7 @@ export default function VaultView({ wallet, refresh }: Props) {
       </div>
       {amount && parseFloat(amount) > 0 && (
         <p className="text-xs text-slate-400 mt-2">
-          ≈ {formatUsdc(koboToMicroUsdc(Math.round(parseFloat(amount) * 100), rate))} USDC
+          ≈ {parseFloat(amount).toLocaleString('en-NG')} cNGN
         </p>
       )}
     </div>
@@ -329,11 +329,11 @@ export default function VaultView({ wallet, refresh }: Props) {
               </div>
               <div>
                 <p className="text-[10px] text-purple-400 mb-0.5">Interest</p>
-                <p className="text-sm font-bold text-emerald-600">+{formatUsdc(projectedInterest)}</p>
+                <p className="text-sm font-bold text-emerald-600">+{formatCngn(projectedInterest)}</p>
               </div>
               <div>
                 <p className="text-[10px] text-purple-400 mb-0.5">At Maturity</p>
-                <p className="text-sm font-bold text-purple-900">{formatUsdc(lockUsdc + projectedInterest)}</p>
+                <p className="text-sm font-bold text-purple-900">{formatCngn(lockUsdc + projectedInterest)}</p>
               </div>
             </div>
             <p className="text-[10px] text-purple-400 mt-2 text-center">
@@ -376,7 +376,7 @@ export default function VaultView({ wallet, refresh }: Props) {
                 <div key={lock.id} className={`bg-white rounded-xl border p-4 ${isMatured ? 'border-emerald-300' : 'border-slate-200'}`}>
                   <div className="flex justify-between items-start mb-2">
                     <div>
-                      <p className="text-sm font-bold text-slate-800">{formatUsdc(lock.amount_usdc_micro)}</p>
+                      <p className="text-sm font-bold text-slate-800">{formatCngn(lock.amount_usdc_micro)}</p>
                       <p className="text-xs text-slate-400">{formatNaira(lock.amount_kobo)}</p>
                     </div>
                     <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
@@ -388,7 +388,7 @@ export default function VaultView({ wallet, refresh }: Props) {
                   <div className="flex items-center gap-4 text-xs text-slate-500 mb-3">
                     <span>{lock.apy_percent}% APY</span>
                     <span>{lock.duration_days} days</span>
-                    <span className="text-emerald-600 font-medium">+{formatUsdc(lock.projected_interest_micro)}</span>
+                    <span className="text-emerald-600 font-medium">+{formatCngn(lock.projected_interest_micro)}</span>
                   </div>
                   <button
                     onClick={() => handleWithdrawLock(lock)}
@@ -421,7 +421,7 @@ export default function VaultView({ wallet, refresh }: Props) {
               <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
                 <p className="text-sm font-semibold text-purple-900 mb-2">Lock Terms</p>
                 <p className="text-xs text-purple-800 leading-relaxed">
-                  You are about to lock <strong>{formatUsdc(lockUsdc)}</strong> for <strong>{lockDuration} days</strong> at <strong>{selectedAPY}%</strong> interest.
+                  You are about to lock <strong>{formatCngn(lockUsdc)}</strong> for <strong>{lockDuration} days</strong> at <strong>{selectedAPY}%</strong> interest.
                 </p>
               </div>
 

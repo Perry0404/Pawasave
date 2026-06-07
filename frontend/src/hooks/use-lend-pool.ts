@@ -1,7 +1,7 @@
 "use client"
 import { useState, useEffect, useCallback } from "react"
 import { ethers } from "ethers"
-import { ADDRESSES, LEND_ABI, ERC20_ABI } from "@/lib/contracts"
+import { ADDRESSES, LEND_ABI, ERC20_ABI, CONFIGURED_COLLATERAL, type CollateralToken } from "@/lib/contracts"
 
 const BASE_RPC = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://mainnet.base.org"
 
@@ -19,16 +19,21 @@ export interface PoolStats {
   paused:         boolean
 }
 
+/** One collateral token's state for the connected wallet */
+export interface CollateralEntry extends CollateralToken {
+  deposited:     bigint   // amount posted as collateral
+  walletBalance: bigint   // amount held in wallet
+}
+
 export interface UserPosition {
-  psNgnShares:       bigint   // psNGN held
-  suppliedValue:     bigint   // cNGN value of shares
-  borrowDebt:        bigint   // cNGN owed
-  usdcCollateral:    bigint   // USDC posted
-  collateralValue:   bigint   // cNGN value of collateral
-  borrowLimit:       bigint   // max cNGN borrowable
+  psNgnShares:       bigint            // psNGN held
+  suppliedValue:     bigint            // cNGN value of shares
+  borrowDebt:        bigint            // cNGN owed
+  collateralValue:   bigint            // aggregate cNGN value of all collateral (from contract)
+  borrowLimit:       bigint            // max cNGN borrowable (from contract, per-token LTV applied)
   healthy:           boolean
-  cngnBalance:       bigint   // wallet cNGN
-  usdcBalance:       bigint   // wallet USDC
+  cngnBalance:       bigint            // wallet cNGN (for supplying)
+  collaterals:       CollateralEntry[] // per-token collateral + wallet balances
 }
 
 export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner | null) {
@@ -41,7 +46,6 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
   const readProvider = new ethers.JsonRpcProvider(BASE_RPC)
   const lendRO  = ADDRESSES.LEND ? new ethers.Contract(ADDRESSES.LEND, LEND_ABI,  readProvider) : null
   const cngnRO  = new ethers.Contract(ADDRESSES.CNGN,  ERC20_ABI, readProvider)
-  const usdcRO  = new ethers.Contract(ADDRESSES.USDC,  ERC20_ABI, readProvider)
 
   const b = (v: any): bigint => BigInt(v ?? 0)
 
@@ -78,27 +82,42 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
   const fetchPosition = useCallback(async () => {
     if (!address || !lendRO) return
     try {
-      const [shares, debt, usdcCol, colVal, limit, healthy, cngnBal, usdcBal] =
-        await Promise.all([
-          lendRO.balanceOf(address),
-          lendRO.borrowBalanceCurrent(address),
-          lendRO.collateralBalance(address, ADDRESSES.USDC),
-          lendRO.totalCollateralValue(address),
-          lendRO.borrowLimit(address),
-          lendRO.isHealthy(address),
-          cngnRO.balanceOf(address),
-          usdcRO.balanceOf(address),
-        ])
+      // Per-token collateral + wallet balances for every configured token
+      const collaterals: CollateralEntry[] = await Promise.all(
+        CONFIGURED_COLLATERAL.map(async (tok) => {
+          const token = new ethers.Contract(tok.address, ERC20_ABI, readProvider)
+          const [deposited, walletBalance] = await Promise.all([
+            lendRO.collateralBalance(address, tok.address).catch(() => 0n),
+            token.balanceOf(address).catch(() => 0n),
+          ])
+          return { ...tok, deposited: b(deposited), walletBalance: b(walletBalance) }
+        })
+      )
+
+      const [shares, debt, colVal, limit, healthy] = await Promise.all([
+        lendRO.balanceOf(address),
+        lendRO.borrowBalanceCurrent(address).catch(() => 0n),
+        lendRO.totalCollateralValue(address).catch(() => 0n),
+        lendRO.borrowLimit(address).catch(() => 0n),
+        lendRO.isHealthy(address).catch(() => true),
+      ])
+
       const total      = b(await lendRO.totalSupply())
       const poolAssets = b(await lendRO.totalPoolAssets())
       const bShares    = b(shares)
       const suppliedValue = total > 0n ? (bShares * poolAssets) / total : 0n
+
+      // wallet cNGN for the supply panel
+      const cngnBalance = collaterals.find(c => c.key === "cngn")?.walletBalance
+        ?? b(await cngnRO.balanceOf(address))
+
       setPosition({
         psNgnShares: bShares, suppliedValue,
-        borrowDebt: b(debt), usdcCollateral: b(usdcCol),
+        borrowDebt: b(debt),
         collateralValue: b(colVal), borrowLimit: b(limit),
         healthy: Boolean(healthy),
-        cngnBalance: b(cngnBal), usdcBalance: b(usdcBal),
+        cngnBalance,
+        collaterals,
       })
     } catch (e: any) {
       console.error("fetchPosition error:", e)
@@ -159,17 +178,17 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
     })
   }
 
-  async function depositCollateral(amount: bigint) {
+  async function depositCollateral(token: string, amount: bigint) {
     await run(async () => {
-      await ensureApproval(ADDRESSES.USDC, ADDRESSES.LEND, amount)
-      const tx = await lendRW().depositCollateral(ADDRESSES.USDC, amount)
+      await ensureApproval(token, ADDRESSES.LEND, amount)
+      const tx = await lendRW().depositCollateral(token, amount)
       await tx.wait()
     })
   }
 
-  async function withdrawCollateral(amount: bigint) {
+  async function withdrawCollateral(token: string, amount: bigint) {
     await run(async () => {
-      const tx = await lendRW().withdrawCollateral(ADDRESSES.USDC, amount)
+      const tx = await lendRW().withdrawCollateral(token, amount)
       await tx.wait()
     })
   }

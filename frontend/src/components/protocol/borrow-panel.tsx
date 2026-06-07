@@ -1,8 +1,9 @@
 "use client"
 import { useState } from "react"
-import { ArrowDownCircle, Loader2, Info } from "lucide-react"
-import type { PoolStats, UserPosition } from "@/hooks/use-lend-pool"
-import { fmtCngn, fmtUsdc, fmtPct, parse6 } from "@/lib/format"
+import { ArrowDownCircle, Loader2, Info, ChevronDown } from "lucide-react"
+import type { PoolStats, UserPosition, CollateralEntry } from "@/hooks/use-lend-pool"
+import { CONFIGURED_COLLATERAL } from "@/lib/contracts"
+import { fmtCngn, fmtUnits, fmtToken, fmtPct, parseUnits } from "@/lib/format"
 
 interface Props {
   stats:    PoolStats | null
@@ -10,10 +11,15 @@ interface Props {
   connected: boolean
   txPending: boolean
   error: string | null
-  onDepositCollateral: (amount: bigint) => Promise<void>
-  onWithdrawCollateral:(amount: bigint) => Promise<void>
+  onDepositCollateral: (token: string, amount: bigint) => Promise<void>
+  onWithdrawCollateral:(token: string, amount: bigint) => Promise<void>
   onBorrow: (amount: bigint) => Promise<void>
 }
+
+// Fallback list (disconnected): show tokens with zero balances
+const FALLBACK: CollateralEntry[] = CONFIGURED_COLLATERAL.map(t => ({
+  ...t, deposited: 0n, walletBalance: 0n,
+}))
 
 export function BorrowPanel({ stats, position, connected, txPending, error,
   onDepositCollateral, onWithdrawCollateral, onBorrow }: Props) {
@@ -21,22 +27,25 @@ export function BorrowPanel({ stats, position, connected, txPending, error,
   const [step,   setStep]   = useState<"collateral" | "borrow">("collateral")
   const [action, setAction] = useState<"deposit" | "withdraw">("deposit")
   const [amount, setAmount] = useState("")
+  const [tokenKey, setTokenKey] = useState(CONFIGURED_COLLATERAL[0]?.key ?? "usdc")
 
-  const maxColDeposit  = position?.usdcBalance    ?? 0n
-  const maxColWithdraw = position?.usdcCollateral ?? 0n
-  const maxBorrow      = position?.borrowLimit    ?? 0n
-  const currentDebt    = position?.borrowDebt     ?? 0n
+  const tokens = position?.collaterals?.length ? position.collaterals : FALLBACK
+  const token  = tokens.find(t => t.key === tokenKey) ?? tokens[0]
+
+  const maxColDeposit  = token?.walletBalance ?? 0n
+  const maxColWithdraw = token?.deposited     ?? 0n
+  const maxBorrow      = position?.borrowLimit ?? 0n
+  const currentDebt    = position?.borrowDebt  ?? 0n
   const available      = maxBorrow > currentDebt ? maxBorrow - currentDebt : 0n
-  const originFee      = stats ? stats.originationFee : 0n
 
   async function handleSubmit() {
-    if (!amount) return
-    const parsed = parse6(amount)
+    if (!amount || !token?.address) return
     if (step === "collateral") {
-      if (action === "deposit") await onDepositCollateral(parsed)
-      else await onWithdrawCollateral(parsed)
+      const parsed = parseUnits(amount, token.decimals)
+      if (action === "deposit") await onDepositCollateral(token.address, parsed)
+      else await onWithdrawCollateral(token.address, parsed)
     } else {
-      await onBorrow(parsed)
+      await onBorrow(parseUnits(amount, 6)) // cNGN is 6 decimals
     }
     setAmount("")
   }
@@ -69,6 +78,26 @@ export function BorrowPanel({ stats, position, connected, txPending, error,
 
       {step === "collateral" && (
         <>
+          {/* Collateral token selector */}
+          <label className="label">Collateral asset</label>
+          <div className="relative mb-3">
+            <select
+              value={tokenKey}
+              onChange={e => { setTokenKey(e.target.value); setAmount("") }}
+              className="proto-input appearance-none pr-10 cursor-pointer"
+            >
+              {tokens.map(t => (
+                <option key={t.key} value={t.key}>
+                  {t.symbol} — {t.ltv}% LTV
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="w-4 h-4 text-gray-500 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
+          {token?.note && (
+            <p className="text-xs text-gray-500 mb-3 -mt-1">{token.note}</p>
+          )}
+
           <div className="flex gap-1 mb-4">
             {(["deposit", "withdraw"] as const).map(a => (
               <button key={a} onClick={() => { setAction(a); setAmount("") }}
@@ -76,35 +105,35 @@ export function BorrowPanel({ stats, position, connected, txPending, error,
                   action === a ? "bg-blue-900 text-blue-300 border border-blue-800" : "text-gray-500 hover:text-gray-400"
                 }`}
               >
-                {a} USDC
+                {a} {token?.symbol}
               </button>
             ))}
           </div>
 
           <div className="bg-gray-800/50 rounded-xl p-3 mb-4 text-sm text-gray-400 space-y-1">
             <div className="flex justify-between">
-              <span>Collateral posted</span>
-              <span className="text-white">{fmtUsdc(maxColWithdraw)}</span>
+              <span>{token?.symbol} posted</span>
+              <span className="text-white">{token ? fmtToken(maxColWithdraw, token.decimals, token.symbol) : "—"}</span>
             </div>
             <div className="flex justify-between">
-              <span>cNGN value</span>
+              <span>Total collateral value</span>
               <span className="text-white">{fmtCngn(position?.collateralValue ?? 0n)}</span>
             </div>
             <div className="flex justify-between">
-              <span>Borrow limit (75% LTV)</span>
+              <span>Borrow limit</span>
               <span className="text-brand-400">{fmtCngn(maxBorrow)}</span>
             </div>
           </div>
 
           <div className="mb-4">
             <label className="label flex justify-between">
-              <span>USDC {action}</span>
+              <span>{token?.symbol} {action}</span>
               <button className="text-brand-400 hover:text-brand-300 text-xs"
-                onClick={() => setAmount(action === "deposit"
-                  ? (Number(maxColDeposit)/1e6).toFixed(2)
-                  : (Number(maxColWithdraw)/1e6).toFixed(2)
-                )}>
-                MAX {action === "deposit" ? fmtUsdc(maxColDeposit) : fmtUsdc(maxColWithdraw)}
+                onClick={() => token && setAmount(fmtUnits(
+                  action === "deposit" ? maxColDeposit : maxColWithdraw,
+                  token.decimals, token.decimals,
+                ))}>
+                MAX {token ? fmtUnits(action === "deposit" ? maxColDeposit : maxColWithdraw, token.decimals) : "0"}
               </button>
             </label>
             <input className="proto-input" placeholder="0.00" value={amount}
@@ -162,7 +191,7 @@ export function BorrowPanel({ stats, position, connected, txPending, error,
       >
         {txPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowDownCircle className="w-4 h-4" />}
         {!connected ? "Connect wallet" : txPending ? "Processing…"
-          : step === "collateral" ? `${action === "deposit" ? "Deposit" : "Withdraw"} Collateral`
+          : step === "collateral" ? `${action === "deposit" ? "Deposit" : "Withdraw"} ${token?.symbol ?? "Collateral"}`
           : "Borrow cNGN"}
       </button>
     </div>

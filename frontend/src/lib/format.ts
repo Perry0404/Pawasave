@@ -17,18 +17,33 @@ export function formatCompact(kobo: number): string {
   return '₦' + n.toLocaleString('en-NG')
 }
 
-export function formatUsdc(micro: number): string {
-  return '$' + (micro / 1_000_000).toFixed(2)
+/** Format cNGN micro-units (6 decimals) as naira. 1 cNGN = ₦1. */
+export function formatCngn(micro: number): string {
+  return formatNaira(microCngnToKobo(micro))
 }
 
-export function koboToMicroUsdc(kobo: number, rate = RATE): number {
-  return Math.floor((kobo / 100 / rate) * 1_000_000)
+// Legacy alias — consumer balances are cNGN now, so this also renders ₦.
+export const formatUsdc = formatCngn
+
+// Savings are denominated in cNGN (1 cNGN = ₦1). Balances are stored as cNGN
+// micro-units (6 decimals), so converting to/from kobo is a fixed peg — never a
+// rate. The optional `rate` arg is ignored (kept so existing call sites compile).
+// 1 NGN = 100 kobo = 1_000_000 cNGN micro  →  1 kobo = 10_000 cNGN micro.
+export function koboToMicroCngn(kobo: number): number {
+  return Math.floor(kobo) * 10_000
 }
 
-export function microUsdcToKobo(micro: number, rate = RATE): number {
-  return Math.floor((micro / 1_000_000) * rate * 100)
+export function microCngnToKobo(micro: number): number {
+  return Math.floor(micro / 10_000)
 }
 
+// Backwards-compatible aliases (now cNGN, not USD — the rate arg is ignored).
+export const koboToMicroUsdc = (kobo: number, _rate?: number): number => koboToMicroCngn(kobo)
+export const microUsdcToKobo = (micro: number, _rate?: number): number => microCngnToKobo(micro)
+
+// Live NGN/USD rate is fetched from /api/ramp/rate (Flipeet). This fallback is
+// only ever used for fiat on/off-ramp pricing if that API is unreachable — never
+// to value a saved balance.
 export function getRate(): number {
   return RATE
 }
@@ -56,6 +71,26 @@ export function fmtPct(mantissa: bigint): string {
 export function parse6(value: string): bigint {
   const [whole, frac = ""] = value.split(".")
   return BigInt(whole || "0") * 1_000_000n + BigInt(frac.padEnd(6, "0").slice(0, 6) || "0")
+}
+
+/** Format a bigint amount with arbitrary token decimals */
+export function fmtUnits(amount: bigint, decimals: number, displayDec = 2): string {
+  const base  = 10n ** BigInt(decimals)
+  const whole = amount / base
+  const frac  = amount % base
+  return `${whole.toLocaleString()}.${frac.toString().padStart(decimals, "0").slice(0, displayDec)}`
+}
+
+/** Format a token amount with its symbol, e.g. "12.50 USDT" */
+export function fmtToken(amount: bigint, decimals: number, symbol: string): string {
+  return `${fmtUnits(amount, decimals)} ${symbol}`
+}
+
+/** Parse a decimal string into a bigint with arbitrary token decimals */
+export function parseUnits(value: string, decimals: number): bigint {
+  const [whole, frac = ""] = value.split(".")
+  return BigInt(whole || "0") * (10n ** BigInt(decimals)) +
+    BigInt(frac.padEnd(decimals, "0").slice(0, decimals) || "0")
 }
 
 export function shortAddr(addr: string): string {

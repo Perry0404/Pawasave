@@ -39,6 +39,9 @@ export function useAuth() {
       email,
       password,
       options: {
+        // Confirmation link routes through our callback so the user lands
+        // signed-in on the app (not the Supabase default Site URL).
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=/`,
         data: {
           display_name: displayName,
           transaction_pin_hash: transactionPinHash,

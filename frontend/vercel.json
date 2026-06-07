@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/harvest-vault",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/scan-deposits",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

@@ -2,7 +2,7 @@
 import { useState } from "react"
 import { CheckCircle, AlertTriangle, Loader2, RefreshCw } from "lucide-react"
 import type { UserPosition } from "@/hooks/use-lend-pool"
-import { fmtCngn, fmtUsdc, parse6 } from "@/lib/format"
+import { fmtCngn, fmtToken, parse6 } from "@/lib/format"
 
 interface Props {
   position:  UserPosition | null
@@ -11,7 +11,7 @@ interface Props {
   error:     string | null
   onRepay:     (amount: bigint) => Promise<void>
   onRepayFull: () => Promise<void>
-  onWithdrawCollateral: (amount: bigint) => Promise<void>
+  onWithdrawCollateral: (token: string, amount: bigint) => Promise<void>
   onWithdrawSupply: (shares: bigint) => Promise<void>
 }
 
@@ -20,9 +20,10 @@ export function PositionsPanel({ position, connected, txPending, error,
 
   const [repayAmt, setRepayAmt] = useState("")
 
+  const depositedCollat = (position?.collaterals ?? []).filter(c => c.deposited > 0n)
   const hasSupply = (position?.psNgnShares ?? 0n) > 0n
   const hasDebt   = (position?.borrowDebt  ?? 0n) > 0n
-  const hasCollat = (position?.usdcCollateral ?? 0n) > 0n
+  const hasCollat = depositedCollat.length > 0
 
   if (!connected) {
     return (
@@ -40,7 +41,7 @@ export function PositionsPanel({ position, connected, txPending, error,
     return (
       <div className="proto-card flex flex-col items-center justify-center py-10 text-center">
         <p className="text-gray-400 font-medium">No open positions</p>
-        <p className="text-gray-600 text-sm mt-1">Supply cNGN to earn yield or borrow against USDC</p>
+        <p className="text-gray-600 text-sm mt-1">Supply cNGN to earn yield or borrow against collateral</p>
       </div>
     )
   }
@@ -89,10 +90,6 @@ export function PositionsPanel({ position, connected, txPending, error,
               <p className="font-semibold text-white">{fmtCngn(position.borrowDebt)}</p>
             </div>
             <div>
-              <p className="text-gray-500 text-xs mb-0.5">Collateral (USDC)</p>
-              <p className="font-semibold text-white">{fmtUsdc(position.usdcCollateral)}</p>
-            </div>
-            <div>
               <p className="text-gray-500 text-xs mb-0.5">Collateral Value</p>
               <p className="font-semibold text-white">{fmtCngn(position.collateralValue)}</p>
             </div>
@@ -100,7 +97,33 @@ export function PositionsPanel({ position, connected, txPending, error,
               <p className="text-gray-500 text-xs mb-0.5">Borrow Limit</p>
               <p className="font-semibold text-brand-400">{fmtCngn(position.borrowLimit)}</p>
             </div>
+            <div>
+              <p className="text-gray-500 text-xs mb-0.5">Health</p>
+              <p className={`font-semibold ${position.healthy ? "text-brand-400" : "text-red-400"}`}>
+                {position.healthy ? "Healthy" : "At risk"}
+              </p>
+            </div>
           </div>
+
+          {/* Per-token collateral breakdown */}
+          {hasCollat && (
+            <div className="space-y-2 mb-4">
+              {depositedCollat.map(c => (
+                <div key={c.key} className="flex items-center justify-between bg-gray-800/40 rounded-lg px-3 py-2">
+                  <span className="text-sm text-gray-300">{fmtToken(c.deposited, c.decimals, c.symbol)}</span>
+                  {!hasDebt && (
+                    <button
+                      onClick={() => onWithdrawCollateral(c.address, c.deposited)}
+                      disabled={txPending}
+                      className="text-xs text-brand-400 hover:text-brand-300 font-semibold"
+                    >
+                      Withdraw
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           {!position.healthy && (
             <div className="flex items-center gap-2 bg-red-950/40 text-red-300 text-xs p-2.5 rounded-lg mb-3">
@@ -134,16 +157,6 @@ export function PositionsPanel({ position, connected, txPending, error,
                 {txPending ? <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" /> : "Repay Full + Reclaim Collateral"}
               </button>
             </div>
-          )}
-
-          {!hasDebt && hasCollat && (
-            <button
-              onClick={() => onWithdrawCollateral(position.usdcCollateral)}
-              disabled={txPending}
-              className="proto-outline w-full text-sm"
-            >
-              Withdraw Collateral
-            </button>
           )}
         </div>
       )}

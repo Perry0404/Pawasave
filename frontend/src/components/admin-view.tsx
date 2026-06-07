@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { formatNaira, formatUsdc } from '@/lib/format'
+import { formatNaira, formatCngn } from '@/lib/format'
 import type { AdminFeeSummary, AdminUserStats, AdminTxVolume, PlatformFee } from '@/lib/types'
 import { Shield, DollarSign, Users, Activity, TrendingUp, Loader2, Lock, AlertTriangle, ArrowUpRight, ArrowDownLeft, Eye, EyeOff, LogOut, Banknote, ChevronDown, BarChart3 } from 'lucide-react'
 import Link from 'next/link'
@@ -276,12 +276,12 @@ export default function AdminView() {
             <p className="font-bold text-slate-800">{formatNaira(users?.total_naira_kobo || 0)}</p>
           </div>
           <div>
-            <p className="text-xs text-slate-500">USDC Vaults</p>
-            <p className="font-bold text-slate-800">{formatUsdc(users?.total_usdc_micro || 0)}</p>
+            <p className="text-xs text-slate-500">cNGN Savings</p>
+            <p className="font-bold text-slate-800">{formatCngn(users?.total_usdc_micro || 0)}</p>
           </div>
           <div>
-            <p className="text-xs text-slate-500">Locked USDC</p>
-            <p className="font-bold text-slate-800">{formatUsdc(users?.total_locked_usdc_micro || 0)}</p>
+            <p className="text-xs text-slate-500">Locked cNGN</p>
+            <p className="font-bold text-slate-800">{formatCngn(users?.total_locked_usdc_micro || 0)}</p>
           </div>
           <div>
             <p className="text-xs text-slate-500">Active Locks</p>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { getNgnUsdRateFromFlipeet, ngnToCngnMicro } from '@/lib/ramp-rate'
+import { ngnToCngnMicro } from '@/lib/ramp-rate'
 import { supplyToLend } from '@/lib/custody'
 
 function readString(...values: unknown[]) {
@@ -115,29 +115,21 @@ export async function POST(request: NextRequest) {
       })
 
       if (userId) {
-        // Auto-process proxy deposit
-        const destinationUsdcDirect = readNumber(
+        // Auto-process proxy deposit. cNGN end-to-end: credit the naira value as
+        // cNGN micro (1 NGN = 1 cNGN). The *_usdc_micro param names are legacy.
+        const amountNaira = readNumber(
+          data?.source?.amount,
           data?.destination?.amount,
-          data?.destination?.amount_usd,
+          data?.amount,
+          (body as any).amount,
         )
-        let usdcMicro: number
-        if (destinationUsdcDirect > 0) {
-          usdcMicro = Math.floor(destinationUsdcDirect * 1_000_000)
-        } else {
-          const amountNaira = readNumber(data?.source?.amount, data?.amount, (body as any).amount)
-          if (amountNaira > 0) {
-            const rate = await getNgnUsdRateFromFlipeet()
-            usdcMicro = Math.floor((amountNaira / rate) * 1_000_000)
-          } else {
-            usdcMicro = 0
-          }
-        }
+        const cngnMicro = Math.floor(amountNaira * 1_000_000)
 
-        if (usdcMicro > 0) {
+        if (cngnMicro > 0) {
           await supabase.rpc('process_proxy_deposit', {
             p_user_id: userId,
             p_proxy_member_id: beneficiaryId,
-            p_amount_usdc_micro: usdcMicro,
+            p_amount_usdc_micro: cngnMicro,
             p_reference: reference,
           })
         }
@@ -155,9 +147,9 @@ export async function POST(request: NextRequest) {
       .eq('id', tx.id)
 
     if (tx.type === 'deposit') {
-      // Route to cNGN: user deposits NGN → credited as cNGN (1 NGN = 1 cNGN).
-      // Source amount in NGN maps directly to cNGN micro (6 decimals).
-      // Fallback: if cNGN amount not available, use destination USDC * NGN rate.
+      // cNGN end-to-end: user deposits NGN → credited as cNGN (1 NGN = 1 cNGN).
+      // The naira value maps directly to cNGN micro (6 decimals); no USD rate is
+      // used to value the balance. (*_usdc_micro params are legacy DB names.)
       const amountNaira = readNumber(
         data?.source?.amount,
         data?.amount,
@@ -168,27 +160,24 @@ export async function POST(request: NextRequest) {
       const feeNaira = feeKobo / 100
       const userNaira = Math.max(0, amountNaira - feeNaira)
 
-      // Use Flipeet's live NGN/USD rate for USDC accounting + cNGN official rate for cNGN amount
-      const flipeetRate = await getNgnUsdRateFromFlipeet()
-      const cngnMicroBig = await ngnToCngnMicro(userNaira) // official cNGN rate (≈1:1 NGN)
+      const cngnMicroBig = await ngnToCngnMicro(userNaira) // ≈ userNaira * 1e6 (cNGN peg)
       const cngnMicro = Number(cngnMicroBig)
-      const userUsdcMicro = Math.floor((userNaira / flipeetRate) * 1_000_000)
 
-      // Credit user's Supabase balance
+      // Credit user's cNGN balance
       await supabase.rpc('credit_wallet', {
         p_user_id: tx.user_id,
         p_naira_kobo: 0,
-        p_usdc_micro: userUsdcMicro,
+        p_usdc_micro: cngnMicro,
       })
 
       await supabase
         .from('transactions')
-        .update({ amount_usdc_micro: userUsdcMicro })
+        .update({ amount_usdc_micro: cngnMicro })
         .eq('id', tx.id)
 
       await supabase.rpc('allocate_cngn_pool', {
         p_user_id: tx.user_id,
-        p_usdc_micro: userUsdcMicro,
+        p_usdc_micro: cngnMicro,
       })
 
       // Supply cNGN to PawasaveLend for yield (flexible savings)
@@ -216,12 +205,12 @@ export async function POST(request: NextRequest) {
       .eq('id', tx.id)
 
     if (tx.type === 'withdrawal') {
-      const flipeetRate = await getNgnUsdRateFromFlipeet()
-      const usdcMicro = Math.floor((tx.amount_kobo / 100 / flipeetRate) * 1_000_000)
+      // Refund the cNGN that was debited (1 NGN = 1 cNGN). amount_kobo → cNGN micro.
+      const cngnMicro = Math.floor(tx.amount_kobo) * 10_000
       await supabase.rpc('credit_wallet', {
         p_user_id: tx.user_id,
         p_naira_kobo: 0,
-        p_usdc_micro: usdcMicro,
+        p_usdc_micro: cngnMicro,
       })
     }
   }

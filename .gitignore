@@ -6,6 +6,8 @@ artifacts/
 cache/
 # TypeScript incremental build info
 *.tsbuildinfo
+# One-off secret scratch files (never commit)
+DEPOSIT_MNEMONIC.txt
 .env
 *.env.local
 .turbo/

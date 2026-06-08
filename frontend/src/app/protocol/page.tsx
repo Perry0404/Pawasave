@@ -6,7 +6,7 @@ import { StatsBar }     from "@/components/protocol/stats-bar"
 import { SupplyPanel }  from "@/components/protocol/supply-panel"
 import { BorrowPanel }  from "@/components/protocol/borrow-panel"
 import { PositionsPanel } from "@/components/protocol/positions-panel"
-import { RefreshCw, ExternalLink, FileText } from "lucide-react"
+import { RefreshCw, ExternalLink } from "lucide-react"
 import Link from "next/link"
 import Logo from "@/components/logo"
 import { ADDRESSES }    from "@/lib/contracts"
@@ -44,15 +44,8 @@ export default function ProtocolPage() {
             Supply cNGN to earn yield from Nigerian borrowers.
             Borrow cNGN against USDC, USDT, cNGN, tokenized T-bills & RWAs at market rates.
           </p>
-          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 mt-4">
-            <Link
-              href="/whitepaper"
-              className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition font-medium"
-            >
-              <FileText className="w-3.5 h-3.5" />
-              Read the Whitepaper
-            </Link>
-            {ADDRESSES.LEND && (
+          {ADDRESSES.LEND && (
+            <div className="flex items-center justify-center mt-4">
               <a
                 href={`https://basescan.org/address/${ADDRESSES.LEND}`}
                 target="_blank"
@@ -62,8 +55,8 @@ export default function ProtocolPage() {
                 <ExternalLink className="w-3 h-3" />
                 {shortAddr(ADDRESSES.LEND)} on Basescan
               </a>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Stats */}

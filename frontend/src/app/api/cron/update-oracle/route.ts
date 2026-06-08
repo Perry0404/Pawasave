@@ -28,6 +28,8 @@ const ORACLE_ABI = [
 
 const USDC_DEFAULT = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const USDT_DEFAULT = '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2'
+const CNGN_DEFAULT = '0x46C85152bFe9f96829aA94755D9f915F9B10EF5F'
+const CNGN_PRICE = 1000000n // 1 cNGN = 1 cNGN (peg), 6 decimals
 
 export const dynamic = 'force-dynamic'
 
@@ -57,23 +59,20 @@ export async function GET(request: NextRequest) {
     const keeper   = new ethers.Wallet(keeperKey, provider)
     const oracle   = new ethers.Contract(oracleAddr, ORACLE_ABI, keeper)
 
+    // USDC/USDT track the live USD rate; cNGN is the peg (1 cNGN = 1 cNGN).
+    // All are re-pushed every run so the oracle's 1h staleness timer never trips.
     const tokens = [
-      { sym: 'USDC', addr: process.env.USDC_TOKEN_ADDRESS || USDC_DEFAULT },
-      { sym: 'USDT', addr: process.env.USDT_TOKEN_ADDRESS || USDT_DEFAULT },
+      { sym: 'USDC', addr: process.env.USDC_TOKEN_ADDRESS || USDC_DEFAULT, price },
+      { sym: 'USDT', addr: process.env.USDT_TOKEN_ADDRESS || USDT_DEFAULT, price },
+      { sym: 'cNGN', addr: process.env.CNGN_TOKEN_ADDRESS || CNGN_DEFAULT, price: CNGN_PRICE },
     ]
 
     const results: Record<string, string> = {}
     for (const t of tokens) {
       try {
-        const current: bigint = await oracle.prices(t.addr)
-        const diffBps = current > 0n
-          ? (price > current ? ((price - current) * 10000n) / current : ((current - price) * 10000n) / current)
-          : 10000n
-        // Skip if within 0.5% AND not stale-risky (refresh anyway every run to reset the 1h clock)
-        // We always push so the staleness timer resets; gas on Base is negligible.
-        const tx = await oracle.setPrice(t.addr, price)
+        const tx = await oracle.setPrice(t.addr, t.price)
         await tx.wait()
-        results[t.sym] = `set ${price.toString()} (Δ${(Number(diffBps) / 100).toFixed(2)}%) tx ${tx.hash}`
+        results[t.sym] = `set ${t.price.toString()} tx ${tx.hash}`
       } catch (e: any) {
         results[t.sym] = `error: ${e?.message || e}`
       }

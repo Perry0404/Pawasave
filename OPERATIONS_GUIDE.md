@@ -52,7 +52,7 @@ PAUTO_VAULT_ADDRESS=0x...        # or NEXT_PUBLIC_PAUTO_VAULT_ADDRESS (already s
 VAULT_HARVESTER_PRIVATE_KEY=0x...
 PRICE_ORACLE_ADDRESS=0x...
 ORACLE_KEEPER_PRIVATE_KEY=0x...
-PAWASAVE_LEND_ADDRESS=0x5ec3a2a7a273e8fb43fa9840c1382b7287c5f532
+PAWASAVE_LEND_ADDRESS=0xA540FB9a23DDB7Cd989CDe0d924dd2a76533a9eA
 USDC_TOKEN_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
 CRON_SECRET=<random string>      # secures /api/cron/* — set the SAME value in Vercel Cron
 ```
@@ -165,7 +165,7 @@ KYC and securities compliance — a months-long project, not a code change.
 ### The real path: partner with an issuer (e.g. the cNGN team)
 For genuine T-bill/RWA collateral, partner with an issuer who has already done the
 legal + custody work, and have them:
-1. **Allowlist the pool** `0x5ec3a2a7a273e8fb43fa9840c1382b7287c5f532` so it can
+1. **Allowlist the pool** `0xA540FB9a23DDB7Cd989CDe0d924dd2a76533a9eA` so it can
    hold the (usually permissioned) token — otherwise `depositCollateral` reverts.
 2. Allowlist liquidators (or pre-agree a liquidation path) so unhealthy positions
    can still be closed.

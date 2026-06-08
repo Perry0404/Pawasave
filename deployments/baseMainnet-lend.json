@@ -1,0 +1,9 @@
+{
+  "cngnToken": "0x46C85152bFe9f96829aA94755D9f915F9B10EF5F",
+  "interestRateModel": "0x3791428B06CF63c320Be458bB2e0F1832127daA0",
+  "priceOracle": "0xa89d62917FeCFb85d31A38e5FE7EA3F603beA403",
+  "pawasaveLend": "0xA540FB9a23DDB7Cd989CDe0d924dd2a76533a9eA",
+  "treasury": "0xf1d59337b781f31bb4d0edc56ed091017b65cc22",
+  "oracleKeeper": "0x22b1b2b95bbb4a5897504afed9961bf25e5e9719",
+  "timestamp": 1780905050663
+}

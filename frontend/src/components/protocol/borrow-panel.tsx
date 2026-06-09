@@ -37,7 +37,10 @@ export function BorrowPanel({ stats, position, collateralStatus, connected, txPe
       ...t,
       deposited:     live?.deposited     ?? 0n,
       walletBalance: live?.walletBalance ?? 0n,
-      live: !!t.address && collateralStatus[t.key] === true,
+      // Optimistic: a token with a real address is "live" unless the chain
+      // EXPLICITLY says not-accepted. A pending/failed read (undefined) won't
+      // make live collateral look dead.
+      live: !!t.address && collateralStatus[t.key] !== false,
     }
   })
   const token = tokens.find(t => t.key === tokenKey) ?? tokens[0]

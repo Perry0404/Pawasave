@@ -93,11 +93,15 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
             const info = await lendRO.collaterals(tok.address)
             return [tok.key, Boolean(info.accepted)] as const
           } catch {
-            return [tok.key, false] as const
+            // Read failed (e.g. public RPC rate-limited the burst) — return null
+            // so we DON'T record a false. The UI stays optimistic for tokens that
+            // have an address; only a confirmed `false` marks them "coming soon".
+            return null
           }
         })
       )
-      setCollateralStatus(Object.fromEntries(entries))
+      const ok = entries.filter((e): e is readonly [string, boolean] => e !== null)
+      setCollateralStatus(prev => ({ ...prev, ...Object.fromEntries(ok) }))
     } catch (e: any) {
       console.error("fetchCollateralStatus error:", e)
     }

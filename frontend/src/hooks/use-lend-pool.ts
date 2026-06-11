@@ -3,7 +3,39 @@ import { useState, useEffect, useCallback } from "react"
 import { ethers } from "ethers"
 import { ADDRESSES, LEND_ABI, ERC20_ABI, CONFIGURED_COLLATERAL, type CollateralToken } from "@/lib/contracts"
 
-const BASE_RPC = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://mainnet.base.org"
+// The public mainnet.base.org endpoint aggressively rate-limits the burst of
+// read calls this hook makes on load, dropping ~30–100% of them — which made
+// pool stats show "N/A" and live collateral show "coming soon". We instead use
+// a FallbackProvider across several reliable public endpoints (quorum 1: first
+// success wins, automatically routes around a flaky/dead node). Override with a
+// dedicated endpoint (Alchemy/QuickNode) by setting NEXT_PUBLIC_BASE_RPC_URL —
+// comma-separated for multiple.
+const DEFAULT_BASE_RPCS = [
+  "https://base.publicnode.com",
+  "https://base.drpc.org",
+  "https://1rpc.io/base",
+  "https://base.gateway.tenderly.co",
+]
+
+let _readProvider: ethers.AbstractProvider | null = null
+function getReadProvider(): ethers.AbstractProvider {
+  if (_readProvider) return _readProvider
+  const env  = process.env.NEXT_PUBLIC_BASE_RPC_URL
+  const urls = (env ? env.split(",") : DEFAULT_BASE_RPCS).map(s => s.trim()).filter(Boolean)
+  if (urls.length === 1) {
+    _readProvider = new ethers.JsonRpcProvider(urls[0], 8453, { staticNetwork: true })
+  } else {
+    _readProvider = new ethers.FallbackProvider(
+      urls.map((url, i) => ({
+        provider: new ethers.JsonRpcProvider(url, 8453, { staticNetwork: true }),
+        priority: i + 1, stallTimeout: 2000, weight: 1,
+      })),
+      8453,
+      { quorum: 1 },
+    )
+  }
+  return _readProvider
+}
 
 export interface PoolStats {
   totalAssets:    bigint
@@ -14,7 +46,6 @@ export interface PoolStats {
   utilization:    number  // 0–100
   exchangeRate:   bigint
   reserveFactor:  bigint
-  collatFactor:   bigint
   originationFee: bigint
   paused:         boolean
 }
@@ -47,7 +78,7 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
   // "coming soon" before connecting.
   const [collateralStatus, setCollateralStatus] = useState<Record<string, boolean>>({})
 
-  const readProvider = new ethers.JsonRpcProvider(BASE_RPC)
+  const readProvider = getReadProvider()
   const lendRO  = ADDRESSES.LEND ? new ethers.Contract(ADDRESSES.LEND, LEND_ABI,  readProvider) : null
   const cngnRO  = new ethers.Contract(ADDRESSES.CNGN,  ERC20_ABI, readProvider)
 
@@ -55,19 +86,23 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
 
   const fetchStats = useCallback(async () => {
     if (!lendRO) return
+    // Each read resolves independently: a single dropped call can no longer
+    // reject the whole batch and blank the stats bar. Defaults are the values
+    // an empty/healthy pool returns. (collateralFactorMantissa was removed — the
+    // contract uses per-token factors, so that global getter doesn't exist.)
+    const r = async <T,>(p: Promise<T>, d: T): Promise<T> => { try { return await p } catch { return d } }
     try {
-      const [assets, borrows, cash, supplyAPY, borrowAPR, rate, rf, cf, of, paused] =
+      const [assets, borrows, cash, supplyAPY, borrowAPR, rate, rf, of, paused] =
         await Promise.all([
-          lendRO.totalPoolAssets(),
-          lendRO.totalBorrows(),
-          lendRO.getCash(),
-          lendRO.currentSupplyAPY(),
-          lendRO.currentBorrowAPR(),
-          lendRO.exchangeRate(),
-          lendRO.reserveFactorMantissa(),
-          lendRO.collateralFactorMantissa(),
-          lendRO.originationFeeMantissa(),
-          lendRO.paused(),
+          r(lendRO.totalPoolAssets(),       0n),
+          r(lendRO.totalBorrows(),          0n),
+          r(lendRO.getCash(),               0n),
+          r(lendRO.currentSupplyAPY(),      0n),
+          r(lendRO.currentBorrowAPR(),      0n),
+          r(lendRO.exchangeRate(),          1000000n),
+          r(lendRO.reserveFactorMantissa(), 0n),
+          r(lendRO.originationFeeMantissa(),0n),
+          r(lendRO.paused(),                false),
         ])
       const ba = b(assets), bb = b(borrows)
       const util = ba > 0n ? Number((bb * 100n) / ba) : 0
@@ -75,7 +110,7 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
         totalAssets: ba, totalBorrows: bb, cash: b(cash),
         supplyAPY: b(supplyAPY), borrowAPR: b(borrowAPR),
         utilization: util, exchangeRate: b(rate),
-        reserveFactor: b(rf), collatFactor: b(cf),
+        reserveFactor: b(rf),
         originationFee: b(of), paused: Boolean(paused),
       })
     } catch (e: any) {

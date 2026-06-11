@@ -126,7 +126,6 @@ export const LEND_ABI = [
   "function currentSupplyAPY() view returns (uint256)",
   "function getCash() view returns (uint256)",
   "function reserveFactorMantissa() view returns (uint256)",
-  "function collateralFactorMantissa() view returns (uint256)",
   "function collaterals(address) view returns (bool accepted, uint8 decimals, uint256 collateralFactor)",
   "function originationFeeMantissa() view returns (uint256)",
   "function paused() view returns (bool)",

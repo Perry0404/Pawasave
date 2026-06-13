@@ -4,7 +4,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { validatePosInvoice, processPosInvoice, registerProxyMember, proxyCryptoToFiatTransfer, proxyFundsTransfer } from '@/lib/xend'
 import {
-  FlipeetApiError,
   FlipeetInitResult,
   getFlipeetRate,
   initializeFlipeetOffRamp,
@@ -89,42 +88,18 @@ function calcFlintFees(amountNaira: number, type: RampType) {
   return Math.ceil(subtotal + vat + gasFee)
 }
 
-function isAuthError(message: string) {
-  return /invalid key|invalid api key|unauthorized|forbidden|401|403/i.test(message)
-}
-
 function formatProviderError(provider: Provider, error: unknown) {
+  // Log the real provider error server-side only. Never leak which providers/keys
+  // are configured, or raw third-party messages, to the client (FIND-API-09).
   const message = error instanceof Error ? error.message : 'Service temporarily unavailable'
+  console.error(`[ramp] ${provider} error:`, message)
 
-  if (provider === 'flint' && isAuthError(message)) {
-    return 'Flint authentication failed. Confirm FLINT_API_KEY is the live API key on the active deployment, then redeploy.'
+  // The one genuinely useful, non-revealing hint to surface to users.
+  if (/insufficient|balance|liquidity/i.test(message)) {
+    return 'Withdrawals are temporarily unavailable. Please try again in a few minutes or contact support.'
   }
 
-  if (provider === 'xend' && /credentials not configured|private key/i.test(message)) {
-    return 'Xend is not fully configured. Merchant API calls require XEND_PRIVATE_KEY as the merchant private PEM, not the public key uploaded to Xend.'
-  }
-
-  if (provider === 'flipeet') {
-    const status = error instanceof FlipeetApiError ? error.status : 0
-    if (status === 401 || status === 403 || isAuthError(message)) {
-      return 'Flipeet authentication failed. Confirm FLIPEET_API_KEY is set correctly in Vercel environment variables.'
-    }
-    if (/insufficient|balance|liquidity/i.test(message)) {
-      return 'Withdrawals are temporarily unavailable. Please try again in a few minutes or contact support.'
-    }
-    // Flipeet occasionally leaks internal DB enum errors (e.g. "Invalid input value for enum
-    // transaction_status_enum"). These are transient API-side bugs — show a clean message.
-    if (/invalid input value for enum|transaction_status_enum|enum.*status/i.test(message)) {
-      return 'Payment provider is temporarily unavailable. Please wait a moment and try again, or contact support if it persists.'
-    }
-    // 400 without a descriptive message = bad request (missing/invalid field our side)
-    if (status === 400 && (message === `Flipeet API error 400` || !message.trim())) {
-      return 'Payment provider rejected the request. Please try again or contact support.'
-    }
-    return `Flipeet: ${message}`
-  }
-
-  return message
+  return 'Payment provider is temporarily unavailable. Please try again shortly, or contact support if it persists.'
 }
 
 async function getNumberSetting(supabase: any, key: string, fallback: number): Promise<number> {

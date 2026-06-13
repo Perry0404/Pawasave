@@ -42,7 +42,7 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 | FIND-FIN-06 | APY values hardcoded/inconsistent | ⬜ | Batch 4 — platform_settings source of truth |
 | FIND-API-05 | In-memory rate limiter | 🔵 | Batch 8 — needs Upstash |
 | FIND-API-08 | Rate endpoint unauthenticated | ⬜ | Batch 4 — cache + limit |
-| FIND-API-09 | Error messages leak internals | ⬜ | Batch 4 — generic client messages |
+| FIND-API-09 | Error messages leak internals | ✅ | Generic client messages; provider details logged server-side only |
 | FIND-INFRA-01 | Empty next.config.js | ✅ | poweredByHeader off, strict mode, compress |
 | FIND-INFRA-02 | No CSP | ✅ | CSP set in middleware (pragmatic, non-breaking) |
 | FIND-INFRA-04 | No runtime kill-switch | 🔵 | Env flags (FLINT/XEND_ENABLED) gate today; DB kill-switch optional |
@@ -85,9 +85,9 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 | FIND-3P-01 | Flipeet no request signing | 🟣 | Provider limitation; TLS + key rotation |
 | FIND-3P-02 | Off-ramp refund single point | ⬜ | Batch 4 — reconciliation cron |
 | FIND-3P-04 | NGN/USD fallback stale | ⬜ | Batch 4 |
-| FIND-FE-02 | window.ethereum no validation | ⬜ | Batch 6 |
-| FIND-FE-03 | External login image | ⬜ | Batch 6 |
-| FIND-FE-04 | confirm() for consent | ⬜ | Batch 6 |
+| FIND-FE-02 | window.ethereum no validation | 🟣 | Accepted — standard web3; chain is validated before any signing. Not meaningfully fixable client-side |
+| FIND-FE-03 | External login image | ⬜ | Low — CSP `img-src` constrains it; host badge locally to fully close |
+| FIND-FE-04 | confirm() for consent | ⬜ | Low/cosmetic — replace native confirm() with the in-app modal; action still needs explicit click |
 | FIND-INFRA-03 | Hardcoded contract addrs | 🟣 | Public addresses; acceptable |
 | FIND-INFRA-05 | Unpinned deps | ⬜ | Batch 5 |
 | FIND-SC-18 | closeFactor ordering fragility | ⬜ | Batch 7 (no active bug) |

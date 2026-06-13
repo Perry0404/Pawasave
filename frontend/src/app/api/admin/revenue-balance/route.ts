@@ -10,11 +10,22 @@ function timingSafeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(aa, bb)
 }
 
-export async function GET(request: NextRequest) {
-  // Simple auth via query param for admin polling
-  const pw = request.nextUrl.searchParams.get('pw')
+/**
+ * POST /api/admin/revenue-balance
+ * Auth: admin password in the JSON body (FIND-API-02 — never in the URL query,
+ * which would leak into server/CDN logs, browser history and Referer headers).
+ */
+export async function POST(request: NextRequest) {
   const adminPassword = process.env.ADMIN_PASSWORD || ''
-  if (!pw || !adminPassword || !timingSafeEqual(pw, adminPassword)) {
+
+  let body: { password?: string }
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  if (!body.password || !adminPassword || !timingSafeEqual(body.password, adminPassword)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

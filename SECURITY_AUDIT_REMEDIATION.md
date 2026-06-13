@@ -25,9 +25,9 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 | FIND-API-04 | Flint webhook auth conditional | ✅ | Fail-closed + gated by `FLINT_ENABLED` |
 | FIND-API-06 | Cron accepts all if no secret | ✅ | Shared `checkCronAuth` — fail-closed |
 | FIND-API-07 | Esusu yield endpoint unauthenticated | ✅ | Requires session + group membership |
-| FIND-API-02 | Admin password in URL query | ⬜ | Batch 2 |
-| FIND-FE-01 | Admin password in sessionStorage | ⬜ | Batch 2 |
-| FIND-AUTH-03 | Admin single password, no MFA | ⬜ | Batch 2 (token) + MFA later |
+| FIND-API-02 | Admin password in URL query | ✅ | Moved to POST body (password auth retained per product decision) |
+| FIND-FE-01 | Admin password in sessionStorage | 🔵 | Password admin retained by decision; optional in-memory-only hardening |
+| FIND-AUTH-03 | Admin single password, no MFA | 🔵 | Password retained by decision; MFA optional later |
 | FIND-AUTH-02 | KYC ID unsalted SHA-256 | ⬜ | Batch 3 |
 | FIND-FIN-04 | Vault withdrawal TOCTOU | ⬜ | Batch 4 — atomic RPC |
 

@@ -99,6 +99,9 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
     
     event LockEnforced(address indexed user, uint256 depositIndex);
     
+    event HarvestFailed(address indexed strategy);
+    event EmergencyWithdrawFailed(address indexed strategy);
+
     // ====================== MODIFIERS ======================
     modifier onlyHarvester() {
         require(hasRole(HARVESTER_ROLE, msg.sender), "Not harvester");
@@ -302,8 +305,12 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
         // Get new balance
         uint256 currentBalance = assetToken.balanceOf(address(this));
         totalYield = currentBalance - previousBalance;
-        
-        require(totalYield > 0, "No yield harvested");
+
+        // Clean no-op when there's nothing to harvest (FIND-SC-09) — external
+        // harvesters get 0 instead of a revert.
+        if (totalYield == 0) {
+            return 0;
+        }
         
         // Calculate platform fee
         uint256 platformFee = (totalYield * platformFeeBps) / 10000;
@@ -328,11 +335,11 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
      * @param strategy Strategy address
      */
     function _harvestFromStrategy(address strategy) internal {
-        // Call harvest on strategy (customize based on actual strategy interface)
-        strategy.call(abi.encodeWithSignature("harvest()"));
-        
-        // Silently continue if harvest not supported
-        // This allows flexibility for different strategy types
+        // Not every strategy exposes harvest(); a failed call is tolerated (yield
+        // is still captured via the balance delta in harvestYield), but we surface
+        // it via an event instead of silently swallowing the error (FIND-SC-04).
+        (bool ok, ) = strategy.call(abi.encodeWithSignature("harvest()"));
+        if (!ok) emit HarvestFailed(strategy);
     }
 
     // ====================== REBALANCING ======================
@@ -531,8 +538,24 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
      * @dev Use only in emergency
      */
     function emergencyWithdraw() external onlyOwner {
-        // Implement based on strategy interfaces
         _pause();
+        // Pull everything we can back from the strategies into the vault so funds
+        // aren't stranded in a compromised/upgraded strategy (FIND-SC-06).
+        // Best-effort: failures are surfaced via event, not reverted.
+        uint256 inPrimary = assetToken.balanceOf(primaryStrategy);
+        if (inPrimary > 0) {
+            (bool ok, ) = primaryStrategy.call(
+                abi.encodeWithSignature("withdraw(uint256,address,address)", inPrimary, address(this), address(this))
+            );
+            if (!ok) emit EmergencyWithdrawFailed(primaryStrategy);
+        }
+        uint256 inFallback = assetToken.balanceOf(fallbackStrategy);
+        if (inFallback > 0) {
+            (bool ok2, ) = fallbackStrategy.call(
+                abi.encodeWithSignature("withdraw(uint256,address,address)", inFallback, address(this), address(this))
+            );
+            if (!ok2) emit EmergencyWithdrawFailed(fallbackStrategy);
+        }
     }
 
     // ====================== INTERNAL VAULT FUNCTIONS ======================

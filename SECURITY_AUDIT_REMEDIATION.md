@@ -51,29 +51,39 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 | FIND-3P-03 | Xend defaults to staging URL | ✅ | Gated; will default prod when re-enabled |
 | FIND-DEP-01 | No npm audit in pipeline | ✅ | npm audit (high+) in CI for frontend + contracts |
 
-## Smart contracts (Batch 7 — one redeploy while TVL=0)
+## Smart contracts
 
+> ✅ = patched in source **and** unit-tested (`test/audit-fixes.ts`, 6 passing).
+> **None of these are live until the single redeploy (7c)**, which is gated on the
+> 7b vault redesign + a re-audit. Patches compile (`npx hardhat compile`).
+
+**Batch 7a — contained patches (done, tested):**
 | ID | Finding | Status |
 |----|---------|--------|
-| FIND-SC-01 | `_checkLocks()` O(n) DoS | ⬜ |
-| FIND-SC-02 | Any lock blocks all withdrawals | ⬜ |
-| FIND-SC-03/08 | `totalAssets()` donation manipulation | ⬜ |
-| FIND-SC-04 | Harvest swallows errors | ⬜ |
-| FIND-SC-05/07 | Strategy interface + timelock | ⬜ |
-| FIND-SC-06 | `emergencyWithdraw()` no-op | ⬜ |
-| FIND-SC-09 | harvestYield reverts on no yield | ⬜ |
-| FIND-SC-11 | borrow() fee accounting | ⬜ |
-| FIND-SC-13 | Liquidation stale price | ⬜ |
-| FIND-SC-14 | getCash bad-debt underflow | ⬜ |
-| FIND-SC-15 | Simple vs compound interest | ⬜ |
-| FIND-SC-16 | withdraw() lacks whenNotPaused (doc) | ⬜ |
-| FIND-SC-17 | No per-user borrow cap | ⬜ |
-| FIND-SC-19 | collateralList grows unbounded | ⬜ |
-| FIND-SC-20 | Oracle no circuit breaker | ⬜ |
-| FIND-SC-22 | Oracle staleness bypass | ⬜ |
-| FIND-SC-23 | cNGN price hardcoded | ⬜ |
-| FIND-SC-24 | Rate-per-second truncation | ⬜ |
-| FIND-SC-25 | IRM not updatable | ⬜ |
+| FIND-SC-04 | Harvest swallows errors | ✅ checks call result, emits HarvestFailed |
+| FIND-SC-06 | `emergencyWithdraw()` no-op | ✅ now pulls funds back from strategies |
+| FIND-SC-09 | harvestYield reverts on no yield | ✅ clean early-return |
+| FIND-SC-11 | borrow() fee accounting | ✅ **verified NOT a bug** (test proves invariance) + documented |
+| FIND-SC-13 | Liquidation stale price | ✅ uses `oracle.getPrice()` (staleness-enforced) |
+| FIND-SC-14 | getCash bad-debt underflow | ✅ underflow-safe `totalPoolAssets` |
+| FIND-SC-15 | Simple vs compound interest | ✅ documented (frequent accrual) |
+| FIND-SC-16 | withdraw() lacks whenNotPaused | ✅ documented (intentional exit-always) |
+| FIND-SC-17 | No per-user borrow cap | ✅ `maxBorrowPerUser` + setter |
+| FIND-SC-19 | collateralList grows unbounded | ✅ trimmed on removeCollateral |
+| FIND-SC-20 | Oracle no circuit breaker | ✅ deviation guard + forceSetPrice |
+| FIND-SC-22 | Oracle staleness bypass | ✅ closed via SC-13 (no more raw `prices()`) |
+| FIND-SC-25 | IRM not updatable | ✅ `setInterestRateModel` |
+| FIND-SC-23 | cNGN price hardcoded | 🔵 informational — fetch live cNGN rate later |
+| FIND-SC-24 | Rate-per-second truncation | 🟣 informational — negligible |
+
+**Batch 7b — vault redesign (NOT done — needs careful work + re-audit before redeploy):**
+| ID | Finding | Status |
+|----|---------|--------|
+| FIND-SC-01 | `_checkLocks()` O(n) DoS (Critical) | ⬜ redesign lock accounting to O(1) |
+| FIND-SC-02 | Any lock blocks all withdrawals | ⬜ separate flexible vs locked shares |
+| FIND-SC-03/08 | `totalAssets()` donation manipulation | ⬜ internal strategy-balance accounting |
+| FIND-SC-05/07 | Strategy interface + timelock | ⬜ IStrategy + timelocked strategy changes |
+| — | vault↔lend integration mismatch | ⬜ vault calls `deposit(uint,addr)`; lend exposes `supply(uint)` |
 
 ## Architecture (Batch 8 — needs your accounts/decisions)
 

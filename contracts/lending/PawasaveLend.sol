@@ -34,10 +34,11 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
 
     // ── Immutables ───────────────────────────────────────────────────────────
     IERC20 public immutable cNGN;
-    InterestRateModel public immutable irm;
+    InterestRateModel public irm;                 // updatable (FIND-SC-25)
     PriceOracle       public immutable oracle;
 
     // ── Protocol parameters (owner-adjustable) ───────────────────────────────
+    uint256 public maxBorrowPerUser;                         // 0 = no cap (FIND-SC-17)
     uint256 public reserveFactorMantissa = 0.10e18;          // 10% of interest → reserves
     uint256 public insuranceShareMantissa = 0.20e18;         // 20% of reserves → insurance fund
     uint256 public originationFeeMantissa = 0.005e18;        // 0.5% flat on every new loan
@@ -96,6 +97,8 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     event CollateralAdded(address indexed token, uint8 decimals, uint256 collateralFactor);
     event CollateralRemoved(address indexed token);
     event CollateralFactorUpdated(address indexed token, uint256 newFactor);
+    event InterestRateModelUpdated(address indexed newIrm);
+    event MaxBorrowPerUserUpdated(uint256 newMax);
 
     // ── Constructor ──────────────────────────────────────────────────────────
     constructor(
@@ -133,7 +136,10 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         uint256 indexPrior    = borrowIndex;
 
         uint256 borrowRatePerSecond = irm.getBorrowRate(cashPrior, borrowsPrior, reservesPrior);
-        // Simple interest for the period (compound interest approximation)
+        // Linear (simple) interest per accrual period. The accrual/harvest cron
+        // calls accrueInterest() frequently (sub-daily), so the inter-accrual gap
+        // is small and the divergence from continuous compounding is negligible
+        // (FIND-SC-15). Any state-changing op also accrues first.
         uint256 interestFactor   = borrowRatePerSecond * deltaTime;
         uint256 interestAccrued  = (interestFactor * borrowsPrior) / BASE;
         uint256 reservesDelta    = (interestAccrued * reserveFactorMantissa) / BASE;
@@ -173,6 +179,10 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     /**
      * @notice Redeem psNGN shares for cNGN.
      * @param shares Number of psNGN shares to redeem
+     * @dev Intentionally NOT `whenNotPaused` (FIND-SC-16): suppliers must always be
+     *      able to exit, even while the pool is paused (pausing blocks new
+     *      supply/borrow/collateral, not redemptions). Liquidity is still bounded
+     *      by getCash(), so a paused pool cannot be drained beyond available cash.
      */
     function withdraw(uint256 shares) external nonReentrant returns (uint256 cngnAmount) {
         require(shares > 0, "Zero shares");
@@ -231,7 +241,11 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         accrueInterest();
         require(getCash() >= cngnAmount, "Insufficient liquidity");
 
-        // Origination fee deducted from proceeds
+        // Origination fee is added to the borrower's debt (they repay the gross
+        // cngnAmount) and booked to reserves. This is NOT a double-count: the
+        // borrower's snapshot and totalBorrows both move by the same gross amount
+        // (individual vs global accounting), and totalPoolAssets stays invariant
+        // across a borrow -> full-repay cycle. (FIND-SC-11)
         uint256 originationFee = (cngnAmount * originationFeeMantissa) / BASE;
         uint256 proceeds       = cngnAmount - originationFee;
 
@@ -241,6 +255,10 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         totalReserves += originationFee;
 
         require(_isHealthy(msg.sender), "Insufficient collateral");
+        // Optional per-user borrow cap to limit single-borrower concentration (FIND-SC-17)
+        if (maxBorrowPerUser > 0) {
+            require(borrowBalanceCurrent(msg.sender) <= maxBorrowPerUser, "Exceeds per-user borrow cap");
+        }
 
         cNGN.safeTransfer(msg.sender, proceeds);
         emit Borrowed(msg.sender, cngnAmount, originationFee);
@@ -328,8 +346,10 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
 
     /** @notice Total cNGN owed to suppliers (cash + borrows - reserves) */
     function totalPoolAssets() public view returns (uint256) {
-        uint256 cash = cNGN.balanceOf(address(this));
-        return cash + totalBorrows - totalReserves;
+        // Underflow-safe: in a partial bad-debt scenario reserves could momentarily
+        // exceed cash+borrows; clamp at 0 rather than reverting (FIND-SC-14).
+        uint256 assets = cNGN.balanceOf(address(this)) + totalBorrows;
+        return assets > totalReserves ? assets - totalReserves : 0;
     }
 
     /** @notice cNGN value of one psNGN share */
@@ -417,6 +437,16 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     function removeCollateral(address token) external onlyOwner {
         require(collaterals[token].accepted, "Not accepted");
         collaterals[token].accepted = false;
+        // Trim from collateralList so the value loops don't iterate dead tokens
+        // forever (FIND-SC-19).
+        uint256 len = collateralList.length;
+        for (uint256 i = 0; i < len; i++) {
+            if (collateralList[i] == token) {
+                collateralList[i] = collateralList[len - 1];
+                collateralList.pop();
+                break;
+            }
+        }
         emit CollateralRemoved(token);
     }
 
@@ -441,6 +471,20 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     function setOriginationFee(uint256 newFee) external onlyOwner {
         require(newFee <= 0.02e18, "Max 2%");
         originationFeeMantissa = newFee;
+    }
+
+    /** @notice Swap the interest-rate model (e.g. as Nigeria's MPR changes). FIND-SC-25 */
+    function setInterestRateModel(address newIrm) external onlyOwner {
+        require(newIrm != address(0), "Zero address");
+        accrueInterest(); // settle interest under the old model first
+        irm = InterestRateModel(newIrm);
+        emit InterestRateModelUpdated(newIrm);
+    }
+
+    /** @notice Set the max total debt a single borrower may hold (0 = no cap). FIND-SC-17 */
+    function setMaxBorrowPerUser(uint256 newMax) external onlyOwner {
+        maxBorrowPerUser = newMax;
+        emit MaxBorrowPerUserUpdated(newMax);
     }
 
     function setTreasury(address newTreasury) external onlyOwner {
@@ -503,8 +547,9 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
 
     /** @notice Convert cNGN amount to collateral token amount */
     function _cngnToCollateral(address token, uint256 cngnAmt) internal view returns (uint256) {
-        uint256 price = oracle.prices(token); // cNGN per 1e18 collateral
-        require(price > 0, "No price");
+        // Use getPrice (staleness-enforced) instead of the raw prices mapping, so a
+        // stale oracle can't be used to over-seize collateral in liquidation (FIND-SC-13).
+        uint256 price = oracle.getPrice(token); // cNGN per 1e18 collateral
         uint8 dec = collaterals[token].decimals;
         // cngnAmt (1e6) → collateral units
         // price = cNGN (1e6) per 1e18 normalised collateral

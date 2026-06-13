@@ -23,7 +23,16 @@ contract PriceOracle is Ownable {
     mapping(address => uint256) public lastUpdated;
     uint256 public constant MAX_PRICE_AGE = 1 hours;
 
+    // Circuit breaker (FIND-SC-20): reject keeper updates that move a price by
+    // more than `maxDeviationBps` from the last value. Catches fat-finger / buggy
+    // feeds (e.g. a 10x or 40% error) that would enable under-collateralised
+    // borrowing or unfair liquidations. Owner can override for genuine large
+    // moves via forceSetPrice(), and tune the threshold via setMaxDeviation().
+    uint256 public maxDeviationBps = 2500; // 25%
+    uint256 private constant BPS = 10_000;
+
     event PriceUpdated(address indexed token, uint256 price, uint256 timestamp);
+    event MaxDeviationUpdated(uint256 newMaxDeviationBps);
 
     // Authorised price keeper (separate from owner for operational security)
     address public keeper;
@@ -38,22 +47,17 @@ contract PriceOracle is Ownable {
     }
 
     /**
-     * @notice Set price for a collateral token.
+     * @notice Set price for a collateral token (keeper or owner).
+     * @dev Enforces the deviation circuit breaker against the previous price.
      * @param token   Collateral token address
      * @param price   cNGN per 1e18 of collateral (scaled 1e6 for cNGN decimals)
-     *                Example: 1 USDC (1e6) = 1650 NGN → price = 1650 * 1e6 * 1e12 = 1650e18
-     *                i.e. price represents "cNGN units per 1e18 collateral units"
      */
     function setPrice(address token, uint256 price) external onlyKeeperOrOwner {
-        require(token != address(0), "Zero address");
-        require(price > 0, "Zero price");
-        prices[token] = price;
-        lastUpdated[token] = block.timestamp;
-        emit PriceUpdated(token, price, block.timestamp);
+        _setPrice(token, price, true);
     }
 
     /**
-     * @notice Batch update prices.
+     * @notice Batch update prices (keeper or owner), with deviation checks.
      */
     function setPrices(
         address[] calldata tokens,
@@ -61,11 +65,37 @@ contract PriceOracle is Ownable {
     ) external onlyKeeperOrOwner {
         require(tokens.length == _prices.length, "Length mismatch");
         for (uint256 i = 0; i < tokens.length; i++) {
-            require(_prices[i] > 0, "Zero price");
-            prices[tokens[i]] = _prices[i];
-            lastUpdated[tokens[i]] = block.timestamp;
-            emit PriceUpdated(tokens[i], _prices[i], block.timestamp);
+            _setPrice(tokens[i], _prices[i], true);
         }
+    }
+
+    /**
+     * @notice Owner-only escape hatch to set a price WITHOUT the deviation check,
+     * for genuine large moves (e.g. a cNGN de-peg or a sharp NGN devaluation).
+     */
+    function forceSetPrice(address token, uint256 price) external onlyOwner {
+        _setPrice(token, price, false);
+    }
+
+    function _setPrice(address token, uint256 price, bool enforceDeviation) internal {
+        require(token != address(0), "Zero address");
+        require(price > 0, "Zero price");
+
+        uint256 prev = prices[token];
+        if (enforceDeviation && prev > 0) {
+            uint256 diff = price > prev ? price - prev : prev - price;
+            require((diff * BPS) / prev <= maxDeviationBps, "Price deviation too large");
+        }
+
+        prices[token] = price;
+        lastUpdated[token] = block.timestamp;
+        emit PriceUpdated(token, price, block.timestamp);
+    }
+
+    function setMaxDeviation(uint256 newMaxDeviationBps) external onlyOwner {
+        require(newMaxDeviationBps > 0 && newMaxDeviationBps <= BPS, "Invalid bps");
+        maxDeviationBps = newMaxDeviationBps;
+        emit MaxDeviationUpdated(newMaxDeviationBps);
     }
 
     /**
@@ -80,7 +110,7 @@ contract PriceOracle is Ownable {
     }
 
     /**
-     * @notice Convert collateral amount to cNGN value.
+     * @notice Convert collateral amount to cNGN value (staleness-enforced).
      * @param token          Collateral token
      * @param collateralAmt  Amount in collateral token's native decimals
      * @param collateralDec  Decimals of the collateral token

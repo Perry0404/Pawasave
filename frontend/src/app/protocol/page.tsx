@@ -137,9 +137,6 @@ export default function ProtocolPage() {
           </div>
         </div>
 
-        <p className="text-center text-xs text-gray-600 max-w-2xl mx-auto">
-          PawaSave Protocol is experimental software. Positions can be liquidated if collateral value falls below the liquidation threshold. Do not deposit funds you cannot afford to lose.
-        </p>
       </main>
 
       {/* Footer */}

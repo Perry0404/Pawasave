@@ -7,13 +7,27 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 > **Strategic note:** the lending pool has ≈0 TVL and 0 borrows. All contract
 > findings can be fixed and redeployed cheaply *now*, before funds arrive.
 
+## 7c — Redeployed to Base mainnet (June 13 2026) — PENDING RE-AUDIT
+Patched (7a+7b) contracts are LIVE at new addresses; frontend repointed:
+
+| Contract | Address |
+|----------|---------|
+| InterestRateModel | `0x79C9c8758731dE8e810e60472Beed4A1766EF60D` |
+| PriceOracle | `0x416c236640CD3997006B5490dF7CeBe4737d8209` |
+| PawasaveLend | `0x0f7aa5dc3B540dc22225085d7363A2524856e744` |
+| PawasaveLendStrategy (adapter) | `0x3f40741E18c37a0a23c1F5EbEcec2046Ea443523` |
+| PawasaveAutoVault | `0x68340bCFA0BC5B0100E997534427271e216d1a7f` |
+
+Verified on-chain: USDC/USDT/cNGN accepted; oracle prices seeded; adapter bound
+to vault; pool unpaused. **Old contracts are abandoned (do not use).**
+
 ## P0 — Before onboarding (live-money / takeover risk)
 
 | ID | Finding | Status | Notes |
 |----|---------|--------|-------|
 | FIND-API-01 | Flipeet webhook unverified (CRIT-01) | ✅ | Secret token in callback URL, fail-closed (`FLIPEET_WEBHOOK_TOKEN`) |
-| FIND-SC-11 | borrow() fee accounting (CRIT-04) | ⬜ | Batch 7 redeploy + test (my trace: over-rated, still fix) |
-| FIND-SC-13 | Liquidation uses stale `oracle.prices()` | ⬜ | Batch 7 — switch to `getPrice()` |
+| FIND-SC-11 | borrow() fee accounting (CRIT-04) | ✅ LIVE | Test proves NOT a bug (totalPoolAssets invariant); redeployed 7c |
+| FIND-SC-13 | Liquidation uses stale `oracle.prices()` | ✅ LIVE | Uses `getPrice()`; redeployed 7c |
 | FIND-FIN-02 | Xend webhook credits USD not cNGN | ✅ | Gated by `XEND_ENABLED` + math fixed to cNGN 1:1 |
 | FIND-AUTH-01 | PIN hashed unsalted SHA-256 | ✅ | Server-side salted scrypt (lib/pin-hash.ts), backward-compatible upgrade-on-verify |
 

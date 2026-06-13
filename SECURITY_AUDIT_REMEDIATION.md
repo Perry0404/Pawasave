@@ -43,13 +43,13 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 | FIND-API-05 | In-memory rate limiter | 🔵 | Batch 8 — needs Upstash |
 | FIND-API-08 | Rate endpoint unauthenticated | ⬜ | Batch 4 — cache + limit |
 | FIND-API-09 | Error messages leak internals | ⬜ | Batch 4 — generic client messages |
-| FIND-INFRA-01 | Empty next.config.js | ⬜ | Batch 5 |
-| FIND-INFRA-02 | No CSP | ⬜ | Batch 5 |
-| FIND-INFRA-04 | No runtime kill-switch | ⬜ | Batch 5 — platform_settings flags |
-| FIND-INFRA-06 | No CI/CD / scanning | ⬜ | Batch 5 — GitHub Actions |
+| FIND-INFRA-01 | Empty next.config.js | ✅ | poweredByHeader off, strict mode, compress |
+| FIND-INFRA-02 | No CSP | ✅ | CSP set in middleware (pragmatic, non-breaking) |
+| FIND-INFRA-04 | No runtime kill-switch | 🔵 | Env flags (FLINT/XEND_ENABLED) gate today; DB kill-switch optional |
+| FIND-INFRA-06 | No CI/CD / scanning | ✅ | GitHub Actions: tsc, lint, npm audit, hardhat compile/test, Slither |
 | FIND-AUTH-04 | KYC not real verification | 🔵 | Known — Dojah/Smile ID integration pending |
 | FIND-3P-03 | Xend defaults to staging URL | ✅ | Gated; will default prod when re-enabled |
-| FIND-DEP-01 | No npm audit in pipeline | ⬜ | Batch 5 |
+| FIND-DEP-01 | No npm audit in pipeline | ✅ | npm audit (high+) in CI for frontend + contracts |
 
 ## Smart contracts (Batch 7 — one redeploy while TVL=0)
 

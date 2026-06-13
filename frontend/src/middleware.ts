@@ -47,6 +47,27 @@ export function middleware(request: NextRequest) {
     'max-age=31536000; includeSubDomains'
   )
 
+  // Content-Security-Policy (FIND-INFRA-02). Pragmatic policy that hardens the app
+  // without breaking Next.js hydration, Tailwind inline styles, Supabase (https +
+  // realtime wss), the Base RPCs, and the external "Featured on Orynth" badge.
+  // script-src keeps 'unsafe-inline'/'unsafe-eval' because App Router hydration
+  // and dev mode require them without per-request nonces.
+  response.headers.set(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'none'",
+      "form-action 'self'",
+      "img-src 'self' data: https:",
+      "font-src 'self' data:",
+      "style-src 'self' 'unsafe-inline'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      "connect-src 'self' https: wss:",
+    ].join('; '),
+  )
+
   // Rate limit API routes
   if (request.nextUrl.pathname.startsWith('/api/')) {
     const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()

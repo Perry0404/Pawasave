@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend:
+    name: Frontend (typecheck · lint · audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-fund --no-audit
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npm run lint --if-present
+      - name: Dependency audit (high+)
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+  contracts:
+    name: Contracts (compile · test · audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-fund --no-audit
+      - name: Compile
+        run: npm run compile
+      - name: Test
+        run: npm test
+      - name: Dependency audit (high+)
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+  slither:
+    name: Slither (static analysis · informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-fund --no-audit
+      - uses: crytic/slither-action@v0.4.0
+        with:
+          fail-on: none

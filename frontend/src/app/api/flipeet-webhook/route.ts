@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import crypto from 'crypto'
 import { ngnToCngnMicro } from '@/lib/ramp-rate'
 import { supplyToLend } from '@/lib/custody'
 
@@ -27,6 +28,24 @@ function isFailedStatus(status: string) {
 }
 
 export async function POST(request: NextRequest) {
+  // Webhook authenticity (FIND-API-01): Flipeet does not sign its callbacks, so we
+  // require a secret token that we embed in the callback_url handed to Flipeet at
+  // init time (see ramp/route.ts). A forged request from the internet won't carry
+  // it. Fail closed — if the token isn't configured we refuse rather than accept.
+  const expectedToken = process.env.FLIPEET_WEBHOOK_TOKEN || ''
+  if (!expectedToken) {
+    console.error('[flipeet-webhook] FLIPEET_WEBHOOK_TOKEN not set — refusing (fail closed)')
+    return NextResponse.json({ error: 'Webhook verification not configured' }, { status: 503 })
+  }
+  const providedToken =
+    request.nextUrl.searchParams.get('token') || request.headers.get('x-webhook-token') || ''
+  if (
+    providedToken.length !== expectedToken.length ||
+    !crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(expectedToken))
+  ) {
+    return NextResponse.json({ error: 'Invalid webhook token' }, { status: 401 })
+  }
+
   const body = await request.json().catch(() => null)
   if (!body || typeof body !== 'object') {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })

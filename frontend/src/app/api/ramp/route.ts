@@ -480,6 +480,11 @@ async function runFlipeet(
   )
   const origin = request.nextUrl.origin || 'https://pawasave.xyz'
   const pawaFeeKobo = Math.round(pawaFeeNaira * 100)
+  // Embed a secret token in the callback URL so the flipeet-webhook handler can
+  // reject forged requests (FIND-API-01). Only Flipeet ever receives this URL.
+  const webhookToken = process.env.FLIPEET_WEBHOOK_TOKEN
+    ? `?token=${encodeURIComponent(process.env.FLIPEET_WEBHOOK_TOKEN)}`
+    : ''
 
   // ── OFF-RAMP: debit user balance BEFORE calling Flipeet ─────────────────────
   // This guarantees we never trigger a payout for a user with insufficient funds.
@@ -508,7 +513,7 @@ async function runFlipeet(
       ? await initializeFlipeetOnRamp({
         amount,
         reference,
-        callbackUrl: `${origin}/api/flipeet-webhook`,
+        callbackUrl: `${origin}/api/flipeet-webhook${webhookToken}`,
         walletAddress: FLIPEET_CUSTODY_ADDRESS,
         holderName: process.env.RAMP_BENEFICIARY_NAME || 'PawaSave Treasury',
         currency: depositCurrency,
@@ -517,7 +522,7 @@ async function runFlipeet(
       : await initializeFlipeetOffRamp({
         amount,
         reference,
-        callbackUrl: `${origin}/api/flipeet-webhook`,
+        callbackUrl: `${origin}/api/flipeet-webhook${webhookToken}`,
         bankCode: bankCode || '',
         accountNumber: accountNumber || '',
         holderName: holderName || process.env.RAMP_BENEFICIARY_NAME || 'PawaSave User',

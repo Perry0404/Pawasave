@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { ethers } from 'ethers'
+import { checkCronAuth } from '@/lib/cron-auth'
 
 /**
  * GET /api/cron/harvest-vault
@@ -25,12 +26,8 @@ const VAULT_ABI = [
 ]
 
 export async function GET(request: NextRequest) {
-  // Auth
-  const authHeader = request.headers.get('authorization')
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const denied = checkCronAuth(request)
+  if (denied) return denied
 
   const rpcUrl      = process.env.BASE_MAINNET_RPC_URL
   const privateKey  = process.env.VAULT_HARVESTER_PRIVATE_KEY

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ethers } from 'ethers'
 import { getNgnUsdRateFromFlipeet } from '@/lib/ramp-rate'
+import { checkCronAuth } from '@/lib/cron-auth'
 
 /**
  * GET /api/cron/update-oracle
@@ -34,11 +35,8 @@ const CNGN_PRICE = 1000000n // 1 cNGN = 1 cNGN (peg), 6 decimals
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get('authorization')
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const denied = checkCronAuth(request)
+  if (denied) return denied
 
   const rpcUrl     = process.env.BASE_MAINNET_RPC_URL || process.env.NEXT_PUBLIC_BASE_RPC_URL
   const keeperKey  = process.env.ORACLE_KEEPER_PRIVATE_KEY

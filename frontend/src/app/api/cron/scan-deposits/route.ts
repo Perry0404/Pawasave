@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { scanAndCredit } from '@/lib/deposit-scan'
+import { checkCronAuth } from '@/lib/cron-auth'
 
 /**
  * GET /api/cron/scan-deposits
@@ -13,11 +14,8 @@ import { scanAndCredit } from '@/lib/deposit-scan'
  *   CRON_SECRET — Vercel cron secret
  */
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get('authorization')
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const denied = checkCronAuth(request)
+  if (denied) return denied
 
   try {
     const { credited, fromBlock, toBlock, scannedAddresses } = await scanAndCredit()

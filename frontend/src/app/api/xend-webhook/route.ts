@@ -10,6 +10,12 @@ import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
  * Verifies RSA signature, then processes the event.
  */
 export async function POST(request: NextRequest) {
+  // Xend is disabled unless explicitly enabled — reject when off so the legacy
+  // USD-crediting path can never run (FIND-API-03, FIND-FIN-02).
+  if (process.env.XEND_ENABLED !== 'true') {
+    return NextResponse.json({ error: 'Xend disabled' }, { status: 503 })
+  }
+
   const rawBody = await request.text()
 
   let body: Record<string, unknown>
@@ -19,14 +25,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // Verify Xend RSA webhook signature
-  const xendPublicKey = process.env.XEND_PUBLIC_KEY
-  if (xendPublicKey) {
-    const valid = verifyXendWebhook(body)
-    if (!valid) {
-      console.error('Xend webhook signature verification failed')
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
-    }
+  // Verify Xend RSA webhook signature — fail closed if the public key is absent.
+  if (!process.env.XEND_PUBLIC_KEY) {
+    console.error('[xend-webhook] XEND_PUBLIC_KEY not set — refusing (fail closed)')
+    return NextResponse.json({ error: 'Webhook verification not configured' }, { status: 503 })
+  }
+  if (!verifyXendWebhook(body)) {
+    console.error('Xend webhook signature verification failed')
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -68,8 +74,8 @@ export async function POST(request: NextRequest) {
         .update({ status: 'completed' })
         .eq('id', tx.id)
 
-      const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
-      const usdcMicro = Math.floor((amount > 0 ? amount : tx.amount_kobo / 100) / rate * 1_000_000)
+      // cNGN settles 1:1 with NGN — credit the naira value directly (no USD rate).
+      const usdcMicro = Math.floor((amount > 0 ? amount : tx.amount_kobo / 100) * 1_000_000)
 
       await supabase.rpc('credit_wallet', {
         p_user_id: tx.user_id,

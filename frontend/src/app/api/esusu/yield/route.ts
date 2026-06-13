@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
 
 /**
  * POST /api/esusu/yield
@@ -50,6 +52,29 @@ export async function POST(request: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY,
     { auth: { persistSession: false } },
   )
+
+  // Authn/authz (FIND-API-07): require a logged-in user who belongs to the group.
+  // Previously this endpoint accepted any caller who knew the group/user UUIDs,
+  // allowing unauthorized yield credits.
+  const cookieStore = await cookies()
+  const authClient = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies: { getAll: () => cookieStore.getAll() } },
+  )
+  const { data: { user } } = await authClient.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  }
+  const { data: membership } = await supabase
+    .from('esusu_members')
+    .select('id')
+    .eq('group_id', group_id)
+    .eq('user_id', user.id)
+    .maybeSingle()
+  if (!membership) {
+    return NextResponse.json({ error: 'Not a member of this group' }, { status: 403 })
+  }
 
   // ──────────────────────────────────────────────────────────
   // DEPOSIT: record contribution for yield tracking

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { checkCronAuth } from '@/lib/cron-auth'
 
 /**
  * GET /api/cron/auto-contribute
@@ -16,11 +17,8 @@ import { createClient } from '@supabase/supabase-js'
  * Protected by CRON_SECRET env var.
  */
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get('authorization')
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const denied = checkCronAuth(request)
+  if (denied) return denied
 
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return NextResponse.json({ error: 'Service key not configured' }, { status: 503 })

@@ -16,6 +16,17 @@ function verifySignature(bodyObj: any, signature: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  // Flint is disabled unless explicitly enabled — reject when off so its legacy
+  // USD-based crediting path can never run (FIND-API-04, FIND-FIN-02 family).
+  if (process.env.FLINT_ENABLED !== 'true') {
+    return NextResponse.json({ error: 'Flint disabled' }, { status: 503 })
+  }
+  // Fail closed: refuse webhooks when the signing secret isn't configured.
+  if (!WEBHOOK_SECRET) {
+    console.error('[flint-webhook] FLINT_WEBHOOK_SECRET not set — refusing (fail closed)')
+    return NextResponse.json({ error: 'Webhook verification not configured' }, { status: 503 })
+  }
+
   const rawBody = await request.text()
   const signature = request.headers.get('x-flint-signature') || ''
 
@@ -27,16 +38,14 @@ export async function POST(request: NextRequest) {
   }
 
   // Verify webhook signature (try both stringify and raw approaches)
-  if (WEBHOOK_SECRET) {
-    const valid = verifySignature(body, signature) || (() => {
-      // Fallback: verify against raw body text in case FlintAPI signs raw bytes
-      const hash = crypto.createHmac('sha512', WEBHOOK_SECRET).update(rawBody).digest('hex')
-      return hash === signature
-    })()
-    if (!valid) {
-      console.error('Webhook signature mismatch')
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
-    }
+  const valid = verifySignature(body, signature) || (() => {
+    // Fallback: verify against raw body text in case FlintAPI signs raw bytes
+    const hash = crypto.createHmac('sha512', WEBHOOK_SECRET).update(rawBody).digest('hex')
+    return hash === signature
+  })()
+  if (!valid) {
+    console.error('Webhook signature mismatch')
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
   const { event, data } = body

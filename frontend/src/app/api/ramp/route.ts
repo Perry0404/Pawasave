@@ -12,6 +12,8 @@ import {
 } from '@/lib/flipeet'
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
 import { sendCngn, cngnToShares, withdrawFromLend } from '@/lib/custody'
+import { createClient } from '@supabase/supabase-js'
+import { verifyPin } from '@/lib/pin-hash'
 
 const FLINT_API_KEY = process.env.FLINT_API_KEY || ''
 const FLINT_BASE = 'https://stables.flintapi.io/v1'
@@ -75,10 +77,6 @@ function generateRef() {
     hex.slice(16, 20),
     hex.slice(20, 32),
   ].join('-')
-}
-
-function sha256Hex(value: string) {
-  return crypto.createHash('sha256').update(value).digest('hex')
 }
 
 function calcFlintFees(amountNaira: number, type: RampType) {
@@ -173,8 +171,24 @@ async function ensureWithdrawalPin(
     return NextResponse.json({ error: 'Set your transaction PIN in Settings first' }, { status: 400 })
   }
 
-  if (sha256Hex(transactionPin) !== profile.transaction_pin_hash) {
+  const { ok, upgrade } = verifyPin(transactionPin, profile.transaction_pin_hash)
+  if (!ok) {
     return NextResponse.json({ error: 'Incorrect transaction PIN' }, { status: 401 })
+  }
+
+  // Opportunistically migrate a legacy unsalted SHA-256 PIN to salted scrypt
+  // (FIND-AUTH-01). Best-effort — verification already succeeded.
+  if (upgrade && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const admin = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY,
+        { auth: { persistSession: false } },
+      )
+      await admin.from('profiles').update({ transaction_pin_hash: upgrade }).eq('id', userId)
+    } catch {
+      // ignore — migration will retry on the next withdrawal
+    }
   }
 
   return null

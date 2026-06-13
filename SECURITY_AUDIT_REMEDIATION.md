@@ -15,7 +15,7 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 | FIND-SC-11 | borrow() fee accounting (CRIT-04) | ⬜ | Batch 7 redeploy + test (my trace: over-rated, still fix) |
 | FIND-SC-13 | Liquidation uses stale `oracle.prices()` | ⬜ | Batch 7 — switch to `getPrice()` |
 | FIND-FIN-02 | Xend webhook credits USD not cNGN | ✅ | Gated by `XEND_ENABLED` + math fixed to cNGN 1:1 |
-| FIND-AUTH-01 | PIN hashed unsalted SHA-256 | ⬜ | Batch 3 — server-side argon2/scrypt + salt |
+| FIND-AUTH-01 | PIN hashed unsalted SHA-256 | ✅ | Server-side salted scrypt (lib/pin-hash.ts), backward-compatible upgrade-on-verify |
 
 ## P1 — Backend / auth (no redeploy)
 
@@ -28,14 +28,14 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 | FIND-API-02 | Admin password in URL query | ✅ | Moved to POST body (password auth retained per product decision) |
 | FIND-FE-01 | Admin password in sessionStorage | 🔵 | Password admin retained by decision; optional in-memory-only hardening |
 | FIND-AUTH-03 | Admin single password, no MFA | 🔵 | Password retained by decision; MFA optional later |
-| FIND-AUTH-02 | KYC ID unsalted SHA-256 | ⬜ | Batch 3 |
+| FIND-AUTH-02 | KYC ID unsalted SHA-256 | 🔵 | Defer to real-KYC integration (Dojah/Smile) — BVN hash isn't verified anywhere yet; salt it server-side at that point |
 | FIND-FIN-04 | Vault withdrawal TOCTOU | ⬜ | Batch 4 — atomic RPC |
 
 ## P2 — Hardening
 
 | ID | Finding | Status | Notes |
 |----|---------|--------|-------|
-| FIND-AUTH-05 | Open redirect in auth callback | ⬜ | Batch 3 — validate `next` is relative |
+| FIND-AUTH-05 | Open redirect in auth callback | ✅ | `next` must be a same-site relative path |
 | FIND-FIN-01 | Inconsistent refund conversion | ⬜ | Batch 4 — canonical helpers |
 | FIND-FIN-03 | Esusu hardcoded USD rate | ⬜ | Batch 4 — switch to cNGN 1:1 |
 | FIND-FIN-05 | Fee recording not atomic | ⬜ | Batch 4 |

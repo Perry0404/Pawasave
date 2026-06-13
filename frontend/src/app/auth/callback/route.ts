@@ -7,7 +7,10 @@ export async function GET(request: NextRequest) {
   const code       = searchParams.get('code')
   const tokenHash  = searchParams.get('token_hash')
   const type       = searchParams.get('type')          // 'recovery' | 'signup' | 'email' | etc.
-  const next       = searchParams.get('next') || '/'
+  const rawNext    = searchParams.get('next') || '/'
+  // Only allow same-site relative paths — block open redirects to e.g. //evil.com
+  // or https://evil.com (FIND-AUTH-05).
+  const next       = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/'
 
   // Supabase appends ?error=...&error_description=... when a link is expired or
   // already used. Surface that on the right screen instead of a blank failure.

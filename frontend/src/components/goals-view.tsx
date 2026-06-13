@@ -5,6 +5,7 @@ import { Target, Plus, ArrowLeft, CheckCircle2, TrendingUp, Loader2, ChevronRigh
 import { formatNaira, formatCngn, koboToMicroUsdc, microUsdcToKobo, getRate } from '@/lib/format'
 import { useSavingsGoals, createSavingsGoal, contributeToGoal, completeSavingsGoal, breakSavingsGoal, setGoalAutoContribute } from '@/hooks/use-data'
 import type { Wallet, SavingsGoal } from '@/lib/types'
+import { useConfirm } from '@/components/confirm-dialog'
 
 interface Props {
   wallet: Wallet | null
@@ -17,6 +18,7 @@ type View = 'list' | 'create' | 'detail'
 
 export default function GoalsView({ wallet, refresh }: Props) {
   const { goals, loading, refresh: refreshGoals } = useSavingsGoals()
+  const confirm = useConfirm()
   const [view, setView] = useState<View>('list')
   const [selected, setSelected] = useState<SavingsGoal | null>(null)
 
@@ -123,7 +125,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
   }
 
   const handleBreak = async (goal: SavingsGoal) => {
-    if (!confirm('Break this goal early? You will only get your principal back — no interest earned.')) return
+    if (!(await confirm({ title: 'Break goal early?', message: 'You will only get your principal back — no interest earned.', confirmText: 'Break goal', danger: true }))) return
     setBusy(true)
     try {
       await breakSavingsGoal(goal.id)

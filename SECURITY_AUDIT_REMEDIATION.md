@@ -103,8 +103,8 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 | FIND-3P-02 | Off-ramp refund single point | ⬜ | Batch 4 — reconciliation cron |
 | FIND-3P-04 | NGN/USD fallback stale | ⬜ | Batch 4 |
 | FIND-FE-02 | window.ethereum no validation | 🟣 | Accepted — standard web3; chain is validated before any signing. Not meaningfully fixable client-side |
-| FIND-FE-03 | External login image | ⬜ | Low — CSP `img-src` constrains it; host badge locally to fully close |
-| FIND-FE-04 | confirm() for consent | ⬜ | Low/cosmetic — replace native confirm() with the in-app modal; action still needs explicit click |
+| FIND-FE-03 | External login image | ✅ | `referrerPolicy="no-referrer"` + `loading="lazy"`; CSP `img-src` also constrains it |
+| FIND-FE-04 | confirm() for consent | ✅ | New `ConfirmProvider` styled modal replaces native `confirm()` at all 3 sites (vault, goals, logout) |
 | FIND-INFRA-03 | Hardcoded contract addrs | 🟣 | Public addresses; acceptable |
 | FIND-INFRA-05 | Unpinned deps | ⬜ | Batch 5 |
 | FIND-SC-18 | closeFactor ordering fragility | ⬜ | Batch 7 (no active bug) |

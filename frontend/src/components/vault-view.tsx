@@ -5,6 +5,7 @@ import { formatNaira, formatCngn, koboToMicroUsdc, microUsdcToKobo, getRate } fr
 import { saveToVault, withdrawFromVault, lockSavings, withdrawLock, useSavingsLocks } from '@/hooks/use-data'
 import { Shield, ArrowDown, ArrowUp, Info, Loader2, Lock, Unlock, TrendingUp, AlertTriangle, Zap, ChevronRight } from 'lucide-react'
 import type { Wallet, SavingsLock } from '@/lib/types'
+import { useConfirm } from '@/components/confirm-dialog'
 
 interface Props {
   wallet: Wallet | null
@@ -35,6 +36,7 @@ export default function VaultView({ wallet, refresh }: Props) {
   const [showLockConsent, setShowLockConsent] = useState(false)
   const [lockConsented, setLockConsented] = useState(false)
   const { locks, loading: locksLoading, refresh: refreshLocks } = useSavingsLocks()
+  const confirm = useConfirm()
 
   useEffect(() => {
     fetch('/api/ramp/rate')
@@ -124,7 +126,7 @@ export default function VaultView({ wallet, refresh }: Props) {
   const handleWithdrawLock = async (lock: SavingsLock) => {
     const isMatured = new Date(lock.unlocks_at) <= new Date()
     const early = !isMatured
-    if (early && !confirm('Early withdrawal forfeits interest and incurs a 0.5% penalty. Continue?')) return
+    if (early && !(await confirm({ title: 'Early withdrawal', message: 'Early withdrawal forfeits interest and incurs a 0.5% penalty.', confirmText: 'Withdraw anyway', danger: true }))) return
     setBusy(true)
     try {
       await withdrawLock(lock.id, early)

@@ -10,6 +10,7 @@ import VaultView from './vault-view'
 import KycGate from './kyc-gate'
 import Logo from './logo'
 import { Home, Users, Activity, LifeBuoy, Settings, LogOut, ShieldCheck, X, Vault, Target } from 'lucide-react'
+import { useConfirm } from '@/components/confirm-dialog'
 
 type Tab = 'home' | 'vault' | 'goals' | 'groups' | 'activity' | 'support' | 'settings'
 
@@ -25,6 +26,7 @@ const tabs: { id: Tab; label: string; Icon: React.FC<any> }[] = [
 
 export default function AppShell() {
   const { user, signOut } = useAuth()
+  const confirm = useConfirm()
   const { profile, refresh: refreshProfile } = useProfile()
   const { wallet, refresh: refreshWallet } = useWallet()
   const { transactions, refresh: refreshTx } = useTransactions()
@@ -109,7 +111,7 @@ export default function AppShell() {
           </div>
         </div>
         <button
-          onClick={() => { if (confirm('Log out?')) signOut() }}
+          onClick={async () => { if (await confirm({ title: 'Log out', message: 'Log out of PawaSave?', confirmText: 'Log out' })) signOut() }}
           className="text-slate-300 hover:text-white transition p-2"
         >
           <LogOut className="w-4 h-4" />

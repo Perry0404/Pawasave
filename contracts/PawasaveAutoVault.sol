@@ -8,596 +8,373 @@ import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
+import "./IStrategy.sol";
 
 /**
  * @title Pawasave P-AUTO Vault
- * @notice Multi-strategy yield aggregator for cNGN/USDC with lock periods, consent tracking, and platform fees
- * @dev Implements ERC4626 standard vault with fixed/flexible deposits and automated rebalancing
- * 
- * Features:
- * - Fixed deposits (30/90/180/365 days) with lock enforcement
- * - Flexible deposits with immediate withdrawal
- * - Automatic yield harvesting and rebalancing
- * - 6% platform fee on harvested yield
- * - Multi-strategy support (Xend Money Market, Lend markets, etc.)
- * - Admin controls and emergency pause
+ * @notice ERC4626 multi-strategy yield aggregator for cNGN with flexible and
+ *         fixed (30/90/180/365-day) savings.
+ *
+ * Security redesign (audit Batch 7b):
+ *  - O(1) lock accounting (FIND-SC-01): a per-user `lockedShares` counter is
+ *    checked on withdrawal instead of iterating an unbounded deposit array.
+ *  - Locks only restrict the locked portion (FIND-SC-02): flexible/matured
+ *    shares are always withdrawable. Fixed deposits must name the caller as
+ *    receiver, removing the deposit-to-victim griefing vector.
+ *  - Donation-proof accounting (FIND-SC-03/08): totalAssets() uses an internal
+ *    `deployedAssets` counter, never a strategy's raw token balance.
+ *  - Strategy safety (FIND-SC-05/07): strategies implement IStrategy, are
+ *    interface-sanity-checked, and can only change through a 48h timelock.
+ *  - Real emergency withdraw (FIND-SC-06) and surfaced harvest errors (FIND-SC-04).
+ *  - ERC4626 inflation resistance via a decimals offset.
  */
 contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, AccessControl {
     using SafeERC20 for IERC20;
 
-    // ====================== CONSTANTS & TYPES ======================
     bytes32 public constant HARVESTER_ROLE = keccak256("HARVESTER_ROLE");
-    
+
     enum DepositType { FLEXIBLE, FIXED_30, FIXED_90, FIXED_180, FIXED_365 }
-    
-    struct UserDeposit {
-        uint256 amount;
-        uint256 depositTime;
+
+    struct Lock {
+        uint256 shares;
         uint256 unlockTime;
-        DepositType depositType;
-        bool yieldClaimed;
     }
 
-    // ====================== STATE VARIABLES ======================
+    // ── State ────────────────────────────────────────────────────────────────
     IERC20 public immutable assetToken;
-    
-    // Strategy addresses
-    address public primaryStrategy;      // High-yield strategy (Xend Money Market, etc.)
-    address public fallbackStrategy;     // Stable strategy
-    
-    // Fee configuration
-    uint256 public platformFeeBps = 600; // 6% (in basis points)
+
+    address public primaryStrategy;
+    address public fallbackStrategy;
+
+    // Internal principal accounting — donation-proof totalAssets (FIND-SC-03).
+    uint256 public deployedAssets;
+
+    // Fees
+    uint256 public platformFeeBps = 600; // 6%
     address public feeRecipient;
     uint256 public totalFeesAccrued;
-    
-    // Lock tracking
-    mapping(address => UserDeposit[]) public userDeposits;
-    
-    // Yield tracking
-    uint256 public totalYieldAccrued;
+
+    // O(1) lock accounting (FIND-SC-01/02)
+    mapping(address => Lock[])   public userLocks;
+    mapping(address => uint256)  public lockedShares;
+
+    // Yield metrics
     uint256 public totalYieldHarvested;
-    mapping(address => uint256) public userYieldClaimed;
-    
-    // Strategy metrics
+
+    // Rebalance
     uint256 public lastRebalanceTime;
     uint256 public rebalanceInterval = 7 days;
-    
-    // ====================== EVENTS ======================
-    event Deposited(
-        address indexed user,
-        uint256 assets,
-        uint256 shares,
-        DepositType depositType,
-        uint256 unlockTime
-    );
-    
-    event Withdrawn(
-        address indexed user,
-        uint256 shares,
-        uint256 assets,
-        bool isEarlyWithdraw
-    );
-    
-    event YieldHarvested(
-        uint256 totalYield,
-        uint256 platformFee,
-        uint256 userYield,
-        uint256 timestamp
-    );
-    
-    event Rebalanced(
-        uint256 amountFromFallback,
-        uint256 amountToPrimary,
-        uint256 timestamp
-    );
-    
-    event StrategyUpdated(
-        string strategyType,
-        address newAddress,
-        address oldAddress
-    );
-    
-    event LockEnforced(address indexed user, uint256 depositIndex);
-    
+
+    // Strategy-change timelock (FIND-SC-07)
+    uint256 public constant STRATEGY_TIMELOCK = 48 hours;
+    address public pendingPrimary;
+    uint256 public pendingPrimaryEta;
+    address public pendingFallback;
+    uint256 public pendingFallbackEta;
+
+    // ── Events ─────────────────────────────────────────────────────────────────
+    event Deposited(address indexed user, uint256 assets, uint256 shares, DepositType depositType, uint256 unlockTime);
+    event LocksReleased(address indexed user, uint256 freedShares);
+    event YieldHarvested(uint256 totalYield, uint256 platformFee, uint256 userYield, uint256 timestamp);
+    event Rebalanced(uint256 amount, uint256 timestamp);
+    event StrategyProposed(string strategyType, address newStrategy, uint256 eta);
+    event StrategyUpdated(string strategyType, address newAddress, address oldAddress);
     event HarvestFailed(address indexed strategy);
     event EmergencyWithdrawFailed(address indexed strategy);
 
-    // ====================== MODIFIERS ======================
     modifier onlyHarvester() {
         require(hasRole(HARVESTER_ROLE, msg.sender), "Not harvester");
         _;
     }
-    
-    modifier lockEnforcer(address user) {
-        _checkLocks(user);
-        _;
-    }
 
-    // ====================== CONSTRUCTOR ======================
     constructor(
         IERC20 _asset,
         address _primaryStrategy,
         address _fallbackStrategy,
         address _feeRecipient
     ) ERC4626(_asset) ERC20("Pawasave Auto", "pAUTO") Ownable() {
+        require(_feeRecipient != address(0), "Invalid fee recipient");
         assetToken = _asset;
+        _validateStrategy(_primaryStrategy);
+        if (_fallbackStrategy != address(0)) _validateStrategy(_fallbackStrategy);
         primaryStrategy = _primaryStrategy;
         fallbackStrategy = _fallbackStrategy;
         feeRecipient = _feeRecipient;
-        
-        // Grant harvester role to owner initially
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(HARVESTER_ROLE, msg.sender);
     }
 
-    // ====================== DEPOSIT FUNCTIONS ======================
-    /**
-     * @notice Deposit assets for flexible savings (no lock)
-     * @param assets Amount of cNGN/USDC to deposit
-     * @param receiver Address to receive shares
-     * @return shares Amount of pAUTO shares minted
-     */
-    function depositFlexible(uint256 assets, address receiver)
-        external
-        nonReentrant
-        whenNotPaused
-        returns (uint256 shares)
-    {
-        require(assets > 0, "Zero deposit");
-        require(receiver != address(0), "Invalid receiver");
-
-        // Calculate shares BEFORE assets move (ERC4626 virtual price uses pre-deposit state)
-        shares = previewDeposit(assets);
-
-        // Transfer assets from user to vault then forward to strategy
-        assetToken.safeTransferFrom(msg.sender, address(this), assets);
-        _depositToStrategy(assets, primaryStrategy);
-
-        // Mint shares
-        _mint(receiver, shares);
-
-        // Track deposit
-        userDeposits[receiver].push(UserDeposit({
-            amount: assets,
-            depositTime: block.timestamp,
-            unlockTime: 0,
-            depositType: DepositType.FLEXIBLE,
-            yieldClaimed: false
-        }));
-
-        emit Deposited(receiver, assets, shares, DepositType.FLEXIBLE, 0);
-        return shares;
+    // ── ERC4626 inflation resistance ───────────────────────────────────────────
+    function _decimalsOffset() internal pure override returns (uint8) {
+        return 6;
     }
 
-    /**
-     * @notice Deposit assets for fixed savings with lock period
-     * @param assets Amount of cNGN/USDC to deposit
-     * @param receiver Address to receive shares
-     * @param lockDays Lock period in days (30, 90, 180, or 365)
-     * @return shares Amount of pAUTO shares minted
-     */
-    function depositFixed(
-        uint256 assets,
-        address receiver,
-        uint256 lockDays
-    )
-        external
-        nonReentrant
-        whenNotPaused
-        returns (uint256 shares)
+    // ── Deposits ───────────────────────────────────────────────────────────────
+    /// @notice Flexible deposit (no lock). Any receiver allowed.
+    function depositFlexible(uint256 assets, address receiver)
+        external nonReentrant whenNotPaused returns (uint256 shares)
     {
         require(assets > 0, "Zero deposit");
         require(receiver != address(0), "Invalid receiver");
+        shares = previewDeposit(assets);
+        _deposit(_msgSender(), receiver, assets, shares);
+        emit Deposited(receiver, assets, shares, DepositType.FLEXIBLE, 0);
+    }
+
+    /// @notice Fixed deposit with a lock. Receiver MUST be the caller so nobody
+    /// can lock another account's funds (FIND-SC-02 griefing).
+    function depositFixed(uint256 assets, address receiver, uint256 lockDays)
+        external nonReentrant whenNotPaused returns (uint256 shares)
+    {
+        require(assets > 0, "Zero deposit");
+        require(receiver == _msgSender(), "Fixed: receiver must be caller");
         require(isValidLockPeriod(lockDays), "Invalid lock period");
 
-        // Calculate shares BEFORE assets move (ERC4626 virtual price uses pre-deposit state)
         shares = previewDeposit(assets);
+        _deposit(_msgSender(), receiver, assets, shares);
 
-        // Transfer assets from user to vault then forward to strategy
-        assetToken.safeTransferFrom(msg.sender, address(this), assets);
-        _depositToStrategy(assets, primaryStrategy);
-
-        // Mint shares
-        _mint(receiver, shares);
-
-        // Determine deposit type and unlock time
-        DepositType depositType;
         uint256 unlockTime = block.timestamp + (lockDays * 1 days);
+        userLocks[receiver].push(Lock({ shares: shares, unlockTime: unlockTime }));
+        lockedShares[receiver] += shares;
 
-        if (lockDays == 30) depositType = DepositType.FIXED_30;
-        else if (lockDays == 90) depositType = DepositType.FIXED_90;
-        else if (lockDays == 180) depositType = DepositType.FIXED_180;
-        else depositType = DepositType.FIXED_365;
-
-        // Track deposit with lock
-        userDeposits[receiver].push(UserDeposit({
-            amount: assets,
-            depositTime: block.timestamp,
-            unlockTime: unlockTime,
-            depositType: depositType,
-            yieldClaimed: false
-        }));
-
-        emit Deposited(receiver, assets, shares, depositType, unlockTime);
-        return shares;
+        emit Deposited(receiver, assets, shares, _depositTypeFor(lockDays), unlockTime);
     }
 
-    /**
-     * @notice Internal function to deposit to strategy
-     * @param assets Amount to deposit
-     * @param strategy Strategy address
-     */
-    function _depositToStrategy(uint256 assets, address strategy) internal {
-        require(strategy != address(0), "Invalid strategy");
-        
-        // Approve strategy to pull funds
-        assetToken.forceApprove(strategy, assets);
-        
-        // Generic ERC4626 deposit call
-        (bool success, ) = strategy.call(
-            abi.encodeWithSignature("deposit(uint256,address)", assets, address(this))
-        );
-        
-        require(success, "Deposit to strategy failed");
+    /// @dev Route every mint of assets into the strategy.
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
+        super._deposit(caller, receiver, assets, shares); // pulls assets, mints shares
+        _depositToStrategy(assets);
     }
 
-    // ====================== WITHDRAWAL FUNCTIONS ======================
-    /**
-     * @notice Withdraw shares, respecting lock periods
-     * @param shares Shares to burn
-     * @param receiver Address to receive assets
-     * @param owner Address owning the shares
-     * @return assets Amount of cNGN/USDC withdrawn
-     */
-    function withdraw(uint256 shares, address receiver, address owner)
-        public
-        override
-        nonReentrant
-        lockEnforcer(owner)
-        returns (uint256 assets)
+    function deposit(uint256 assets, address receiver) public override whenNotPaused nonReentrant returns (uint256) {
+        return super.deposit(assets, receiver);
+    }
+
+    function mint(uint256 shares, address receiver) public override whenNotPaused nonReentrant returns (uint256) {
+        return super.mint(shares, receiver);
+    }
+
+    // ── Withdrawals (lock-aware, O(1)) ─────────────────────────────────────────
+    function withdraw(uint256 assets, address receiver, address owner)
+        public override nonReentrant returns (uint256 shares)
     {
-        return super.withdraw(shares, receiver, owner);
+        shares = previewWithdraw(assets);
+        _enforceUnlocked(owner, shares);
+        return super.withdraw(assets, receiver, owner);
     }
 
-    /**
-     * @notice Redeem shares, respecting lock periods
-     * @param shares Shares to burn
-     * @param receiver Address to receive assets
-     * @param owner Address owning the shares
-     * @return assets Amount of cNGN/USDC redeemed
-     */
     function redeem(uint256 shares, address receiver, address owner)
-        public
-        override
-        nonReentrant
-        lockEnforcer(owner)
-        returns (uint256 assets)
+        public override nonReentrant returns (uint256)
     {
+        _enforceUnlocked(owner, shares);
         return super.redeem(shares, receiver, owner);
     }
 
-    /**
-     * @notice Check and enforce locks on user's deposits
-     * @param user User address
-     */
-    function _checkLocks(address user) internal view {
-        UserDeposit[] storage deposits = userDeposits[user];
-        
-        for (uint256 i = 0; i < deposits.length; i++) {
-            if (deposits[i].unlockTime > 0 && block.timestamp < deposits[i].unlockTime) {
-                revert("Funds still locked");
+    /// @dev O(1): a withdrawal must leave at least `lockedShares[owner]` behind.
+    function _enforceUnlocked(address owner, uint256 shares) internal view {
+        require(balanceOf(owner) >= shares, "Insufficient shares");
+        require(balanceOf(owner) - shares >= lockedShares[owner], "Funds still locked");
+    }
+
+    /// @notice Free shares from matured locks. Caller pays gas for their own
+    /// array; withdrawals stay O(1) regardless of how many locks exist.
+    function releaseMatured() external {
+        Lock[] storage ls = userLocks[msg.sender];
+        uint256 freed;
+        uint256 i;
+        while (i < ls.length) {
+            if (block.timestamp >= ls[i].unlockTime) {
+                freed += ls[i].shares;
+                ls[i] = ls[ls.length - 1];
+                ls.pop();
+            } else {
+                i++;
             }
+        }
+        if (freed > 0) {
+            lockedShares[msg.sender] -= freed;
+            emit LocksReleased(msg.sender, freed);
         }
     }
 
-    // ====================== YIELD HARVESTING ======================
-    /**
-     * @notice Harvest yield from strategies and distribute
-     * @dev Called by keeper/harvester roles
-     * @return totalYield Total yield harvested
-     */
-    function harvestYield() external onlyHarvester returns (uint256 totalYield) {
-        // Get current balance of assets in strategy
-        uint256 previousBalance = assetToken.balanceOf(address(this));
-        
-        // Call harvest on primary strategy
-        _harvestFromStrategy(primaryStrategy);
-        
-        // Get new balance
-        uint256 currentBalance = assetToken.balanceOf(address(this));
-        totalYield = currentBalance - previousBalance;
-
-        // Clean no-op when there's nothing to harvest (FIND-SC-09) — external
-        // harvesters get 0 instead of a revert.
-        if (totalYield == 0) {
-            return 0;
+    /// @dev Pull funds back from the primary strategy on the way out if needed.
+    function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares)
+        internal override
+    {
+        uint256 bal = assetToken.balanceOf(address(this));
+        if (bal < assets) {
+            _withdrawFromStrategy(primaryStrategy, assets - bal);
         }
-        
-        // Calculate platform fee
-        uint256 platformFee = (totalYield * platformFeeBps) / 10000;
+        super._withdraw(caller, receiver, owner, assets, shares);
+    }
+
+    // ── Strategy plumbing ──────────────────────────────────────────────────────
+    function _depositToStrategy(uint256 assets) internal {
+        address strat = primaryStrategy;
+        require(strat != address(0), "No strategy");
+        assetToken.forceApprove(strat, assets);
+        IStrategy(strat).deposit(assets);
+        deployedAssets += assets;
+    }
+
+    function _withdrawFromStrategy(address strat, uint256 amount) internal returns (uint256 got) {
+        require(strat != address(0), "No strategy");
+        got = IStrategy(strat).withdraw(amount);
+        deployedAssets = deployedAssets > got ? deployedAssets - got : 0;
+    }
+
+    /// @notice totalAssets = idle cash + deployed principal (donation-proof).
+    function totalAssets() public view override returns (uint256) {
+        return assetToken.balanceOf(address(this)) + deployedAssets;
+    }
+
+    // ── Yield harvest ──────────────────────────────────────────────────────────
+    function harvestYield() external onlyHarvester nonReentrant returns (uint256 totalYield) {
+        uint256 before = assetToken.balanceOf(address(this));
+
+        // Best-effort; a strategy without harvest() is tolerated but surfaced.
+        try IStrategy(primaryStrategy).harvest() {} catch { emit HarvestFailed(primaryStrategy); }
+
+        uint256 received = assetToken.balanceOf(address(this)) - before;
+        if (received == 0) return 0; // clean no-op (FIND-SC-09)
+        totalYield = received;
+
+        uint256 platformFee = (totalYield * platformFeeBps) / 10_000;
         uint256 userYield = totalYield - platformFee;
-        
-        // Track accrual
-        totalYieldAccrued += userYield;
+
         totalFeesAccrued += platformFee;
         totalYieldHarvested += totalYield;
-        
-        // Transfer fee to recipient
-        if (platformFee > 0) {
-            assetToken.safeTransfer(feeRecipient, platformFee);
-        }
-        
+
+        if (platformFee > 0) assetToken.safeTransfer(feeRecipient, platformFee);
+        // userYield stays as idle cash → totalAssets up → share price up for all.
+
         emit YieldHarvested(totalYield, platformFee, userYield, block.timestamp);
-        return totalYield;
     }
 
-    /**
-     * @notice Internal harvest from strategy (flexible based on strategy interface)
-     * @param strategy Strategy address
-     */
-    function _harvestFromStrategy(address strategy) internal {
-        // Not every strategy exposes harvest(); a failed call is tolerated (yield
-        // is still captured via the balance delta in harvestYield), but we surface
-        // it via an event instead of silently swallowing the error (FIND-SC-04).
-        (bool ok, ) = strategy.call(abi.encodeWithSignature("harvest()"));
-        if (!ok) emit HarvestFailed(strategy);
-    }
-
-    // ====================== REBALANCING ======================
-    /**
-     * @notice Rebalance between strategies if needed
-     * @dev Moves funds from fallback to primary if primary needs capital
-     */
+    // ── Rebalance ──────────────────────────────────────────────────────────────
     function rebalance() external onlyOwner {
-        require(
-            block.timestamp >= lastRebalanceTime + rebalanceInterval,
-            "Rebalance interval not met"
-        );
-        
-        // Get balances in each strategy
-        uint256 primaryBalance = _getStrategyBalance(primaryStrategy);
-        uint256 fallbackBalance = _getStrategyBalance(fallbackStrategy);
-        
-        // If fallback has funds and primary is below threshold, rebalance
-        if (fallbackBalance > 0 && primaryBalance < totalAssets() / 3) {
-            uint256 amountToMove = fallbackBalance / 2; // Move 50% of fallback
-            
-            // Withdraw from fallback
-            _withdrawFromStrategy(fallbackStrategy, amountToMove);
-            
-            // Deposit to primary
-            _depositToStrategy(amountToMove, primaryStrategy);
-            
+        require(block.timestamp >= lastRebalanceTime + rebalanceInterval, "Rebalance interval not met");
+        if (fallbackStrategy == address(0)) return;
+
+        uint256 fallbackBal = IStrategy(fallbackStrategy).totalAssets();
+        if (fallbackBal > 0 && IStrategy(primaryStrategy).totalAssets() < totalAssets() / 3) {
+            uint256 amount = fallbackBal / 2;
+            uint256 got = IStrategy(fallbackStrategy).withdraw(amount);
+            assetToken.forceApprove(primaryStrategy, got);
+            IStrategy(primaryStrategy).deposit(got);
             lastRebalanceTime = block.timestamp;
-            emit Rebalanced(amountToMove, amountToMove, block.timestamp);
+            emit Rebalanced(got, block.timestamp);
         }
     }
 
-    /**
-     * @notice Get balance in a strategy (simplified)
-     * @param strategy Strategy address
-     * @return balance Balance of assets
-     */
-    function _getStrategyBalance(address strategy) internal view returns (uint256) {
-        return assetToken.balanceOf(strategy);
+    // ── Views ──────────────────────────────────────────────────────────────────
+    function getUserLocks(address user) external view returns (Lock[] memory) {
+        return userLocks[user];
     }
 
-    /**
-     * @notice Withdraw from strategy
-     * @param strategy Strategy address
-     * @param amount Amount to withdraw
-     */
-    function _withdrawFromStrategy(address strategy, uint256 amount) internal {
-        (bool success, ) = strategy.call(
-            abi.encodeWithSignature("withdraw(uint256,address,address)", amount, address(this), address(this))
-        );
-        require(success, "Withdraw from strategy failed");
+    function maxWithdrawableShares(address user) external view returns (uint256) {
+        uint256 bal = balanceOf(user);
+        uint256 locked = lockedShares[user];
+        return bal > locked ? bal - locked : 0;
     }
 
-    // ====================== VIEW FUNCTIONS ======================
-    /**
-     * @notice Get user's deposits
-     * @param user User address
-     * @return User's deposit array
-     */
-    function getUserDeposits(address user) external view returns (UserDeposit[] memory) {
-        return userDeposits[user];
-    }
-
-    /**
-     * @notice Check if user has active locks
-     * @param user User address
-     * @return hasActiveLock True if any deposit is still locked
-     */
     function hasActiveLock(address user) external view returns (bool) {
-        UserDeposit[] storage deposits = userDeposits[user];
-        
-        for (uint256 i = 0; i < deposits.length; i++) {
-            if (deposits[i].unlockTime > 0 && block.timestamp < deposits[i].unlockTime) {
-                return true;
-            }
+        Lock[] storage ls = userLocks[user];
+        for (uint256 i = 0; i < ls.length; i++) {
+            if (block.timestamp < ls[i].unlockTime) return true;
         }
         return false;
     }
 
-    /**
-     * @notice Get next unlock time for user
-     * @param user User address
-     * @return nextUnlock Unix timestamp of next unlock
-     */
     function getNextUnlockTime(address user) external view returns (uint256) {
-        UserDeposit[] storage deposits = userDeposits[user];
-        uint256 nextUnlock = type(uint256).max;
-        
-        for (uint256 i = 0; i < deposits.length; i++) {
-            if (deposits[i].unlockTime > block.timestamp && deposits[i].unlockTime < nextUnlock) {
-                nextUnlock = deposits[i].unlockTime;
-            }
+        Lock[] storage ls = userLocks[user];
+        uint256 next = type(uint256).max;
+        for (uint256 i = 0; i < ls.length; i++) {
+            if (ls[i].unlockTime > block.timestamp && ls[i].unlockTime < next) next = ls[i].unlockTime;
         }
-        
-        return nextUnlock == type(uint256).max ? 0 : nextUnlock;
+        return next == type(uint256).max ? 0 : next;
     }
 
-    /**
-     * @notice Validate lock period
-     * @param lockDays Lock period in days
-     * @return isValid True if valid lock period
-     */
     function isValidLockPeriod(uint256 lockDays) public pure returns (bool) {
         return lockDays == 30 || lockDays == 90 || lockDays == 180 || lockDays == 365;
     }
 
-    /**
-     * @notice Get total yield accrued (user's portion)
-     * @return Accrued yield in assets
-     */
-    function getTotalUserYield() external view returns (uint256) {
-        return totalYieldAccrued;
+    function _depositTypeFor(uint256 lockDays) internal pure returns (DepositType) {
+        if (lockDays == 30) return DepositType.FIXED_30;
+        if (lockDays == 90) return DepositType.FIXED_90;
+        if (lockDays == 180) return DepositType.FIXED_180;
+        return DepositType.FIXED_365;
     }
 
-    /**
-     * @notice Get total fees accrued (platform's portion)
-     * @return Accrued fees in assets
-     */
-    function getTotalFees() external view returns (uint256) {
-        return totalFeesAccrued;
+    // ── Admin: strategy changes via timelock (FIND-SC-05/07) ───────────────────
+    function _validateStrategy(address strategy) internal view {
+        require(strategy != address(0), "Invalid strategy");
+        require(IStrategy(strategy).asset() == address(assetToken), "Strategy asset mismatch");
     }
 
-    // ====================== ADMIN FUNCTIONS ======================
-    /**
-     * @notice Update primary strategy
-     * @param newStrategy New strategy address
-     */
-    function updatePrimaryStrategy(address newStrategy) external onlyOwner {
-        require(newStrategy != address(0), "Invalid strategy");
-        address oldStrategy = primaryStrategy;
-        primaryStrategy = newStrategy;
-        emit StrategyUpdated("PRIMARY", newStrategy, oldStrategy);
+    function proposePrimaryStrategy(address newStrategy) external onlyOwner {
+        _validateStrategy(newStrategy);
+        pendingPrimary = newStrategy;
+        pendingPrimaryEta = block.timestamp + STRATEGY_TIMELOCK;
+        emit StrategyProposed("PRIMARY", newStrategy, pendingPrimaryEta);
     }
 
-    /**
-     * @notice Update fallback strategy
-     * @param newStrategy New strategy address
-     */
-    function updateFallbackStrategy(address newStrategy) external onlyOwner {
-        require(newStrategy != address(0), "Invalid strategy");
-        address oldStrategy = fallbackStrategy;
-        fallbackStrategy = newStrategy;
-        emit StrategyUpdated("FALLBACK", newStrategy, oldStrategy);
+    function executePrimaryStrategy() external onlyOwner {
+        require(pendingPrimary != address(0), "No pending");
+        require(block.timestamp >= pendingPrimaryEta, "Timelock active");
+        address old = primaryStrategy;
+        primaryStrategy = pendingPrimary;
+        pendingPrimary = address(0);
+        emit StrategyUpdated("PRIMARY", primaryStrategy, old);
     }
 
-    /**
-     * @notice Update platform fee (max 15%)
-     * @param newFeeBps New fee in basis points
-     */
+    function proposeFallbackStrategy(address newStrategy) external onlyOwner {
+        _validateStrategy(newStrategy);
+        pendingFallback = newStrategy;
+        pendingFallbackEta = block.timestamp + STRATEGY_TIMELOCK;
+        emit StrategyProposed("FALLBACK", newStrategy, pendingFallbackEta);
+    }
+
+    function executeFallbackStrategy() external onlyOwner {
+        require(pendingFallback != address(0), "No pending");
+        require(block.timestamp >= pendingFallbackEta, "Timelock active");
+        address old = fallbackStrategy;
+        fallbackStrategy = pendingFallback;
+        pendingFallback = address(0);
+        emit StrategyUpdated("FALLBACK", fallbackStrategy, old);
+    }
+
     function updatePlatformFee(uint256 newFeeBps) external onlyOwner {
         require(newFeeBps <= 1500, "Fee cannot exceed 15%");
         platformFeeBps = newFeeBps;
     }
 
-    /**
-     * @notice Update fee recipient
-     * @param newRecipient New recipient address
-     */
     function updateFeeRecipient(address newRecipient) external onlyOwner {
         require(newRecipient != address(0), "Invalid recipient");
         feeRecipient = newRecipient;
     }
 
-    /**
-     * @notice Grant harvester role
-     * @param account Account to grant role
-     */
-    function grantHarvesterRole(address account) external onlyOwner {
-        _grantRole(HARVESTER_ROLE, account);
-    }
+    function grantHarvesterRole(address account) external onlyOwner { _grantRole(HARVESTER_ROLE, account); }
+    function revokeHarvesterRole(address account) external onlyOwner { _revokeRole(HARVESTER_ROLE, account); }
 
-    /**
-     * @notice Revoke harvester role
-     * @param account Account to revoke role
-     */
-    function revokeHarvesterRole(address account) external onlyOwner {
-        _revokeRole(HARVESTER_ROLE, account);
-    }
+    function pauseVault() external onlyOwner { _pause(); }
+    function unpauseVault() external onlyOwner { _unpause(); }
 
-    /**
-     * @notice Pause vault
-     */
-    function pauseVault() external onlyOwner {
-        _pause();
-    }
-
-    /**
-     * @notice Unpause vault
-     */
-    function unpauseVault() external onlyOwner {
-        _unpause();
-    }
-
-    /**
-     * @notice Emergency withdraw all assets from strategies
-     * @dev Use only in emergency
-     */
+    /// @notice Pull everything back from strategies into the vault, then pause
+    /// (FIND-SC-06). Best-effort; failures are surfaced, not reverted.
     function emergencyWithdraw() external onlyOwner {
         _pause();
-        // Pull everything we can back from the strategies into the vault so funds
-        // aren't stranded in a compromised/upgraded strategy (FIND-SC-06).
-        // Best-effort: failures are surfaced via event, not reverted.
-        uint256 inPrimary = assetToken.balanceOf(primaryStrategy);
-        if (inPrimary > 0) {
-            (bool ok, ) = primaryStrategy.call(
-                abi.encodeWithSignature("withdraw(uint256,address,address)", inPrimary, address(this), address(this))
-            );
-            if (!ok) emit EmergencyWithdrawFailed(primaryStrategy);
+        _emergencyPull(primaryStrategy);
+        if (fallbackStrategy != address(0)) _emergencyPull(fallbackStrategy);
+    }
+
+    function _emergencyPull(address strat) internal {
+        uint256 amt = IStrategy(strat).totalAssets();
+        if (amt == 0) return;
+        try IStrategy(strat).withdraw(amt) returns (uint256 got) {
+            deployedAssets = deployedAssets > got ? deployedAssets - got : 0;
+        } catch {
+            emit EmergencyWithdrawFailed(strat);
         }
-        uint256 inFallback = assetToken.balanceOf(fallbackStrategy);
-        if (inFallback > 0) {
-            (bool ok2, ) = fallbackStrategy.call(
-                abi.encodeWithSignature("withdraw(uint256,address,address)", inFallback, address(this), address(this))
-            );
-            if (!ok2) emit EmergencyWithdrawFailed(fallbackStrategy);
-        }
-    }
-
-    // ====================== INTERNAL VAULT FUNCTIONS ======================
-    /**
-     * @notice Total assets in vault and strategies
-     * @return Total assets
-     */
-    function totalAssets() public view override returns (uint256) {
-        return assetToken.balanceOf(address(this))
-            + assetToken.balanceOf(primaryStrategy)
-            + assetToken.balanceOf(fallbackStrategy);
-    }
-
-    function _withdraw(
-        address caller,
-        address receiver,
-        address owner,
-        uint256 assets,
-        uint256 shares
-    ) internal override {
-        uint256 vaultBalance = assetToken.balanceOf(address(this));
-        if (vaultBalance < assets) {
-            _withdrawFromStrategy(primaryStrategy, assets - vaultBalance);
-        }
-        super._withdraw(caller, receiver, owner, assets, shares);
-    }
-
-    /**
-     * @notice Convert assets to shares
-     * @param assets Amount of assets
-     * @return Shares amount
-     */
-    function convertToShares(uint256 assets) public view override returns (uint256) {
-        return super.convertToShares(assets);
-    }
-
-    /**
-     * @notice Convert shares to assets
-     * @param shares Amount of shares
-     * @return Assets amount
-     */
-    function convertToAssets(uint256 shares) public view override returns (uint256) {
-        return super.convertToAssets(shares);
     }
 }

@@ -4,6 +4,8 @@ import * as path from "path"
 
 interface DeploymentConfig {
   cNGNToken: string
+  lendPool: string
+  lendStrategy: string
   primaryStrategy: string
   fallbackStrategy: string
   feeRecipient: string
@@ -35,10 +37,27 @@ async function main() {
     console.log("✓ MockERC20 deployed to:", tokenAddress)
   }
 
-  // PRIMARY_STRATEGY_ADDRESS = PawasaveLend contract (deploy-lend.ts first)
-  // FALLBACK_STRATEGY_ADDRESS = XEND X-AUTO bridge or secondary lending pool
-  const primaryStrategy  = process.env.PRIMARY_STRATEGY_ADDRESS  || deployer.address
-  const fallbackStrategy = process.env.FALLBACK_STRATEGY_ADDRESS || deployer.address
+  // Strategy wiring (redesign): the vault now requires IStrategy-conforming
+  // strategies. Preferred path — set LEND_POOL_ADDRESS to the deployed
+  // PawasaveLend, and we deploy a PawasaveLendStrategy adapter over it. (The raw
+  // lend pool is NOT an IStrategy, so it can no longer be passed directly.)
+  let primaryStrategy = process.env.PRIMARY_STRATEGY_ADDRESS || ""
+  let lendStrategyAddress = ""
+  const lendPool = process.env.LEND_POOL_ADDRESS || ""
+  if (lendPool) {
+    console.log("\n🔗 Deploying PawasaveLendStrategy adapter over lend pool:", lendPool)
+    const Adapter = await ethers.getContractFactory("PawasaveLendStrategy")
+    const adapter = await Adapter.deploy(tokenAddress, lendPool)
+    await adapter.waitForDeployment()
+    lendStrategyAddress = await adapter.getAddress()
+    primaryStrategy = lendStrategyAddress
+    console.log("✓ Adapter deployed to:", lendStrategyAddress)
+  }
+  if (!primaryStrategy) {
+    throw new Error("Set LEND_POOL_ADDRESS (preferred) or PRIMARY_STRATEGY_ADDRESS to an IStrategy")
+  }
+  // Fallback is optional and must itself be an IStrategy; default to none.
+  const fallbackStrategy = process.env.FALLBACK_STRATEGY_ADDRESS || ethers.ZeroAddress
   const feeRecipient     = process.env.FEE_RECIPIENT_ADDRESS     || deployer.address
 
   console.log("\n📋 Deployment Configuration:")
@@ -60,6 +79,15 @@ async function main() {
   const vaultAddress = await vault.getAddress()
   console.log("✓ Vault deployed to:", vaultAddress)
 
+  // Bind the lend adapter to the vault (one-time) so only the vault can move funds.
+  if (lendStrategyAddress) {
+    console.log("\n🔗 Binding adapter to vault (setVault)...")
+    const adapter = await ethers.getContractAt("PawasaveLendStrategy", lendStrategyAddress)
+    const tx = await adapter.setVault(vaultAddress)
+    await tx.wait()
+    console.log("✓ Adapter bound to vault")
+  }
+
   // Verify deployment
   console.log("\n✅ Verifying deployment...")
   const assetToken = await vault.assetToken()
@@ -77,6 +105,8 @@ async function main() {
   // Save deployment info
   const deploymentInfo: DeploymentConfig = {
     cNGNToken: tokenAddress,
+    lendPool,
+    lendStrategy: lendStrategyAddress,
     primaryStrategy,
     fallbackStrategy,
     feeRecipient,

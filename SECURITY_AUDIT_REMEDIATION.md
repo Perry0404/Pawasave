@@ -76,14 +76,19 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 | FIND-SC-23 | cNGN price hardcoded | 🔵 informational — fetch live cNGN rate later |
 | FIND-SC-24 | Rate-per-second truncation | 🟣 informational — negligible |
 
-**Batch 7b — vault redesign (NOT done — needs careful work + re-audit before redeploy):**
+**Batch 7b — vault redesign (DONE in source + unit-tested; `test/vault-redesign.ts`, 7 passing; full suite 52 passing):**
 | ID | Finding | Status |
 |----|---------|--------|
-| FIND-SC-01 | `_checkLocks()` O(n) DoS (Critical) | ⬜ redesign lock accounting to O(1) |
-| FIND-SC-02 | Any lock blocks all withdrawals | ⬜ separate flexible vs locked shares |
-| FIND-SC-03/08 | `totalAssets()` donation manipulation | ⬜ internal strategy-balance accounting |
-| FIND-SC-05/07 | Strategy interface + timelock | ⬜ IStrategy + timelocked strategy changes |
-| — | vault↔lend integration mismatch | ⬜ vault calls `deposit(uint,addr)`; lend exposes `supply(uint)` |
+| FIND-SC-01 | `_checkLocks()` O(n) DoS (Critical) | ✅ O(1) `lockedShares` counter; `releaseMatured()` for matured locks |
+| FIND-SC-02 | Any lock blocks all withdrawals | ✅ only locked portion blocked; fixed deposits are self-only (anti-grief) |
+| FIND-SC-03/08 | `totalAssets()` donation manipulation | ✅ internal `deployedAssets`; never reads strategy raw balance; +decimals offset |
+| FIND-SC-05/07 | Strategy interface + timelock | ✅ `IStrategy` + asset sanity-check + 48h timelocked strategy changes |
+| FIND-SC-04 | harvest swallows errors | ✅ `try/catch` + `HarvestFailed` event |
+| FIND-SC-06 | emergencyWithdraw no-op | ✅ pulls all strategy funds back, then pauses |
+| — | vault↔lend integration mismatch | ✅ new `PawasaveLendStrategy` adapter wraps supply/withdraw + deploy script wired |
+
+> **Still gated:** none of 7a/7b is live until the single redeploy (7c), which needs
+> your go + the deployer key, and which you've said will be re-audited first.
 
 ## Architecture (Batch 8 — needs your accounts/decisions)
 

@@ -355,9 +355,11 @@ describe("PawasaveLend", function () {
     })
 
     it("underwater position can be liquidated", async () => {
-      // Drop USDC price by 30% to make position underwater
+      // Drop USDC price by 30% to make position underwater. A move this large
+      // exceeds the oracle circuit breaker (FIND-SC-20), so the owner uses the
+      // forceSetPrice escape hatch (as it would for a genuine sharp move).
       const newPrice = (USDC_PRICE * 70n) / 100n
-      await oracle.connect(keeper).setPrice(await usdc.getAddress(), newPrice)
+      await oracle.connect(owner).forceSetPrice(await usdc.getAddress(), newPrice)
 
       expect(await lend.isHealthy(borrower2.address)).to.be.false
 
@@ -373,8 +375,8 @@ describe("PawasaveLend", function () {
         )
       ).to.emit(lend, "Liquidated")
 
-      // Restore price
-      await oracle.connect(keeper).setPrice(await usdc.getAddress(), USDC_PRICE)
+      // Restore price (large move back up → owner override again)
+      await oracle.connect(owner).forceSetPrice(await usdc.getAddress(), USDC_PRICE)
     })
 
     it("liquidator cannot self-liquidate", async () => {

@@ -196,24 +196,15 @@ export async function withdrawFromVault(amountKobo: number, usdcMicro: number) {
   const cngnPool = Number(wallet?.cngn_pool_micro || 0)
   const totalAvailable = freeUsdc + cngnPool
 
+  // Client-side pre-check is UX only — the real guard is the atomic RPC below.
   if (usdcMicro > totalAvailable) throw new Error('Insufficient vault balance')
 
-  // Step 1: free pool funds into usdc_balance so withdraw_from_vault can see them
-  const fromPool = Math.min(cngnPool, usdcMicro)
-  if (fromPool > 0) {
-    const { data: freed, error: freeError } = await supabase.rpc('withdraw_cngn_pool', {
-      p_user_id: user.id,
-      p_amount_micro: fromPool,
-    })
-    if (freeError) throw freeError
-    if (!freed) throw new Error('Insufficient vault balance')
-  }
-
-  // Step 2: deduct full USDC amount from usdc_balance and credit naira to wallet
-  const { data: ok, error: vaultErr } = await supabase.rpc('withdraw_from_vault', {
+  // FIND-FIN-04: single atomic RPC pulls from the cNGN pool (if needed) and
+  // debits in one transaction under a row lock — no read-then-write TOCTOU race.
+  const { data: ok, error: vaultErr } = await supabase.rpc('withdraw_vault_atomic', {
     p_user_id: user.id,
     p_naira_kobo: amountKobo,   // ← credits naira_balance_kobo
-    p_usdc_micro: usdcMicro,    // ← debits usdc_balance_micro
+    p_usdc_micro: usdcMicro,    // ← debits usdc_balance_micro (pool-backed)
   })
   if (vaultErr) throw vaultErr
   if (!ok) throw new Error('Insufficient vault balance')

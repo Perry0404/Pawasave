@@ -29,7 +29,7 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 | FIND-FE-01 | Admin password in sessionStorage | 🔵 | Password admin retained by decision; optional in-memory-only hardening |
 | FIND-AUTH-03 | Admin single password, no MFA | 🔵 | Password retained by decision; MFA optional later |
 | FIND-AUTH-02 | KYC ID unsalted SHA-256 | 🔵 | Defer to real-KYC integration (Dojah/Smile) — BVN hash isn't verified anywhere yet; salt it server-side at that point |
-| FIND-FIN-04 | Vault withdrawal TOCTOU | ⬜ | Batch 4 — atomic RPC |
+| FIND-FIN-04 | Vault withdrawal TOCTOU | ✅ | `withdraw_vault_atomic` (migration 028) + both client sites wired |
 
 ## P2 — Hardening
 
@@ -38,8 +38,10 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 | FIND-AUTH-05 | Open redirect in auth callback | ✅ | `next` must be a same-site relative path |
 | FIND-FIN-01 | Inconsistent refund conversion | ⬜ | Batch 4 — canonical helpers |
 | FIND-FIN-03 | Esusu hardcoded USD rate | ⬜ | Batch 4 — switch to cNGN 1:1 |
-| FIND-FIN-05 | Fee recording not atomic | ⬜ | Batch 4 |
-| FIND-FIN-06 | APY values hardcoded/inconsistent | ⬜ | Batch 4 — platform_settings source of truth |
+| FIND-FIN-05 | Fee recording not atomic | 🟡 | `debit_wallet_with_fee` (028) delivered; off-ramp records fee on provider success, adopt where debit+fee co-commit |
+| FIND-FIN-06 | APY values hardcoded/inconsistent | 🟡 | `platform_settings` + `get_apy_settings()` (028) single source; frontend read pending (value tied to yield decision) |
+
+> **Action for you:** run `supabase/migrations/028_audit_financial_fixes.sql` in Supabase (then `026` if not already run).
 | FIND-API-05 | In-memory rate limiter | 🔵 | Batch 8 — needs Upstash |
 | FIND-API-08 | Rate endpoint unauthenticated | ⬜ | Batch 4 — cache + limit |
 | FIND-API-09 | Error messages leak internals | ✅ | Generic client messages; provider details logged server-side only |

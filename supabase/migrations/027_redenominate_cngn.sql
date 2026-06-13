@@ -11,7 +11,7 @@
 --     reset balances instead.
 --
 -- 1) EDIT v_rate below to the NGN/USD rate you want to lock existing balances at.
--- 2) Run the whole script in the Supabase SQL editor.
+-- 2) Run the whole script in the Supabase  editor.
 -- ============================================================
 
 DO $$

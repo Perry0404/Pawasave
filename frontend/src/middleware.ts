@@ -1,29 +1,61 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-// Simple in-memory rate limiter for API routes
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
+// ── Rate limiting (FIND-API-05) ──────────────────────────────────────────────
+// Preferred: Upstash Redis (persistent — survives serverless cold starts, so an
+// attacker can't reset their counter by forcing new processes). Set
+// UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN to enable. Falls back to an
+// in-memory limiter when Upstash isn't configured (dev / single instance).
+
 const RATE_LIMIT_WINDOW = 60_000 // 1 minute
-const RATE_LIMIT_MAX = 30 // max requests per window
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
 
-function checkRateLimit(ip: string): boolean {
+// Tighter limits on sensitive surfaces; generous default elsewhere.
+function limitFor(path: string): { max: number; bucket: string } {
+  if (path.startsWith('/api/admin')) return { max: 10, bucket: 'admin' }
+  if (path.startsWith('/api/ramp'))  return { max: 15, bucket: 'ramp' }
+  return { max: 30, bucket: 'api' }
+}
+
+function checkRateLimitMemory(key: string, max: number): boolean {
   const now = Date.now()
-  const entry = rateLimitMap.get(ip)
-
+  const entry = rateLimitMap.get(key)
   if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW })
+    rateLimitMap.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW })
     return true
   }
-
-  if (entry.count >= RATE_LIMIT_MAX) {
-    return false
-  }
-
+  if (entry.count >= max) return false
   entry.count++
   return true
 }
 
-// Clean up stale entries periodically
+// Returns the post-increment count, or null if Upstash isn't configured/errored
+// (caller then falls back to the in-memory limiter / fails open).
+async function upstashIncr(key: string): Promise<number | null> {
+  const url = process.env.UPSTASH_REDIS_REST_URL
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN
+  if (!url || !token) return null
+  try {
+    const res = await fetch(`${url}/pipeline`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify([
+        ['INCR', key],
+        ['EXPIRE', key, Math.ceil(RATE_LIMIT_WINDOW / 1000)],
+      ]),
+      // never let the limiter add meaningful latency / hang the request
+      signal: AbortSignal.timeout(1500),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const count = Array.isArray(data) ? Number(data[0]?.result) : NaN
+    return Number.isFinite(count) ? count : null
+  } catch {
+    return null // fail open on Redis error — availability over strictness
+  }
+}
+
+// Clean up stale in-memory entries periodically.
 if (typeof globalThis !== 'undefined') {
   setInterval(() => {
     const now = Date.now()
@@ -33,7 +65,7 @@ if (typeof globalThis !== 'undefined') {
   }, 60_000)
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const response = NextResponse.next()
 
   // Security headers
@@ -42,10 +74,7 @@ export function middleware(request: NextRequest) {
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
   response.headers.set('X-XSS-Protection', '1; mode=block')
   response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
-  response.headers.set(
-    'Strict-Transport-Security',
-    'max-age=31536000; includeSubDomains'
-  )
+  response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
 
   // Content-Security-Policy (FIND-INFRA-02). Pragmatic policy that hardens the app
   // without breaking Next.js hydration, Tailwind inline styles, Supabase (https +
@@ -73,11 +102,16 @@ export function middleware(request: NextRequest) {
     const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
       || request.headers.get('x-real-ip')
       || 'unknown'
+    const { max, bucket } = limitFor(request.nextUrl.pathname)
+    const key = `rl:${bucket}:${ip}`
 
-    if (!checkRateLimit(ip)) {
+    const count = await upstashIncr(key)
+    const allowed = count === null ? checkRateLimitMemory(key, max) : count <= max
+
+    if (!allowed) {
       return NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
-        { status: 429 }
+        { status: 429 },
       )
     }
   }

@@ -42,7 +42,7 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 | FIND-FIN-06 | APY values hardcoded/inconsistent | 🟡 | `platform_settings` + `get_apy_settings()` (028) single source; frontend read pending (value tied to yield decision) |
 
 > **Action for you:** run `supabase/migrations/028_audit_financial_fixes.sql` in Supabase (then `026` if not already run).
-| FIND-API-05 | In-memory rate limiter | 🔵 | Batch 8 — needs Upstash |
+| FIND-API-05 | In-memory rate limiter | ✅ | Upstash-backed limiter + tighter limits on /api/admin & /api/ramp; in-memory fallback. Set UPSTASH_* to enable persistence |
 | FIND-API-08 | Rate endpoint unauthenticated | ⬜ | Batch 4 — cache + limit |
 | FIND-API-09 | Error messages leak internals | ✅ | Generic client messages; provider details logged server-side only |
 | FIND-INFRA-01 | Empty next.config.js | ✅ | poweredByHeader off, strict mode, compress |
@@ -96,9 +96,11 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 
 | ID | Finding | Status | Notes |
 |----|---------|--------|-------|
-| FIND-3P-05 | Custody single key (CRIT-02) | 🔵 | Migrate to Gnosis Safe multisig |
-| FIND-3P-06 | Deposit mnemonic single secret (CRIT-03) | 🔵 | Sweep-on-receipt + KMS |
-| FIND-SC-21 | Oracle keeper key in Vercel env | 🔵 | KMS/HSM |
+| FIND-3P-05 | Custody single key (CRIT-02) | 🟡 | `scripts/transfer-ownership.ts` moves CONTRACT ownership to a Safe (run post-redeploy). The custody EOA itself → Safe + per-tx limits is operational (needs your Safe) |
+| FIND-3P-06 | Deposit mnemonic single secret (CRIT-03) | 🔵 | Operational: move mnemonic to KMS/secrets manager; sweep-on-receipt needs per-address gas funding or a relayer (design follow-up) |
+| FIND-SC-21 | Oracle keeper key in Vercel env | 🔵 | Operational: move keeper key to KMS/HSM (needs your KMS) |
+
+> **Batch 8 code shipped:** Upstash rate limiter + `scripts/transfer-ownership.ts` (set `NEW_OWNER` to your Safe, run after the audited redeploy). The remaining items are key-custody operations that need your Safe/KMS accounts.
 | FIND-3P-01 | Flipeet no request signing | 🟣 | Provider limitation; TLS + key rotation |
 | FIND-3P-02 | Off-ramp refund single point | ⬜ | Batch 4 — reconciliation cron |
 | FIND-3P-04 | NGN/USD fallback stale | ⬜ | Batch 4 |

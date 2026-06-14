@@ -12,14 +12,19 @@ Patched (7a+7b) contracts are LIVE at new addresses; frontend repointed:
 
 | Contract | Address |
 |----------|---------|
-| InterestRateModel | `0x79C9c8758731dE8e810e60472Beed4A1766EF60D` |
-| PriceOracle | `0x416c236640CD3997006B5490dF7CeBe4737d8209` |
-| PawasaveLend | `0x0f7aa5dc3B540dc22225085d7363A2524856e744` |
-| PawasaveLendStrategy (adapter) | `0x3f40741E18c37a0a23c1F5EbEcec2046Ea443523` |
-| PawasaveAutoVault | `0x68340bCFA0BC5B0100E997534427271e216d1a7f` |
+| InterestRateModel | `0xfc9A201C08AB779003A142e9122A0fC94dfd7407` |
+| PriceOracle | `0xE5D6B16e02bcf0B311feD6177f423fe5F860Bd1a` |
+| PawasaveLend | `0x07F2365DDd5b720E55d0C04e1391A0aA92f2eaB7` |
+| PawasaveLendStrategy (adapter) | `0xA98131D9A2C84870F7dc94BC122908Fe6064167F` |
+| PawasaveAutoVault | `0x423750c8aa5f3008E342d8c764381a91550cCbB3` |
 
 Verified on-chain: USDC/USDT/cNGN accepted; oracle prices seeded; adapter bound
 to vault; pool unpaused. **Old contracts are abandoned (do not use).**
+
+**Loan policy (live on this deployment):** max borrow **₦50M/user**; tenor **90d default
+(30/180 options)**; **4-day grace** then overdue-liquidation; early repayment **free**.
+Vercel env (`PRICE_ORACLE_ADDRESS`/`PAWASAVE_LEND_ADDRESS`/`PAUTO_VAULT_ADDRESS`) +
+`FLIPEET_WEBHOOK_TOKEN` set. ⚠ still run **migration 028** (`withdraw_vault_atomic`).
 
 ## P0 — Before onboarding (live-money / takeover risk)
 

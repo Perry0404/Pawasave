@@ -13,7 +13,7 @@ export const CONTRACTS = {
   /** PawasaveAutoVault — P-AUTO fixed savings vault (Base mainnet) */
   PAUTO_VAULT: (
     process.env.NEXT_PUBLIC_PAUTO_VAULT_ADDRESS ||
-    "0x68340bCFA0BC5B0100E997534427271e216d1a7f"
+    "0x423750c8aa5f3008E342d8c764381a91550cCbB3"
   ) as `0x${string}`,
 
   /** cNGN stablecoin on Base (6 decimals) */
@@ -42,11 +42,11 @@ export const USDT_ADDRESS =
 
 /** ADDRESSES alias for protocol components (same values as CONTRACTS) */
 export const ADDRESSES = {
-  LEND:   (process.env.NEXT_PUBLIC_LEND_ADDRESS || "0x0f7aa5dc3B540dc22225085d7363A2524856e744") as `0x${string}`,
+  LEND:   (process.env.NEXT_PUBLIC_LEND_ADDRESS || "0x07F2365DDd5b720E55d0C04e1391A0aA92f2eaB7") as `0x${string}`,
   CNGN:   CONTRACTS.CNGN,
   USDC:   CONTRACTS.USDC,
   USDT:   USDT_ADDRESS,
-  ORACLE: (process.env.NEXT_PUBLIC_ORACLE_ADDRESS || "0x416c236640CD3997006B5490dF7CeBe4737d8209") as `0x${string}`,
+  ORACLE: (process.env.NEXT_PUBLIC_ORACLE_ADDRESS || "0xE5D6B16e02bcf0B311feD6177f423fe5F860Bd1a") as `0x${string}`,
 }
 
 /**
@@ -111,7 +111,11 @@ export const LEND_ABI = [
   "function depositCollateral(address token, uint256 amount) external",
   "function withdrawCollateral(address token, uint256 amount) external",
   "function borrow(uint256 cngnAmount) external",
+  "function borrow(uint256 cngnAmount, uint256 tenorDays) external",
   "function repay(address borrower, uint256 cngnAmount) external",
+  "function loanDueDate(address borrower) view returns (uint256)",
+  "function isOverdue(address borrower) view returns (bool)",
+  "function isLiquidatable(address borrower) view returns (bool)",
   "function liquidate(address borrower, uint256 repayAmount, address collateralToken) external",
   "function totalBorrows() view returns (uint256)",
   "function totalReserves() view returns (uint256)",

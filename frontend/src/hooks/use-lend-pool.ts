@@ -65,6 +65,8 @@ export interface UserPosition {
   healthy:           boolean
   cngnBalance:       bigint            // wallet cNGN (for supplying)
   collaterals:       CollateralEntry[] // per-token collateral + wallet balances
+  dueDate:           bigint            // loan due date (unix secs; 0 = no active loan)
+  overdue:           boolean           // past due date + grace → liquidatable
 }
 
 export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner | null) {
@@ -157,12 +159,14 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
         })
       )
 
-      const [shares, debt, colVal, limit, healthy] = await Promise.all([
+      const [shares, debt, colVal, limit, healthy, dueDate, overdue] = await Promise.all([
         lendRO.balanceOf(address),
         lendRO.borrowBalanceCurrent(address).catch(() => 0n),
         lendRO.totalCollateralValue(address).catch(() => 0n),
         lendRO.borrowLimit(address).catch(() => 0n),
         lendRO.isHealthy(address).catch(() => true),
+        lendRO.loanDueDate(address).catch(() => 0n),
+        lendRO.isOverdue(address).catch(() => false),
       ])
 
       const total      = b(await lendRO.totalSupply())
@@ -181,6 +185,8 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
         healthy: Boolean(healthy),
         cngnBalance,
         collaterals,
+        dueDate: b(dueDate),
+        overdue: Boolean(overdue),
       })
     } catch (e: any) {
       console.error("fetchPosition error:", e)
@@ -260,9 +266,9 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
     })
   }
 
-  async function borrow(amount: bigint) {
+  async function borrow(amount: bigint, tenorDays: number = 90) {
     await run(async () => {
-      const tx = await lendRW().borrow(amount)
+      const tx = await lendRW()["borrow(uint256,uint256)"](amount, tenorDays)
       await tx.wait()
     })
   }

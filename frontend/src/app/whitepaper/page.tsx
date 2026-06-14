@@ -21,7 +21,7 @@ export default function WhitepaperPage() {
         </p>
         <div className="mt-4 flex gap-4 text-sm">
           <a href="/protocol" className="text-emerald-400 hover:underline">Launch App →</a>
-          <a href="https://basescan.org/address/0x0f7aa5dc3B540dc22225085d7363A2524856e744" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white">Contract on Basescan →</a>
+          <a href="https://basescan.org/address/0x07F2365DDd5b720E55d0C04e1391A0aA92f2eaB7" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white">Contract on Basescan →</a>
         </div>
       </header>
 
@@ -61,7 +61,7 @@ export default function WhitepaperPage() {
             {[
               {
                 name: 'PawasaveLend.sol',
-                address: '0x0f7aa5dc3B540dc22225085d7363A2524856e744',
+                address: '0x07F2365DDd5b720E55d0C04e1391A0aA92f2eaB7',
                 desc: 'Core lending pool. Accepts cNGN deposits and mints psNGN yield-bearing shares. Manages collateral, borrow positions, interest accrual, and liquidations. Inherits ERC20 (psNGN shares), Ownable, ReentrancyGuard, and Pausable from OpenZeppelin v4.',
               },
               {
@@ -76,7 +76,7 @@ export default function WhitepaperPage() {
               },
               {
                 name: 'PawasaveAutoVault.sol (P-AUTO)',
-                address: '0x68340bCFA0BC5B0100E997534427271e216d1a7f',
+                address: '0x423750c8aa5f3008E342d8c764381a91550cCbB3',
                 desc: 'ERC4626-compliant yield vault for fixed savings. Users lock cNGN for 30/90/180/365 days and receive pAUTO shares. The vault routes idle cNGN into PawasaveLend for yield, with lock enforcement preventing early withdrawal.',
               },
             ].map(c => (

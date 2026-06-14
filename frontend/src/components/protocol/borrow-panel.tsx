@@ -14,8 +14,10 @@ interface Props {
   error: string | null
   onDepositCollateral: (token: string, amount: bigint) => Promise<void>
   onWithdrawCollateral:(token: string, amount: bigint) => Promise<void>
-  onBorrow: (amount: bigint) => Promise<void>
+  onBorrow: (amount: bigint, tenorDays: number) => Promise<void>
 }
+
+const TENORS = [30, 90, 180] as const
 
 /** A row for the selector: every known collateral, enriched with live data. */
 type DisplayToken = CollateralEntry & { live: boolean }
@@ -26,6 +28,7 @@ export function BorrowPanel({ stats, position, collateralStatus, connected, txPe
   const [step,   setStep]   = useState<"collateral" | "borrow">("collateral")
   const [action, setAction] = useState<"deposit" | "withdraw">("deposit")
   const [amount, setAmount] = useState("")
+  const [tenor, setTenor] = useState<number>(90)
   const [tokenKey, setTokenKey] = useState(COLLATERAL_TOKENS[0]?.key ?? "usdc")
 
   // Merge the full token catalogue with live balances + on-chain accepted status.
@@ -63,7 +66,7 @@ export function BorrowPanel({ stats, position, collateralStatus, connected, txPe
       if (action === "deposit") await onDepositCollateral(token.address, parsed)
       else await onWithdrawCollateral(token.address, parsed)
     } else {
-      await onBorrow(parseUnits(amount, 6)) // cNGN is 6 decimals
+      await onBorrow(parseUnits(amount, 6), tenor) // cNGN is 6 decimals
     }
     setAmount("")
   }
@@ -175,6 +178,15 @@ export function BorrowPanel({ stats, position, collateralStatus, connected, txPe
               <span>Current debt</span>
               <span className="text-white">{fmtCngn(currentDebt)}</span>
             </div>
+            {position && position.dueDate > 0n && (
+              <div className="flex justify-between">
+                <span>Loan due</span>
+                <span className={position.overdue ? "text-red-400 font-semibold" : "text-white"}>
+                  {new Date(Number(position.dueDate) * 1000).toLocaleDateString()}
+                  {position.overdue ? " · overdue" : ""}
+                </span>
+              </div>
+            )}
             {stats && (
               <div className="flex justify-between">
                 <span>Origination fee</span>
@@ -193,6 +205,24 @@ export function BorrowPanel({ stats, position, collateralStatus, connected, txPe
             </label>
             <input className="proto-input" placeholder="0.00" value={amount}
               onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} />
+          </div>
+
+          <div className="mb-4">
+            <label className="label">Loan term</label>
+            <div className="grid grid-cols-3 gap-2">
+              {TENORS.map(d => (
+                <button key={d} onClick={() => setTenor(d)}
+                  className={`py-2 rounded-lg text-sm font-semibold transition ${
+                    tenor === d ? "bg-brand-600 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-300"
+                  }`}>
+                  {d} days
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-1.5">
+              Repay by the due date. Early repayment is free; after a 4-day grace period an overdue loan can be liquidated.
+              {position && position.dueDate > 0n ? " (Term applies to new loans; your existing due date is unchanged.)" : ""}
+            </p>
           </div>
 
           <div className="flex items-start gap-2 bg-orange-950/30 border border-orange-900/50 rounded-xl p-3 mb-4">

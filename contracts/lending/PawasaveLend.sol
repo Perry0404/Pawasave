@@ -46,6 +46,13 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     uint256 public liquidationProtocolFeeMantissa = 0.02e18; // 2% of liquidation bonus → protocol
     uint256 public closeFactor = 0.50e18;                    // max 50% of debt per liquidation
 
+    // ── Loan term (maturity overlay) ─────────────────────────────────────────
+    // Loans carry a due date (tenor). After dueDate + grace they become
+    // liquidatable regardless of collateral health. Variable interest still
+    // accrues as normal; early repayment has no penalty.
+    uint256 public constant DEFAULT_TENOR_DAYS = 90;
+    uint256 public gracePeriodSeconds = 4 days;              // grace after maturity before overdue-liquidation
+
     address public treasury;
     address public insuranceFund;          // separate address for bad-debt insurance pool
     uint256 public totalInsuranceAccrued;  // total cNGN in insurance fund
@@ -67,8 +74,9 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
 
     // ── Borrower positions ───────────────────────────────────────────────────
     struct BorrowSnapshot {
-        uint256 principal;   // cNGN borrowed (scaled 1e6)
+        uint256 principal;     // cNGN borrowed (scaled 1e6)
         uint256 interestIndex; // borrowIndex at time of last update
+        uint256 dueDate;       // unix time the loan must be repaid by (0 = no active loan)
     }
 
     struct Position {
@@ -99,6 +107,8 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     event CollateralFactorUpdated(address indexed token, uint256 newFactor);
     event InterestRateModelUpdated(address indexed newIrm);
     event MaxBorrowPerUserUpdated(uint256 newMax);
+    event LoanTermSet(address indexed borrower, uint256 dueDate, uint256 tenorDays);
+    event GracePeriodUpdated(uint256 newGracePeriodSeconds);
 
     // ── Constructor ──────────────────────────────────────────────────────────
     constructor(
@@ -233,11 +243,25 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     // ══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Borrow cNGN against deposited collateral.
+     * @notice Borrow cNGN against deposited collateral at the default 90-day tenor.
      * @param cngnAmount Amount of cNGN to borrow (6 decimals)
      */
     function borrow(uint256 cngnAmount) external nonReentrant whenNotPaused {
+        _borrow(cngnAmount, DEFAULT_TENOR_DAYS);
+    }
+
+    /**
+     * @notice Borrow cNGN against collateral, choosing the loan tenor.
+     * @param cngnAmount Amount of cNGN to borrow (6 decimals)
+     * @param tenorDays  Loan term — 30, 90, or 180 days
+     */
+    function borrow(uint256 cngnAmount, uint256 tenorDays) external nonReentrant whenNotPaused {
+        _borrow(cngnAmount, tenorDays);
+    }
+
+    function _borrow(uint256 cngnAmount, uint256 tenorDays) internal {
         require(cngnAmount > 0, "Zero amount");
+        require(_validTenor(tenorDays), "Invalid tenor");
         accrueInterest();
         require(getCash() >= cngnAmount, "Insufficient liquidity");
 
@@ -249,10 +273,19 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         uint256 originationFee = (cngnAmount * originationFeeMantissa) / BASE;
         uint256 proceeds       = cngnAmount - originationFee;
 
+        BorrowSnapshot storage snap = positions[msg.sender].borrow;
+        bool newLoan = snap.principal == 0;
+
         // Update borrow position
         _updateBorrowBalance(msg.sender, cngnAmount, true);
         totalBorrows += cngnAmount;
         totalReserves += originationFee;
+
+        // Set the due date on a fresh loan; an existing loan keeps its (earlier)
+        // deadline so re-borrowing can't silently extend the term.
+        if (newLoan) {
+            snap.dueDate = block.timestamp + tenorDays * 1 days;
+        }
 
         require(_isHealthy(msg.sender), "Insufficient collateral");
         // Optional per-user borrow cap to limit single-borrower concentration (FIND-SC-17)
@@ -262,6 +295,7 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
 
         cNGN.safeTransfer(msg.sender, proceeds);
         emit Borrowed(msg.sender, cngnAmount, originationFee);
+        emit LoanTermSet(msg.sender, snap.dueDate, tenorDays);
     }
 
     /**
@@ -281,6 +315,11 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         cNGN.safeTransferFrom(msg.sender, address(this), actualRepay);
         _updateBorrowBalance(borrower, actualRepay, false);
         totalBorrows = totalBorrows > actualRepay ? totalBorrows - actualRepay : 0;
+
+        // Clear the maturity once the loan is fully repaid.
+        if (positions[borrower].borrow.principal == 0) {
+            positions[borrower].borrow.dueDate = 0;
+        }
 
         emit Repaid(borrower, msg.sender, actualRepay);
     }
@@ -303,7 +342,8 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         require(borrower != msg.sender, "Cannot self-liquidate");
         accrueInterest();
 
-        require(!_isHealthy(borrower), "Position is healthy");
+        // Liquidatable if under-collateralised OR past its due date + grace.
+        require(!_isHealthy(borrower) || _isOverdue(borrower), "Healthy and not overdue");
 
         uint256 currentDebt = borrowBalanceCurrent(borrower);
         uint256 maxRepay    = (currentDebt * closeFactor) / BASE;
@@ -326,6 +366,9 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         cNGN.safeTransferFrom(msg.sender, address(this), repayAmount);
         _updateBorrowBalance(borrower, repayAmount, false);
         totalBorrows = totalBorrows > repayAmount ? totalBorrows - repayAmount : 0;
+        if (positions[borrower].borrow.principal == 0) {
+            positions[borrower].borrow.dueDate = 0;
+        }
 
         // Transfer collateral
         positions[borrower].collateralBalances[collateralToken] -= seizeAmount;
@@ -406,6 +449,32 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         return _isHealthy(borrower);
     }
 
+    function _validTenor(uint256 d) internal pure returns (bool) {
+        return d == 30 || d == 90 || d == 180;
+    }
+
+    /** @notice True once a loan is past its due date + grace period. */
+    function _isOverdue(address borrower) internal view returns (bool) {
+        uint256 due = positions[borrower].borrow.dueDate;
+        return due != 0
+            && block.timestamp > due + gracePeriodSeconds
+            && borrowBalanceCurrent(borrower) > 0;
+    }
+
+    /** @notice Loan due date (0 = no active loan). */
+    function loanDueDate(address borrower) external view returns (uint256) {
+        return positions[borrower].borrow.dueDate;
+    }
+
+    function isOverdue(address borrower) external view returns (bool) {
+        return _isOverdue(borrower);
+    }
+
+    /** @notice True if the position can be liquidated (under-collateralised OR overdue). */
+    function isLiquidatable(address borrower) external view returns (bool) {
+        return !_isHealthy(borrower) || _isOverdue(borrower);
+    }
+
     /** @notice Current borrow APR (annualised, 1e18 = 100%) */
     function currentBorrowAPR() external view returns (uint256) {
         return irm.getBorrowAPR(getCash(), totalBorrows, totalReserves);
@@ -482,6 +551,12 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     }
 
     /** @notice Set the max total debt a single borrower may hold (0 = no cap). FIND-SC-17 */
+    function setGracePeriod(uint256 newGraceSeconds) external onlyOwner {
+        require(newGraceSeconds <= 30 days, "Max 30d grace");
+        gracePeriodSeconds = newGraceSeconds;
+        emit GracePeriodUpdated(newGraceSeconds);
+    }
+
     function setMaxBorrowPerUser(uint256 newMax) external onlyOwner {
         maxBorrowPerUser = newMax;
         emit MaxBorrowPerUserUpdated(newMax);

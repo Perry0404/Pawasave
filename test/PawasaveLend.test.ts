@@ -351,7 +351,7 @@ describe("PawasaveLend", function () {
           parseUnits("1000", 6),
           await usdc.getAddress()
         )
-      ).to.be.revertedWith("Position is healthy")
+      ).to.be.revertedWith("Healthy and not overdue")
     })
 
     it("underwater position can be liquidated", async () => {

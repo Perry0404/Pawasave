@@ -24,7 +24,19 @@ to vault; pool unpaused. **Old contracts are abandoned (do not use).**
 **Loan policy (live on this deployment):** max borrow **₦50M/user**; tenor **90d default
 (30/180 options)**; **4-day grace** then overdue-liquidation; early repayment **free**.
 Vercel env (`PRICE_ORACLE_ADDRESS`/`PAWASAVE_LEND_ADDRESS`/`PAUTO_VAULT_ADDRESS`) +
-`FLIPEET_WEBHOOK_TOKEN` set. ⚠ still run **migration 028** (`withdraw_vault_atomic`).
+`FLIPEET_WEBHOOK_TOKEN` set. ✅ **migration 028 applied** (`withdraw_vault_atomic`,
+`debit_wallet_with_fee`, `get_apy_settings`) — vault withdrawals atomic in prod.
+
+## B2B credit lines — NEW module, staged for re-audit (NOT deployed)
+`contracts/lending/PawasaveCreditLine.sol` — uncollateralised protocol-to-protocol
+revolving credit (managed custody). Owner allowlists partners with a credit limit +
+per-partner APR; simple interest folds into principal on every state change;
+`draw` callable by the partner OR the owner (managed custody) to any settlement
+address; `repay` open to anyone; `suspend`/`reactivate`/`writeOff`; `fund` /
+`withdrawLiquidity` (idle only); Pausable + ReentrancyGuard + SafeERC20.
+Tests: `test/credit-line.ts` — **11 passing** (full suite **68 passing**).
+⚠ **Must be audited before deploy.** Managed partner API (Supabase partner table +
+custody draw/repay/status endpoints) is the next build, gated on this audit.
 
 ## P0 — Before onboarding (live-money / takeover risk)
 
@@ -60,7 +72,7 @@ Vercel env (`PRICE_ORACLE_ADDRESS`/`PAWASAVE_LEND_ADDRESS`/`PAUTO_VAULT_ADDRESS`
 | FIND-FIN-05 | Fee recording not atomic | 🟡 | `debit_wallet_with_fee` (028) delivered; off-ramp records fee on provider success, adopt where debit+fee co-commit |
 | FIND-FIN-06 | APY values hardcoded/inconsistent | 🟡 | `platform_settings` + `get_apy_settings()` (028) single source; frontend read pending (value tied to yield decision) |
 
-> **Action for you:** run `supabase/migrations/028_audit_financial_fixes.sql` in Supabase (then `026` if not already run).
+> **✅ Done:** `supabase/migrations/028_audit_financial_fixes.sql` applied in Supabase (along with 026/027).
 | FIND-API-05 | In-memory rate limiter | ✅ | Upstash-backed limiter + tighter limits on /api/admin & /api/ramp; in-memory fallback. Set UPSTASH_* to enable persistence |
 | FIND-API-08 | Rate endpoint unauthenticated | ⬜ | Batch 4 — cache + limit |
 | FIND-API-09 | Error messages leak internals | ✅ | Generic client messages; provider details logged server-side only |

@@ -127,7 +127,7 @@ custody draw/repay/status endpoints) is the next build, gated on this audit.
 
 | ID | Finding | Status | Notes |
 |----|---------|--------|-------|
-| FIND-3P-05 | Custody single key (CRIT-02) | 🟡 | `scripts/transfer-ownership.ts` moves CONTRACT ownership to a Safe (run post-redeploy). The custody EOA itself → Safe + per-tx limits is operational (needs your Safe) |
+| FIND-3P-05 | Custody single key (CRIT-02) | 🟡 | **Safe created & set to 2-of-3** on Base (`0x04A68bB3056D95fFD64FE681f442BCfc04c79109`, signers 0x4985/0xe371/0xe86a). `scripts/transfer-ownership.ts` (covers Lend/Oracle/CreditLine/Vault) runs at the audited redeploy with `NEW_OWNER=0x04A68…`. Remaining: rotate exposed deployer key out of signers (→ hardware wallet) |
 | FIND-3P-06 | Deposit mnemonic single secret (CRIT-03) | 🟡 | **Sweep-on-receipt shipped** (`lib/deposit-sweep.ts` + `/api/cron/sweep-deposits`, every 30m): drains per-user HD addresses to one custody address (gas-funded), so a mnemonic leak yields ~nothing. **Activate:** set `DEPOSIT_SWEEP_DESTINATION` (a COLD/Safe addr) in Vercel + fund the gas funder. Remaining: move the mnemonic itself to a secrets manager (needs cloud account) |
 | FIND-SC-21 | Oracle keeper key in Vercel env | 🔵 | Operational: move keeper key to KMS/HSM (needs your KMS) |
 

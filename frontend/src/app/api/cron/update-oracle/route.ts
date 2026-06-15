@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ethers } from 'ethers'
 import { getNgnUsdRateFromFlipeet } from '@/lib/ramp-rate'
 import { checkCronAuth } from '@/lib/cron-auth'
+import { getSecret } from '@/lib/secrets'
 
 /**
  * GET /api/cron/update-oracle
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest) {
   if (denied) return denied
 
   const rpcUrl     = process.env.BASE_MAINNET_RPC_URL || process.env.NEXT_PUBLIC_BASE_RPC_URL
-  const keeperKey  = process.env.ORACLE_KEEPER_PRIVATE_KEY
+  const keeperKey  = await getSecret('ORACLE_KEEPER_PRIVATE_KEY')
   const oracleAddr = process.env.PRICE_ORACLE_ADDRESS
   if (!rpcUrl || !keeperKey || !oracleAddr) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'Oracle keeper not configured' })

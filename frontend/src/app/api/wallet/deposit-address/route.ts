@@ -19,7 +19,7 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
-  if (!depositWalletConfigured()) {
+  if (!(await depositWalletConfigured())) {
     return NextResponse.json({ error: 'Crypto deposits not configured' }, { status: 503 })
   }
 
@@ -35,7 +35,7 @@ export async function GET() {
 
   let address = wallet.deposit_address as string | null
   if (!address) {
-    address = deriveDepositAddress(Number(wallet.deposit_index))
+    address = await deriveDepositAddress(Number(wallet.deposit_index))
     await supabase.rpc('set_deposit_address', { p_user_id: user.id, p_address: address })
   }
 

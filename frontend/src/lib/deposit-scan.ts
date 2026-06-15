@@ -60,7 +60,7 @@ async function buildAddressMap(
     if (w.deposit_index == null) continue
     let addr = w.deposit_address
     if (!addr) {
-      addr = deriveDepositAddress(Number(w.deposit_index))
+      addr = await deriveDepositAddress(Number(w.deposit_index))
       await supabase.rpc("set_deposit_address", { p_user_id: w.user_id, p_address: addr })
     }
     map.set(addr.toLowerCase(), { userId: w.user_id, address: addr })

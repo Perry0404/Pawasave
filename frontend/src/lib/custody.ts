@@ -10,13 +10,14 @@
 
 import { ethers } from 'ethers'
 import { CONTRACTS, ADDRESSES, LEND_ABI, ERC20_ABI } from './contracts'
+import { getSecret } from './secrets'
 
-const RPC      = process.env.NEXT_PUBLIC_BASE_RPC_URL || 'https://mainnet.base.org'
-const CUST_KEY = process.env.CUSTODY_PRIVATE_KEY || ''
+const RPC = process.env.NEXT_PUBLIC_BASE_RPC_URL || 'https://mainnet.base.org'
 
-function getSigner() {
-  if (!CUST_KEY) throw new Error('CUSTODY_PRIVATE_KEY not configured')
-  return new ethers.Wallet(CUST_KEY, new ethers.JsonRpcProvider(RPC))
+async function getSigner() {
+  const key = await getSecret('CUSTODY_PRIVATE_KEY')
+  if (!key) throw new Error('CUSTODY_PRIVATE_KEY not configured')
+  return new ethers.Wallet(key, new ethers.JsonRpcProvider(RPC))
 }
 
 const b = (v: unknown): bigint => BigInt(v as any ?? 0)
@@ -25,7 +26,7 @@ const b = (v: unknown): bigint => BigInt(v as any ?? 0)
 
 /** Send USDC from custody to an address (used for Flipeet off-ramp) */
 export async function sendUsdc(to: string, amountUsdc: number): Promise<string> {
-  const signer = getSigner()
+  const signer = await getSigner()
   const usdc    = new ethers.Contract(CONTRACTS.USDC, ERC20_ABI, signer)
   const micro   = BigInt(Math.floor(amountUsdc * 1_000_000))
   const tx      = await usdc.transfer(to, micro)
@@ -35,7 +36,7 @@ export async function sendUsdc(to: string, amountUsdc: number): Promise<string> 
 
 /** Send cNGN from custody to an address (used for Flipeet off-ramp with cNGN) */
 export async function sendCngn(to: string, cngnMicro: bigint): Promise<string> {
-  const signer  = getSigner()
+  const signer  = await getSigner()
   const cngn    = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, signer)
   const tx      = await cngn.transfer(to, cngnMicro)
   const receipt = await tx.wait()
@@ -50,7 +51,7 @@ export async function sendCngn(to: string, cngnMicro: bigint): Promise<string> {
  */
 export async function supplyToLend(cngnMicro: bigint): Promise<{ txHash: string; shares: bigint }> {
   if (cngnMicro <= 0n) throw new Error('Zero supply amount')
-  const signer = getSigner()
+  const signer = await getSigner()
   const cngn   = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, signer)
   const lend   = new ethers.Contract(ADDRESSES.LEND, LEND_ABI, signer)
 
@@ -78,7 +79,7 @@ export async function supplyToLend(cngnMicro: bigint): Promise<{ txHash: string;
  */
 export async function withdrawFromLend(shares: bigint): Promise<{ txHash: string; cngnMicro: bigint }> {
   if (shares <= 0n) throw new Error('Zero shares')
-  const signer = getSigner()
+  const signer = await getSigner()
   const lend   = new ethers.Contract(ADDRESSES.LEND, LEND_ABI, signer)
 
   const tx      = await lend.withdraw(shares)
@@ -102,7 +103,7 @@ export async function withdrawFromLend(shares: bigint): Promise<{ txHash: string
 export async function custodyLendValue(): Promise<bigint> {
   const provider = new ethers.JsonRpcProvider(RPC)
   const lend     = new ethers.Contract(ADDRESSES.LEND, LEND_ABI, provider)
-  const cust     = process.env.FLIPEET_CUSTODY_ADDRESS || getSigner().address
+  const cust     = process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address
 
   const [totalShares, totalAssets, custShares] = await Promise.all([
     lend.totalSupply(),

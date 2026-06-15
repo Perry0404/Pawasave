@@ -27,6 +27,7 @@ import { ethers } from "ethers"
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { CONTRACTS } from "./contracts"
 import { deriveDepositSigner, depositWalletConfigured } from "./deposit-wallet"
+import { getSecret } from "./secrets"
 
 const RPC =
   process.env.BASE_MAINNET_RPC_URL ||
@@ -62,14 +63,14 @@ export async function sweepDeposits(): Promise<{
   skipped: Record<string, unknown>[]
   scanned: number
 }> {
-  if (!depositWalletConfigured()) throw new Error("DEPOSIT_WALLET_MNEMONIC not configured")
+  if (!(await depositWalletConfigured())) throw new Error("DEPOSIT_WALLET_MNEMONIC not configured")
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY not configured")
 
   const destination = process.env.DEPOSIT_SWEEP_DESTINATION
   if (!destination || !ethers.isAddress(destination)) {
     throw new Error("DEPOSIT_SWEEP_DESTINATION not set or invalid")
   }
-  const funderKey = process.env.DEPOSIT_GAS_FUNDER_PRIVATE_KEY || process.env.CUSTODY_PRIVATE_KEY
+  const funderKey = (await getSecret("DEPOSIT_GAS_FUNDER_PRIVATE_KEY")) || (await getSecret("CUSTODY_PRIVATE_KEY"))
   if (!funderKey || funderKey === "0x") {
     throw new Error("No gas funder key (DEPOSIT_GAS_FUNDER_PRIVATE_KEY or CUSTODY_PRIVATE_KEY)")
   }
@@ -107,7 +108,7 @@ export async function sweepDeposits(): Promise<{
       const bal = (await cngnRead.balanceOf(w.deposit_address)) as bigint
       if (bal < minSweep) continue
 
-      const signer = deriveDepositSigner(Number(w.deposit_index), provider)
+      const signer = await deriveDepositSigner(Number(w.deposit_index), provider)
       const cngn   = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, signer)
 
       // Ensure the address can pay gas for one ERC-20 transfer.

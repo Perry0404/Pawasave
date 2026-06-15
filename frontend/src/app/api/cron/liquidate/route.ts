@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ethers } from 'ethers'
 import { checkCronAuth } from '@/lib/cron-auth'
+import { getSecret } from '@/lib/secrets'
 
 /**
  * GET /api/cron/liquidate
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
   if (auth) return auth
 
   const rpcUrl    = process.env.BASE_MAINNET_RPC_URL || process.env.NEXT_PUBLIC_BASE_RPC_URL
-  const keeperKey = process.env.LIQUIDATION_KEEPER_PRIVATE_KEY
+  const keeperKey = await getSecret('LIQUIDATION_KEEPER_PRIVATE_KEY')
   const lendAddr  = process.env.PAWASAVE_LEND_ADDRESS
   if (!rpcUrl || !keeperKey || !lendAddr) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'Liquidation keeper not configured' })

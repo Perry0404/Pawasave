@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { ethers } from 'ethers'
 import { checkCronAuth } from '@/lib/cron-auth'
+import { getSecret } from '@/lib/secrets'
 
 /**
  * GET /api/cron/harvest-vault
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
   if (denied) return denied
 
   const rpcUrl      = process.env.BASE_MAINNET_RPC_URL
-  const privateKey  = process.env.VAULT_HARVESTER_PRIVATE_KEY
+  const privateKey  = await getSecret('VAULT_HARVESTER_PRIVATE_KEY')
   const vaultAddr   = process.env.PAUTO_VAULT_ADDRESS || process.env.NEXT_PUBLIC_PAUTO_VAULT_ADDRESS
 
   if (!rpcUrl || !privateKey || !vaultAddr) {

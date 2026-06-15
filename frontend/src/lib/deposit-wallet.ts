@@ -2,21 +2,28 @@
  * deposit-wallet.ts — per-user deposit address derivation (SERVER ONLY).
  *
  * Each user's wallet has a stable `deposit_index`. Their personal Base deposit
- * address is derived from one master mnemonic (DEPOSIT_WALLET_MNEMONIC) at
- * BIP-44 path m/44'/60'/0'/0/{index}. PawaSave controls the keys, so funds can
- * later be swept to custody; the scanner credits incoming cNGN automatically.
+ * address is derived from one master mnemonic at BIP-44 path
+ * m/44'/60'/0'/0/{index}. PawaSave controls the keys, so funds can be swept to
+ * custody; the scanner credits incoming cNGN automatically.
+ *
+ * The mnemonic is resolved via `getSecret` — AWS Secrets Manager when configured
+ * (DEPOSIT_WALLET_MNEMONIC inside AWS_SECRETS_ID), otherwise the env var.
  *
  * NEVER import this into a client component — it reads the master seed.
- *
- * Required env var:
- *   DEPOSIT_WALLET_MNEMONIC — 12/24-word seed phrase for the deposit HD wallet
  */
 import { HDNodeWallet, JsonRpcProvider } from "ethers"
+import { getSecret } from "./secrets"
 
-const MNEMONIC = process.env.DEPOSIT_WALLET_MNEMONIC || ""
+let cachedMnemonic: string | null = null
 
-export function depositWalletConfigured(): boolean {
-  return MNEMONIC.trim().split(/\s+/).length >= 12
+async function mnemonic(): Promise<string> {
+  if (cachedMnemonic !== null) return cachedMnemonic
+  cachedMnemonic = (await getSecret("DEPOSIT_WALLET_MNEMONIC")) || ""
+  return cachedMnemonic
+}
+
+function isConfigured(m: string): boolean {
+  return m.trim().split(/\s+/).length >= 12
 }
 
 function pathFor(index: number): string {
@@ -24,14 +31,20 @@ function pathFor(index: number): string {
   return `m/44'/60'/0'/0/${index}`
 }
 
-/** Derive the deposit address for a given index. */
-export function deriveDepositAddress(index: number): string {
-  if (!depositWalletConfigured()) throw new Error("DEPOSIT_WALLET_MNEMONIC not configured")
-  return HDNodeWallet.fromPhrase(MNEMONIC, undefined, pathFor(index)).address
+export async function depositWalletConfigured(): Promise<boolean> {
+  return isConfigured(await mnemonic())
 }
 
-/** Derive a signer for a deposit address (for future sweeping to custody). */
-export function deriveDepositSigner(index: number, provider: JsonRpcProvider) {
-  if (!depositWalletConfigured()) throw new Error("DEPOSIT_WALLET_MNEMONIC not configured")
-  return HDNodeWallet.fromPhrase(MNEMONIC, undefined, pathFor(index)).connect(provider)
+/** Derive the deposit address for a given index. */
+export async function deriveDepositAddress(index: number): Promise<string> {
+  const m = await mnemonic()
+  if (!isConfigured(m)) throw new Error("DEPOSIT_WALLET_MNEMONIC not configured")
+  return HDNodeWallet.fromPhrase(m, undefined, pathFor(index)).address
+}
+
+/** Derive a signer for a deposit address (for sweeping to custody). */
+export async function deriveDepositSigner(index: number, provider: JsonRpcProvider) {
+  const m = await mnemonic()
+  if (!isConfigured(m)) throw new Error("DEPOSIT_WALLET_MNEMONIC not configured")
+  return HDNodeWallet.fromPhrase(m, undefined, pathFor(index)).connect(provider)
 }

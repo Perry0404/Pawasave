@@ -39,18 +39,14 @@ Tests: `test/credit-line.ts` — **11 passing** (full suite **68 passing**).
 custody draw/repay/status endpoints) is the next build, gated on this audit.
 
 ## Beta readiness (2026-06-14)
-Built so beta launches with bounded risk + a controlled cohort:
 - **TVL caps (on-chain):** `PawasaveLend.supplyCap` + `maxSupplyPerUser`, `PawasaveAutoVault.depositCap`
-  (+ cap-aware `maxDeposit/maxMint`), all owner-settable (0 = off). Tests `test/beta-caps.ts`
-  — **7 passing** (full suite **75 passing**). Set the numbers at the redeploy; adjustable live via setters.
-- **Beta cohort gate (app):** migration `029_beta_allowlist.sql` — `beta_allowlist` table + `beta_mode`
-  flag, enforced in the `handle_new_user` trigger (un-bypassable). `/api/auth/beta-check` (friendly UI
-  message) + `/api/admin/beta` (list/add/remove/setMode). Defaults OFF — add yourself, add the cohort,
-  then flip `beta_mode='on'`. ⚠ **run migration 029 in Supabase.**
+  (+ cap-aware `maxDeposit/maxMint`), all owner-settable (0 = off, dormant unless set). Tests
+  `test/beta-caps.ts` — **7 passing** (full suite **75 passing**). Set numbers at the redeploy; adjustable live.
+- ~~Beta cohort allowlist gate~~ — **removed** (not wanted; signups stay open).
 
 **Remaining for beta:** (1) the second audit, (2) the redeploy (sets owner=Safe, caps, KMS keepers),
-(3) **KYC** (FIND-AUTH-04, Dojah/Smile), (4) move keeper keys + deposit mnemonic to **KMS/secrets
-manager** (needs a cloud account).
+(3) **KYC** (FIND-AUTH-04, Dojah/Smile), (4) move keeper keys + deposit mnemonic to **AWS KMS / Secrets
+Manager** (user has an AWS account — in progress).
 
 ## P0 — Before onboarding (live-money / takeover risk)
 

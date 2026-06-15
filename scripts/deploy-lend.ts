@@ -78,6 +78,20 @@ async function main() {
   await lend.addCollateral(cngnAddress, 6, ethers.parseEther("0.60"))
   console.log("✓ cNGN added as collateral (60% LTV) — first on Base!")
 
+  // cNGN self-collateral needs an oracle price: peg is 1 cNGN = 1 cNGN (1e6).
+  await (await oracle.setPrice(cngnAddress, 1_000_000n)).wait()
+  console.log("✓ cNGN price set (peg 1:1)")
+
+  // Per-user borrow cap — ₦50M (FIND-SC-17). 0 = no cap.
+  const maxBorrow = process.env.MAX_BORROW_PER_USER_CNGN
+    ? ethers.parseUnits(process.env.MAX_BORROW_PER_USER_CNGN, 6)
+    : ethers.parseUnits("50000000", 6) // ₦50,000,000
+  await (await lend.setMaxBorrowPerUser(maxBorrow)).wait()
+  console.log("✓ maxBorrowPerUser set:", maxBorrow.toString(), "(micro-cNGN)")
+
+  // Beta TVL caps are left OFF (0) by default — set later via setSupplyCap /
+  // setMaxSupplyPerUser if you want to bound the pool during beta.
+
   // ── Verify ────────────────────────────────────────────────────────────────
   console.log("\n📋 Deployment summary:")
   console.log("  cNGN:            ", cngnAddress)

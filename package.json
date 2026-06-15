@@ -17,6 +17,8 @@
     "deploy:lend:local": "hardhat run scripts/deploy-lend.ts --network localhost",
     "deploy:lend:sepolia": "hardhat run scripts/deploy-lend.ts --network baseSepolia",
     "deploy:lend:mainnet": "hardhat run scripts/deploy-lend.ts --network baseMainnet",
+    "deploy:creditline:mainnet": "hardhat run scripts/deploy-credit-line.ts --network baseMainnet",
+    "transfer-ownership:mainnet": "hardhat run scripts/transfer-ownership.ts --network baseMainnet",
     "oracle:keeper": "ts-node scripts/oracle-keeper.ts",
     "verify": "hardhat verify",
     "clean": "hardhat clean"

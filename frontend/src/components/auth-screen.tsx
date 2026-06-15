@@ -49,6 +49,20 @@ export default function AuthScreen() {
     setBusy(true)
     try {
       if (mode === 'register') {
+        // Beta cohort gate — friendly pre-check (the DB trigger is the hard backstop).
+        try {
+          const res = await fetch('/api/auth/beta-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+          })
+          const j = await res.json()
+          if (j?.allowed === false) {
+            setErr("PawaSave is in invite-only beta. This email isn't on the list yet — request access and we'll let you in.")
+            return
+          }
+        } catch { /* fail open — the signup trigger still enforces the allowlist */ }
+
         const pinHash = await hashValue(pin)
         await signUp(email, password, name || email.split('@')[0], pinHash)
         setSignupEmailSent(true) // Show "check your email" screen

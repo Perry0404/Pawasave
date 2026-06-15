@@ -39,6 +39,8 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
 
     // ── Protocol parameters (owner-adjustable) ───────────────────────────────
     uint256 public maxBorrowPerUser;                         // 0 = no cap (FIND-SC-17)
+    uint256 public supplyCap;                                // 0 = no cap — total pool assets ceiling (beta safety)
+    uint256 public maxSupplyPerUser;                         // 0 = no cap — per-supplier ceiling (beta safety)
     uint256 public reserveFactorMantissa = 0.10e18;          // 10% of interest → reserves
     uint256 public insuranceShareMantissa = 0.20e18;         // 20% of reserves → insurance fund
     uint256 public originationFeeMantissa = 0.005e18;        // 0.5% flat on every new loan
@@ -107,6 +109,8 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     event CollateralFactorUpdated(address indexed token, uint256 newFactor);
     event InterestRateModelUpdated(address indexed newIrm);
     event MaxBorrowPerUserUpdated(uint256 newMax);
+    event SupplyCapUpdated(uint256 newCap);
+    event MaxSupplyPerUserUpdated(uint256 newMax);
     event LoanTermSet(address indexed borrower, uint256 dueDate, uint256 tenorDays);
     event GracePeriodUpdated(uint256 newGracePeriodSeconds);
 
@@ -181,6 +185,14 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
 
         cNGN.safeTransferFrom(msg.sender, address(this), cngnAmount);
         _mint(msg.sender, sharesToMint);
+
+        // Beta safety caps (0 = disabled). Checked after mint so they bound the
+        // resulting pool/user exposure exactly.
+        if (supplyCap > 0) require(totalPoolAssets() <= supplyCap, "Supply cap reached");
+        if (maxSupplyPerUser > 0) {
+            uint256 userValue = (balanceOf(msg.sender) * totalPoolAssets()) / totalSupply();
+            require(userValue <= maxSupplyPerUser, "Exceeds per-user supply cap");
+        }
 
         emit Supplied(msg.sender, cngnAmount, sharesToMint);
         return sharesToMint;
@@ -560,6 +572,18 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     function setMaxBorrowPerUser(uint256 newMax) external onlyOwner {
         maxBorrowPerUser = newMax;
         emit MaxBorrowPerUserUpdated(newMax);
+    }
+
+    /** @notice Cap total cNGN supplied to the pool (0 = no cap). Beta blast-radius limit. */
+    function setSupplyCap(uint256 newCap) external onlyOwner {
+        supplyCap = newCap;
+        emit SupplyCapUpdated(newCap);
+    }
+
+    /** @notice Cap the cNGN value a single supplier may hold (0 = no cap). */
+    function setMaxSupplyPerUser(uint256 newMax) external onlyOwner {
+        maxSupplyPerUser = newMax;
+        emit MaxSupplyPerUserUpdated(newMax);
     }
 
     function setTreasury(address newTreasury) external onlyOwner {

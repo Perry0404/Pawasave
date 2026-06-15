@@ -54,6 +54,9 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
     address public feeRecipient;
     uint256 public totalFeesAccrued;
 
+    // Beta safety: total-assets ceiling (0 = no cap)
+    uint256 public depositCap;
+
     // O(1) lock accounting (FIND-SC-01/02)
     mapping(address => Lock[])   public userLocks;
     mapping(address => uint256)  public lockedShares;
@@ -81,6 +84,7 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
     event StrategyUpdated(string strategyType, address newAddress, address oldAddress);
     event HarvestFailed(address indexed strategy);
     event EmergencyWithdrawFailed(address indexed strategy);
+    event DepositCapUpdated(uint256 newCap);
 
     modifier onlyHarvester() {
         require(hasRole(HARVESTER_ROLE, msg.sender), "Not harvester");
@@ -143,7 +147,22 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
     /// @dev Route every mint of assets into the strategy.
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
         super._deposit(caller, receiver, assets, shares); // pulls assets, mints shares
+        // Beta blast-radius cap (0 = disabled). Covers every entry path including
+        // depositFlexible/depositFixed which bypass maxDeposit().
+        if (depositCap > 0) require(totalAssets() <= depositCap, "Deposit cap reached");
         _depositToStrategy(assets);
+    }
+
+    /// @notice ERC4626 cap-aware max deposit (standard deposit()/mint() honour this).
+    function maxDeposit(address) public view override returns (uint256) {
+        if (depositCap == 0) return type(uint256).max;
+        uint256 ta = totalAssets();
+        return ta >= depositCap ? 0 : depositCap - ta;
+    }
+
+    function maxMint(address receiver) public view override returns (uint256) {
+        uint256 room = maxDeposit(receiver);
+        return room == type(uint256).max ? type(uint256).max : previewDeposit(room);
     }
 
     function deposit(uint256 assets, address receiver) public override whenNotPaused nonReentrant returns (uint256) {
@@ -352,6 +371,12 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
     function updateFeeRecipient(address newRecipient) external onlyOwner {
         require(newRecipient != address(0), "Invalid recipient");
         feeRecipient = newRecipient;
+    }
+
+    /** @notice Cap total assets the vault will hold (0 = no cap). Beta blast-radius limit. */
+    function setDepositCap(uint256 newCap) external onlyOwner {
+        depositCap = newCap;
+        emit DepositCapUpdated(newCap);
     }
 
     function grantHarvesterRole(address account) external onlyOwner { _grantRole(HARVESTER_ROLE, account); }

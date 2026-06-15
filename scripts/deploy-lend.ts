@@ -26,22 +26,34 @@ async function main() {
   // ── Interest Rate Model ────────────────────────────────────────────────────
   // 5% base | 40% multiplier | 300% jump | 80% kink
   // Target: ~65% borrow APR at 85% utilization
-  const IRMF = await ethers.getContractFactory("InterestRateModel")
-  const irm  = await IRMF.deploy(
-    ethers.parseEther("0.05"),
-    ethers.parseEther("0.40"),
-    ethers.parseEther("3.00"),
-    ethers.parseEther("0.80"),
-  )
-  await irm.waitForDeployment()
-  console.log("✓ InterestRateModel:", await irm.getAddress())
+  let irm
+  if (process.env.IRM_ADDRESS) {
+    irm = await ethers.getContractAt("InterestRateModel", process.env.IRM_ADDRESS)
+    console.log("✓ Reusing InterestRateModel:", process.env.IRM_ADDRESS)
+  } else {
+    const IRMF = await ethers.getContractFactory("InterestRateModel")
+    irm = await IRMF.deploy(
+      ethers.parseEther("0.05"),
+      ethers.parseEther("0.40"),
+      ethers.parseEther("3.00"),
+      ethers.parseEther("0.80"),
+    )
+    await irm.waitForDeployment()
+    console.log("✓ InterestRateModel:", await irm.getAddress())
+  }
 
   // ── Price Oracle ───────────────────────────────────────────────────────────
   const keeperAddress = process.env.ORACLE_KEEPER_ADDRESS || deployer.address
-  const OF     = await ethers.getContractFactory("PriceOracle")
-  const oracle = await OF.deploy(keeperAddress)
-  await oracle.waitForDeployment()
-  console.log("✓ PriceOracle:", await oracle.getAddress())
+  let oracle
+  if (process.env.PRICE_ORACLE_ADDRESS) {
+    oracle = await ethers.getContractAt("PriceOracle", process.env.PRICE_ORACLE_ADDRESS)
+    console.log("✓ Reusing PriceOracle:", process.env.PRICE_ORACLE_ADDRESS)
+  } else {
+    const OF = await ethers.getContractFactory("PriceOracle")
+    oracle = await OF.deploy(keeperAddress)
+    await oracle.waitForDeployment()
+    console.log("✓ PriceOracle:", await oracle.getAddress())
+  }
 
   // Seed initial price if USDC address is known
   const usdcAddress = process.env.USDC_TOKEN_ADDRESS

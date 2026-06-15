@@ -7,16 +7,27 @@ Audit** (Blessed Tosin-Oyinbo / 0xTnxl, June 13 2026). Status legend:
 > **Strategic note:** the lending pool has ≈0 TVL and 0 borrows. All contract
 > findings can be fixed and redeployed cheaply *now*, before funds arrive.
 
-## 7c — Redeployed to Base mainnet (June 13 2026) — PENDING RE-AUDIT
-Patched (7a+7b) contracts are LIVE at new addresses; frontend repointed:
+## 7d — Redeployed to Base mainnet (June 14 2026) — owned by Safe — PENDING RE-AUDIT
+Latest stack (audit fixes + loan terms + TVL caps + B2B credit line). Ownership
+moved to the Gnosis Safe `0x04A68bB3056D95fFD64FE681f442BCfc04c79109` (see
+[[key-custody-safe]]); **vault is Ownable2Step — Safe must `acceptOwnership()`**.
 
 | Contract | Address |
 |----------|---------|
-| InterestRateModel | `0xfc9A201C08AB779003A142e9122A0fC94dfd7407` |
-| PriceOracle | `0xE5D6B16e02bcf0B311feD6177f423fe5F860Bd1a` |
-| PawasaveLend | `0x07F2365DDd5b720E55d0C04e1391A0aA92f2eaB7` |
-| PawasaveLendStrategy (adapter) | `0xA98131D9A2C84870F7dc94BC122908Fe6064167F` |
-| PawasaveAutoVault | `0x423750c8aa5f3008E342d8c764381a91550cCbB3` |
+| InterestRateModel | `0x60Dd7e3749777edD7D1aF0FE905bcc824CCC4Ddd` |
+| PriceOracle | `0x58a16675C1E898a73c9D3B975b0deEE680B73BdF` |
+| PawasaveLend | `0x14c524Eb4b77c706D1eb786603F9885377442B93` |
+| PawasaveLendStrategy (adapter) | `0xB9f6f4dbB832c2bB0638878947D50c748e2ddc81` |
+| PawasaveAutoVault | `0x000B9C8d90B211DB22cbD99c18cA9C41E814b9E2` |
+| PawasaveCreditLine | `0x723CF2c9A94456Dd4257e3eD9aF368509a6E3F06` |
+
+Verified on-chain: USDC/USDT (75%) + cNGN (60%) collateral; prices seeded
+(USD 1650 / cNGN peg); ₦50M borrow cap; adapter bound to vault; unpaused; caps off (0).
+
+### Prior 7c stack (June 13 2026) — ABANDONED
+IRM `0xfc9A201C08AB779003A142e9122A0fC94dfd7407` · Oracle `0xE5D6B16e02bcf0B311feD6177f423fe5F860Bd1a` ·
+Lend `0x07F2365DDd5b720E55d0C04e1391A0aA92f2eaB7` · Adapter `0xA98131D9A2C84870F7dc94BC122908Fe6064167F` ·
+Vault `0x423750c8aa5f3008E342d8c764381a91550cCbB3` (do not use)
 
 Verified on-chain: USDC/USDT/cNGN accepted; oracle prices seeded; adapter bound
 to vault; pool unpaused. **Old contracts are abandoned (do not use).**

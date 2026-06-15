@@ -10,6 +10,7 @@ import { ethers } from "hardhat"
  *   NEW_OWNER                  Safe/multisig address to own the contracts
  *   PAWASAVE_LEND_ADDRESS      (optional) lend pool
  *   PRICE_ORACLE_ADDRESS       (optional) oracle
+ *   CREDIT_LINE_ADDRESS        (optional) B2B credit line
  *   PAUTO_VAULT_ADDRESS        (optional) vault
  *
  *   npx hardhat run scripts/transfer-ownership.ts --network baseMainnet
@@ -32,6 +33,7 @@ async function main() {
   const targets: { name: string; addr?: string; twoStep?: boolean }[] = [
     { name: "PawasaveLend", addr: process.env.PAWASAVE_LEND_ADDRESS },
     { name: "PriceOracle",  addr: process.env.PRICE_ORACLE_ADDRESS },
+    { name: "PawasaveCreditLine", addr: process.env.CREDIT_LINE_ADDRESS },
     { name: "PawasaveAutoVault", addr: process.env.PAUTO_VAULT_ADDRESS, twoStep: true },
   ]
 

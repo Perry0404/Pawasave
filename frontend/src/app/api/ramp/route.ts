@@ -578,7 +578,13 @@ async function runFlipeet(
         throw new Error('Failed to send withdrawal on-chain — balance refunded')
       }
     } else {
-      console.warn('Flipeet off-ramp: no deposit address in response', result)
+      // V2-MED-03: no deposit address means we can't settle on-chain. The user was
+      // already debited before this call — refund, mark failed, and surface an error
+      // instead of leaving the transaction pending forever with funds gone.
+      console.error('Flipeet off-ramp: no deposit address in response', result)
+      await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: Math.floor(amount * 1_000_000) })
+      await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+      throw new Error('Off-ramp failed — no settlement address returned. Your balance was refunded.')
     }
   }
 

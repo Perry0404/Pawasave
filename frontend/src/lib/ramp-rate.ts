@@ -1,6 +1,20 @@
 const FLINT_BASE = 'https://stables.flintapi.io/v1'
 const FLIPEET_BASE = 'https://api.pay.flipeet.io/api/v1/public'
-const FALLBACK_RATE = Number(process.env.NGN_USD_RATE || 1550)
+const FALLBACK_RATE = Number(process.env.NGN_USD_RATE || 1650) // V1 FIND-3P-04: was 1550
+
+/**
+ * Canonical kobo ↔ cNGN-micro conversions (V2-LOW-01). cNGN is pegged 1:1 to NGN
+ * with 6 decimals, so these are exact and provider-independent — use these
+ * instead of inline magic numbers or USD/NGN rate detours.
+ *   1 kobo = 0.01 NGN = 10_000 micro   (a synchronous NGN→micro helper is
+ *   ngnToCngnMicro below, which honours the live peg rate)
+ */
+export function koboToCngnMicro(kobo: number): number {
+  return Math.floor(kobo * 10_000)
+}
+export function cngnMicroToKobo(micro: number): number {
+  return Math.floor(micro / 10_000)
+}
 
 function asNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value

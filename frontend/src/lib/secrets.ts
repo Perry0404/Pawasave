@@ -24,7 +24,9 @@
  */
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager'
 
-const TTL_MS = 5 * 60_000
+// Cache TTL (ms). Default 5 min; lower it (e.g. 60000) during a key-rotation
+// event so old keys age out fast across all serverless instances (V2-HIGH-02).
+const TTL_MS = Number(process.env.SECRETS_TTL_MS || 5 * 60_000)
 let cache: { at: number; values: Record<string, string> } | null = null
 
 async function loadBundle(): Promise<Record<string, string>> {
@@ -49,4 +51,13 @@ async function loadBundle(): Promise<Record<string, string>> {
 export async function getSecret(name: string): Promise<string | undefined> {
   const bundle = await loadBundle()
   return bundle[name] ?? process.env[name]
+}
+
+/**
+ * Drop the cached bundle so the next getSecret() re-fetches from AWS (V2-HIGH-02).
+ * Call this immediately after rotating a key in Secrets Manager so the old key
+ * stops being used without waiting out the 5-minute TTL.
+ */
+export function clearSecretsCache(): void {
+  cache = null
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { koboToCngnMicro, cngnMicroToKobo } from '@/lib/ramp-rate'
 
 /**
  * POST /api/esusu/yield
@@ -14,20 +15,10 @@ import { cookies } from 'next/headers'
  * action = 'deposit'  — records the contribution amount for yield tracking.
  * action = 'payout'   — claims accumulated yield and credits recipient.
  *
- * Optional env var: USDC_TO_NAIRA_RATE (default 1600)
+ * Amounts are tracked in cNGN micro-units at a 1:1 NGN peg (V2-LOW-02) — no
+ * USD/NGN rate detour. The DB columns are named *_usdc_micro for legacy reasons
+ * but hold cNGN micro-units.
  */
-
-const USDC_NGN_RATE = parseInt(process.env.USDC_TO_NAIRA_RATE || '1600', 10)
-
-/** Naira kobo → USDC micro-units  (1 USDC = RATE NGN = RATE×100 kobo) */
-function koboToUsdcMicro(kobo: number): number {
-  return Math.floor((kobo * 1_000_000) / (USDC_NGN_RATE * 100))
-}
-
-/** USDC micro-units → Naira kobo */
-function usdcMicroToKobo(micro: number): number {
-  return Math.floor((micro * USDC_NGN_RATE * 100) / 1_000_000)
-}
 
 export async function POST(request: NextRequest) {
   let body: { action?: string; group_id?: string; contribution_kobo?: number; recipient_user_id?: string }
@@ -84,7 +75,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'contribution_kobo required' }, { status: 400 })
     }
 
-    const usdcMicro = koboToUsdcMicro(contribution_kobo)
+    const usdcMicro = koboToCngnMicro(contribution_kobo)
     if (usdcMicro <= 0) {
       return NextResponse.json({ ok: false, reason: 'amount_too_small' })
     }
@@ -123,7 +114,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Credit yield bonus in NGN from platform reserves
-    const yieldKobo = usdcMicroToKobo(yield_usdc_micro)
+    const yieldKobo = cngnMicroToKobo(yield_usdc_micro)
 
     if (yieldKobo > 0) {
       await supabase.rpc('credit_wallet', {

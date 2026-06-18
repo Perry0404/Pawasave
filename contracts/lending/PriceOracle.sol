@@ -33,6 +33,7 @@ contract PriceOracle is Ownable {
 
     event PriceUpdated(address indexed token, uint256 price, uint256 timestamp);
     event MaxDeviationUpdated(uint256 newMaxDeviationBps);
+    event KeeperUpdated(address indexed oldKeeper, address indexed newKeeper);
 
     // Authorised price keeper (separate from owner for operational security)
     address public keeper;
@@ -92,8 +93,13 @@ contract PriceOracle is Ownable {
         emit PriceUpdated(token, price, block.timestamp);
     }
 
+    /// @notice Max single-update price deviation. Capped at 50% (V2-SC-09) so the
+    ///         circuit breaker can never be effectively disabled; genuine larger
+    ///         moves must go through forceSetPrice().
+    uint256 public constant MAX_DEVIATION_CEILING_BPS = 5000; // 50%
+
     function setMaxDeviation(uint256 newMaxDeviationBps) external onlyOwner {
-        require(newMaxDeviationBps > 0 && newMaxDeviationBps <= BPS, "Invalid bps");
+        require(newMaxDeviationBps > 0 && newMaxDeviationBps <= MAX_DEVIATION_CEILING_BPS, "Max 50%");
         maxDeviationBps = newMaxDeviationBps;
         emit MaxDeviationUpdated(newMaxDeviationBps);
     }
@@ -133,6 +139,7 @@ contract PriceOracle is Ownable {
     }
 
     function setKeeper(address _keeper) external onlyOwner {
+        emit KeeperUpdated(keeper, _keeper); // V2-SC-10: observable keeper rotation
         keeper = _keeper;
     }
 }

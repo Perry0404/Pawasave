@@ -14,23 +14,32 @@ import "@openzeppelin/contracts/security/Pausable.sol";
  * PawaSave extends revolving cNGN credit to vetted partner fintechs. Each
  * partner is allowlisted by the owner with a credit limit and an APR. Partners
  * (or PawaSave operating managed custody on their behalf) draw cNGN up to their
- * limit and repay over time. Interest accrues as simple interest on the
- * outstanding principal and is folded into principal on every state change.
+ * limit and repay over time.
  *
- * This is intentionally NOT collateralised — credit risk is managed off-chain
- * via partner agreements / KYB. On-chain controls:
- *   • only allowlisted, active partners can draw
- *   • a hard per-partner credit limit (principal + accrued interest)
- *   • the owner can suspend a partner (freezes new draws, interest keeps accruing)
- *   • the owner can write off uncollectible debt explicitly (auditable event)
- *   • Pausable kill-switch halts all draws/repays
+ * ── Accounting (audit v2 V2-HIGH-01 fix) ───────────────────────────────────
+ * Drawn principal and accrued interest are tracked SEPARATELY:
+ *   • `creditLimit` governs DRAWN PRINCIPAL only — accrued interest never
+ *     consumes draw headroom, so a partner can't be locked out of their line
+ *     just because interest piled up on a near-limit position.
+ *   • Interest accrues as SIMPLE interest on outstanding principal and is
+ *     booked into `interestAccrued`. (V2-SC-21: simple, not compound — for long
+ *     idle gaps this slightly under-accrues vs. continuous compounding; the
+ *     off-chain accrual cron is expected to call a state-changing function
+ *     frequently to keep the gap negligible.)
+ *   • Repayments and write-offs apply to interest FIRST, then principal.
  *
- * Custody model: "managed" — PawaSave (owner) may `draw` to a partner's
- * settlement address on their behalf, so partners never need to hold gas or a
- * key. Partners may also self-serve `draw` if given their own operator address.
+ * Uncollateralised by design — credit risk is managed off-chain via partner
+ * agreements / KYB. On-chain controls: allowlist, per-partner principal limit,
+ * suspend (freezes new draws, interest keeps accruing), explicit write-off
+ * (auditable, with reason), and a Pausable kill-switch.
  *
- * Liquidity: the owner funds this contract with cNGN (`fund`) and may withdraw
- * idle (un-drawn) cNGN at any time (`withdrawLiquidity`).
+ * Custody model: "managed" — the owner may `draw` to a partner's settlement
+ * address on their behalf, so partners never need a key or gas.
+ *
+ * Liquidity note (V2-SC-22): drawn cNGN physically LEAVES the contract, so
+ * `idleLiquidity()` = the contract's cNGN balance is exactly the un-lent amount
+ * the owner can withdraw. Outstanding debt is owed back TO the contract and is
+ * tracked separately in `totalPrincipal`; it is not sitting in the balance.
  */
 contract PawasaveCreditLine is Ownable, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
@@ -39,23 +48,29 @@ contract PawasaveCreditLine is Ownable, ReentrancyGuard, Pausable {
     uint256 private constant SECONDS_PER_YEAR = 365 days;
     /// @notice Sanity ceiling on the APR an owner can set (100% APR).
     uint256 public constant MAX_RATE_PER_YEAR = 1e18;
+    /// @notice Minimum repayment (1 cNGN) to avoid dust no-op repays (V2-SC-19);
+    ///         a full pay-off of a smaller residual debt is always allowed.
+    uint256 public constant MIN_REPAY = 1e6;
 
     IERC20 public immutable cNGN;
 
     struct Partner {
-        bool    active;        // allowlisted + not suspended (gates new draws)
-        bool    exists;        // has ever been added (distinguishes "0-limit" from "unknown")
-        uint256 creditLimit;   // max outstanding debt (principal + accrued), in cNGN (1e6)
-        uint256 ratePerYear;   // simple APR, 1e18 mantissa (e.g. 0.18e18 = 18%)
-        uint256 principal;     // current outstanding debt incl. folded-in interest (1e6)
-        uint256 accrualTime;   // last timestamp interest was folded in
+        bool    active;          // allowlisted + not suspended (gates new draws)
+        bool    exists;          // has ever been added
+        uint256 creditLimit;     // max DRAWN PRINCIPAL, in cNGN (1e6); interest is separate
+        uint256 ratePerYear;     // simple APR, 1e18 mantissa (e.g. 0.18e18 = 18%)
+        uint256 principal;       // outstanding drawn principal (1e6)
+        uint256 interestAccrued; // booked-but-unpaid interest (1e6)
+        uint256 accrualTime;     // last timestamp interest was booked
     }
 
     mapping(address => Partner) public partners;
     address[] public partnerList;
 
-    /// @notice Sum of all partners' outstanding principal (for off-chain reconciliation).
-    uint256 public totalOutstanding;
+    /// @notice Sum of all partners' outstanding drawn principal (exposure ex-interest).
+    uint256 public totalPrincipal;
+    /// @notice Lifetime total written off (for accounting/dashboards — V2-SC-20).
+    uint256 public totalWrittenOff;
 
     // ── Events ────────────────────────────────────────────────────────────────
     event PartnerAdded(address indexed partner, uint256 creditLimit, uint256 ratePerYear);
@@ -63,10 +78,10 @@ contract PawasaveCreditLine is Ownable, ReentrancyGuard, Pausable {
     event PartnerRateUpdated(address indexed partner, uint256 oldRate, uint256 newRate);
     event PartnerSuspended(address indexed partner);
     event PartnerReactivated(address indexed partner);
-    event InterestAccrued(address indexed partner, uint256 interest, uint256 newPrincipal);
+    event InterestAccrued(address indexed partner, uint256 interest, uint256 interestAccrued);
     event Drawn(address indexed partner, address indexed to, uint256 amount, uint256 newPrincipal);
-    event Repaid(address indexed partner, address indexed payer, uint256 amount, uint256 newPrincipal);
-    event WrittenOff(address indexed partner, uint256 amount, uint256 newPrincipal);
+    event Repaid(address indexed partner, address indexed payer, uint256 amount, uint256 principalLeft, uint256 interestLeft);
+    event WrittenOff(address indexed partner, uint256 amount, uint256 debtLeft, string reason);
     event Funded(address indexed from, uint256 amount);
     event LiquidityWithdrawn(address indexed to, uint256 amount);
 
@@ -84,16 +99,17 @@ contract PawasaveCreditLine is Ownable, ReentrancyGuard, Pausable {
         emit Funded(msg.sender, amount);
     }
 
-    /// @notice Owner withdraws idle (un-drawn) cNGN. Cannot touch drawn principal.
+    /// @notice Owner withdraws idle (un-lent) cNGN. Drawn funds have already left
+    ///         the contract, so the whole balance is withdrawable (V2-SC-22).
     function withdrawLiquidity(uint256 amount, address to) external onlyOwner {
         require(to != address(0), "Bad recipient");
-        require(amount > 0 && amount <= availableLiquidity(), "Exceeds idle liquidity");
+        require(amount > 0 && amount <= idleLiquidity(), "Exceeds idle liquidity");
         cNGN.safeTransfer(to, amount);
         emit LiquidityWithdrawn(to, amount);
     }
 
-    /// @notice Idle cNGN held by the contract that is not lent out.
-    function availableLiquidity() public view returns (uint256) {
+    /// @notice cNGN physically held by the contract = un-lent, owner-withdrawable.
+    function idleLiquidity() public view returns (uint256) {
         return cNGN.balanceOf(address(this));
     }
 
@@ -104,12 +120,13 @@ contract PawasaveCreditLine is Ownable, ReentrancyGuard, Pausable {
         require(!partners[partner].exists, "Already added");
         require(ratePerYear <= MAX_RATE_PER_YEAR, "Rate too high");
         partners[partner] = Partner({
-            active:      true,
-            exists:      true,
-            creditLimit: creditLimit,
-            ratePerYear: ratePerYear,
-            principal:   0,
-            accrualTime: block.timestamp
+            active:          true,
+            exists:          true,
+            creditLimit:     creditLimit,
+            ratePerYear:     ratePerYear,
+            principal:       0,
+            interestAccrued: 0,
+            accrualTime:     block.timestamp
         });
         partnerList.push(partner);
         emit PartnerAdded(partner, creditLimit, ratePerYear);
@@ -147,14 +164,23 @@ contract PawasaveCreditLine is Ownable, ReentrancyGuard, Pausable {
         emit PartnerReactivated(partner);
     }
 
-    /// @notice Owner forgives uncollectible debt (records the loss on-chain).
-    function writeOff(address partner, uint256 amount) external onlyOwner {
+    /// @notice Owner forgives uncollectible debt (interest first, then principal).
+    /// @param reason Free-text reason recorded on-chain for compliance (V2-SC-20).
+    function writeOff(address partner, uint256 amount, string calldata reason) external onlyOwner {
         _accrue(partner);
         Partner storage p = partners[partner];
-        require(amount > 0 && amount <= p.principal, "Bad amount");
-        p.principal -= amount;
-        totalOutstanding -= amount;
-        emit WrittenOff(partner, amount, p.principal);
+        uint256 debt = p.principal + p.interestAccrued;
+        require(amount > 0 && amount <= debt, "Bad amount");
+
+        uint256 offInterest = amount > p.interestAccrued ? p.interestAccrued : amount;
+        p.interestAccrued -= offInterest;
+        uint256 offPrincipal = amount - offInterest;
+        if (offPrincipal > 0) {
+            p.principal -= offPrincipal;
+            totalPrincipal -= offPrincipal;
+        }
+        totalWrittenOff += amount;
+        emit WrittenOff(partner, amount, p.principal + p.interestAccrued, reason);
     }
 
     // ── Draw / repay ──────────────────────────────────────────────────────────
@@ -162,7 +188,8 @@ contract PawasaveCreditLine is Ownable, ReentrancyGuard, Pausable {
     /**
      * @notice Draw cNGN against a partner's credit line.
      * @dev Callable by the partner itself OR by the owner (managed custody).
-     *      `to` is the settlement address the funds go to.
+     *      The limit is checked against DRAWN PRINCIPAL only — accrued interest
+     *      does NOT consume headroom (V2-HIGH-01).
      */
     function draw(address partner, uint256 amount, address to)
         external
@@ -177,17 +204,19 @@ contract PawasaveCreditLine is Ownable, ReentrancyGuard, Pausable {
         Partner storage p = partners[partner];
         require(p.active, "Partner inactive");
         require(p.principal + amount <= p.creditLimit, "Exceeds credit limit");
-        require(amount <= availableLiquidity(), "Insufficient liquidity");
+        require(amount <= idleLiquidity(), "Insufficient liquidity");
 
         p.principal += amount;
-        totalOutstanding += amount;
+        totalPrincipal += amount;
         cNGN.safeTransfer(to, amount);
         emit Drawn(partner, to, amount, p.principal);
     }
 
     /**
-     * @notice Repay a partner's debt. Anyone may pay on a partner's behalf.
-     * @param amount cNGN to repay; capped at the current debt (overpay is clamped).
+     * @notice Repay a partner's debt (interest first, then principal). Anyone may
+     *         pay on a partner's behalf.
+     * @param amount cNGN to repay; clamped to the current debt (overpay refunded
+     *        by being clamped). Must be >= MIN_REPAY unless it clears the debt.
      */
     function repay(address partner, uint256 amount)
         external
@@ -199,18 +228,27 @@ contract PawasaveCreditLine is Ownable, ReentrancyGuard, Pausable {
         Partner storage p = partners[partner];
         require(p.exists, "Unknown partner");
 
-        uint256 pay = amount > p.principal ? p.principal : amount;
-        require(pay > 0, "Nothing owed");
+        uint256 debt = p.principal + p.interestAccrued;
+        require(debt > 0, "Nothing owed");
+        uint256 pay = amount > debt ? debt : amount;
+        require(pay >= MIN_REPAY || pay == debt, "Below min repay"); // V2-SC-19
 
-        p.principal -= pay;
-        totalOutstanding -= pay;
+        uint256 toInterest = pay > p.interestAccrued ? p.interestAccrued : pay;
+        p.interestAccrued -= toInterest;
+        uint256 toPrincipal = pay - toInterest;
+        if (toPrincipal > 0) {
+            p.principal -= toPrincipal;
+            totalPrincipal -= toPrincipal;
+        }
+
         cNGN.safeTransferFrom(msg.sender, address(this), pay);
-        emit Repaid(partner, msg.sender, pay, p.principal);
+        emit Repaid(partner, msg.sender, pay, p.principal, p.interestAccrued);
     }
 
     // ── Interest accrual ──────────────────────────────────────────────────────
 
-    /// @dev Folds simple interest accrued since `accrualTime` into principal.
+    /// @dev Books simple interest accrued on principal since `accrualTime` into
+    ///      `interestAccrued`. Principal (the draw-limit measure) is untouched.
     function _accrue(address partner) internal {
         Partner storage p = partners[partner];
         if (!p.exists) return;
@@ -221,33 +259,39 @@ contract PawasaveCreditLine is Ownable, ReentrancyGuard, Pausable {
         }
         uint256 interest = (p.principal * p.ratePerYear * elapsed) / (BASE * SECONDS_PER_YEAR);
         if (interest > 0) {
-            p.principal += interest;
-            totalOutstanding += interest;
-            emit InterestAccrued(partner, interest, p.principal);
+            p.interestAccrued += interest;
+            emit InterestAccrued(partner, interest, p.interestAccrued);
         }
         p.accrualTime = block.timestamp;
     }
 
     // ── Views ─────────────────────────────────────────────────────────────────
 
-    /// @notice Outstanding debt incl. interest accrued up to now (no state change).
+    /// @notice Total debt (principal + booked interest + interest pending to now).
     function currentDebt(address partner) public view returns (uint256) {
         Partner storage p = partners[partner];
-        if (!p.exists || p.principal == 0) return p.principal;
-        uint256 elapsed = block.timestamp - p.accrualTime;
-        if (elapsed == 0 || p.ratePerYear == 0) return p.principal;
-        uint256 interest = (p.principal * p.ratePerYear * elapsed) / (BASE * SECONDS_PER_YEAR);
-        return p.principal + interest;
+        if (!p.exists) return 0;
+        return p.principal + p.interestAccrued + _pendingInterest(p);
     }
 
-    /// @notice Remaining headroom a partner can still draw (0 if over/at limit or inactive).
+    /// @notice Outstanding drawn principal only (the figure the credit limit caps).
+    function outstandingPrincipal(address partner) external view returns (uint256) {
+        return partners[partner].principal;
+    }
+
+    function _pendingInterest(Partner storage p) internal view returns (uint256) {
+        uint256 elapsed = block.timestamp - p.accrualTime;
+        if (elapsed == 0 || p.principal == 0 || p.ratePerYear == 0) return 0;
+        return (p.principal * p.ratePerYear * elapsed) / (BASE * SECONDS_PER_YEAR);
+    }
+
+    /// @notice Remaining headroom a partner can still draw (principal-based, V2-HIGH-01),
+    ///         bounded by idle liquidity. 0 if at/over limit or inactive.
     function availableCredit(address partner) external view returns (uint256) {
         Partner storage p = partners[partner];
-        if (!p.exists || !p.active) return 0;
-        uint256 debt = currentDebt(partner);
-        if (debt >= p.creditLimit) return 0;
-        uint256 headroom = p.creditLimit - debt;
-        uint256 liq = availableLiquidity();
+        if (!p.exists || !p.active || p.principal >= p.creditLimit) return 0;
+        uint256 headroom = p.creditLimit - p.principal;
+        uint256 liq = idleLiquidity();
         return headroom < liq ? headroom : liq;
     }
 

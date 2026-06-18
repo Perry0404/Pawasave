@@ -1,5 +1,8 @@
 {
-  "creditLine": "0x723CF2c9A94456Dd4257e3eD9aF368509a6E3F06",
+  "creditLine": "0x5056520eDF1efF1c18aD924a8Abd76b189221B13",
+  "owner": "0x04A68bB3056D95fFD64FE681f442BCfc04c79109",
   "cngn": "0x46C85152bFe9f96829aA94755D9f915F9B10EF5F",
-  "timestamp": 1781535800319
+  "abandoned": "0x723CF2c9A94456Dd4257e3eD9aF368509a6E3F06",
+  "note": "Redeployed with audit-v2 fixes (V2-HIGH-01 principal/interest split). Old 0x723C abandoned.",
+  "timestamp": 1781780701293
 }

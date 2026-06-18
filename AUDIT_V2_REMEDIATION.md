@@ -14,7 +14,7 @@ Status: ✅ fixed in code · 🛠️ fixed in source, **needs the next redeploy 
 ## Done this session (code)
 | ID | Sev | Status | Note |
 |----|-----|--------|------|
-| V2-HIGH-01 | High | ✅ | CreditLine: drawn principal vs accrued interest tracked separately — interest never consumes draw headroom; repay/writeOff interest-first. Tests rewritten (13). |
+| V2-HIGH-01 | High | ✅ LIVE | CreditLine: drawn principal vs accrued interest tracked separately — interest never consumes draw headroom; repay/writeOff interest-first. Tests rewritten (13). **Redeployed to `0x5056520eDF1efF1c18aD924a8Abd76b189221B13`** (owner=Safe); old `0x723CF2c9…` abandoned. |
 | V2-HIGH-02 | High | ✅ | `clearSecretsCache()` + `/api/admin/clear-secrets-cache` + `SECRETS_TTL_MS` env for fast key rotation. |
 | V2-HIGH-03 | High | ✅ | Admin auth → httpOnly HMAC session cookie (`lib/admin-session.ts`); password no longer in `sessionStorage`. New `/api/admin/logout`. |
 | V2-MED-03 | Med | ✅ | Off-ramp refunds + fails when Flipeet returns no deposit address. |

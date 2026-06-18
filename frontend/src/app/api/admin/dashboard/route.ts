@@ -1,16 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
+import { isAuthorisedAdmin } from '@/lib/admin-session'
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || ''
-
-function timingSafeEqual(a: string, b: string): boolean {
-  const enc = new TextEncoder()
-  const aa = enc.encode(a)
-  const bb = enc.encode(b)
-  if (aa.byteLength !== bb.byteLength) return false
-  return crypto.timingSafeEqual(aa, bb)
-}
 
 export async function POST(request: NextRequest) {
   if (!ADMIN_PASSWORD) {
@@ -27,7 +19,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  if (!body.password || !timingSafeEqual(body.password, ADMIN_PASSWORD)) {
+  if (!isAuthorisedAdmin(request, body.password)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

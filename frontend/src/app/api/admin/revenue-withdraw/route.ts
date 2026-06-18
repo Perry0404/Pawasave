@@ -2,18 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
+import { isAuthorisedAdmin } from '@/lib/admin-session'
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || ''
 const FLINT_API_KEY = process.env.FLINT_API_KEY || ''
 const FLINT_BASE = 'https://stables.flintapi.io/v1'
-
-function timingSafeEqual(a: string, b: string): boolean {
-  const enc = new TextEncoder()
-  const ba = enc.encode(a)
-  const bb = enc.encode(b)
-  if (ba.byteLength !== bb.byteLength) return false
-  return crypto.timingSafeEqual(ba, bb)
-}
 
 export async function POST(request: NextRequest) {
   if (!ADMIN_PASSWORD) {
@@ -35,7 +28,7 @@ export async function POST(request: NextRequest) {
 
   const { password, amountNaira, bankCode, accountNumber } = body
 
-  if (!password || !timingSafeEqual(password, ADMIN_PASSWORD)) {
+  if (!isAuthorisedAdmin(request, password)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   if (!amountNaira || typeof amountNaira !== 'number' || amountNaira < 1000) {

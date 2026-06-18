@@ -1,19 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
-
-function timingSafeEqual(a: string, b: string): boolean {
-  const enc = new TextEncoder()
-  const aa = enc.encode(a)
-  const bb = enc.encode(b)
-  if (aa.byteLength !== bb.byteLength) return false
-  return crypto.timingSafeEqual(aa, bb)
-}
+import { isAuthorisedAdmin } from '@/lib/admin-session'
 
 /**
  * POST /api/admin/revenue-balance
- * Auth: admin password in the JSON body (FIND-API-02 — never in the URL query,
- * which would leak into server/CDN logs, browser history and Referer headers).
+ * Auth: admin session cookie (V2-HIGH-03) or password in the JSON body
+ * (FIND-API-02 — never in the URL query).
  */
 export async function POST(request: NextRequest) {
   const adminPassword = process.env.ADMIN_PASSWORD || ''
@@ -22,10 +14,10 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json()
   } catch {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    body = {}
   }
 
-  if (!body.password || !adminPassword || !timingSafeEqual(body.password, adminPassword)) {
+  if (!adminPassword || !isAuthorisedAdmin(request, body.password)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

@@ -27,33 +27,33 @@ export default function AdminView() {
   const [withdrawBusy, setWithdrawBusy] = useState(false)
   const [withdrawFeedback, setWithdrawFeedback] = useState('')
 
-  // Check session storage for existing auth
+  // Restore the UI "authed" flag (non-sensitive); the real auth is the httpOnly
+  // session cookie set by /api/admin/verify (V2-HIGH-03 — no password in storage).
   useEffect(() => {
-    const stored = sessionStorage.getItem(ADMIN_STORAGE_KEY)
-    const storedPw = sessionStorage.getItem('pawa_admin_pw')
-    if (stored === 'true' && storedPw) {
+    if (sessionStorage.getItem(ADMIN_STORAGE_KEY) === 'true') {
       setAuthed(true)
     } else {
-      sessionStorage.removeItem(ADMIN_STORAGE_KEY)
-      sessionStorage.removeItem('pawa_admin_pw')
       setLoading(false)
     }
   }, [])
 
-  // Load data once authed
+  // Load data once authed (auth travels via the httpOnly cookie, sent automatically)
   useEffect(() => {
     if (!authed) return
     const load = async () => {
       setLoading(true)
-      const storedPw = sessionStorage.getItem('pawa_admin_pw') || ''
       try {
         const res = await fetch('/api/admin/dashboard', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: storedPw, recentFeeLimit: 30 }),
+          body: JSON.stringify({ recentFeeLimit: 30 }),
         })
         const data = await res.json()
-        if (!res.ok) {
+        if (res.status === 401) {
+          // session expired / not established → back to login
+          sessionStorage.removeItem(ADMIN_STORAGE_KEY)
+          setAuthed(false)
+        } else if (!res.ok) {
           setDashboardError(data.error || 'Dashboard load failed — check Vercel logs')
         } else {
           setDashboardError('')
@@ -81,12 +81,10 @@ export default function AdminView() {
     setWithdrawBusy(true)
     setWithdrawFeedback('')
     try {
-      const storedPw = sessionStorage.getItem('pawa_admin_pw') || password
       const res = await fetch('/api/admin/revenue-withdraw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          password: storedPw,
           amountNaira: amount,
           bankCode: withdrawBankCode,
           accountNumber: withdrawAccount,
@@ -117,8 +115,9 @@ export default function AdminView() {
       body: JSON.stringify({ password }),
     })
     if (res.ok) {
+      // Auth now lives in the httpOnly cookie the server just set; we only keep a
+      // non-sensitive UI flag so the panel re-opens on reload (V2-HIGH-03).
       sessionStorage.setItem(ADMIN_STORAGE_KEY, 'true')
-      sessionStorage.setItem('pawa_admin_pw', password)
       setAuthed(true)
       setPassword('')
     } else {
@@ -126,9 +125,9 @@ export default function AdminView() {
     }
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     sessionStorage.removeItem(ADMIN_STORAGE_KEY)
-    sessionStorage.removeItem('pawa_admin_pw')
+    try { await fetch('/api/admin/logout', { method: 'POST' }) } catch { /* ignore */ }
     setAuthed(false)
   }
 

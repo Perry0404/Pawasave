@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { setAdminCookie } from '@/lib/admin-session'
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || ''
 
@@ -30,5 +31,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 401 })
   }
 
-  return NextResponse.json({ ok: true })
+  // Issue an httpOnly session cookie instead of having the client keep the
+  // password around (V2-HIGH-03).
+  return setAdminCookie(NextResponse.json({ ok: true }))
 }

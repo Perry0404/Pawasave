@@ -213,7 +213,19 @@ export async function POST(request: NextRequest) {
             }, { onConflict: 'user_id', ignoreDuplicates: false })
           })
           .catch((err: unknown) => {
-            console.warn('PawasaveLend supply skipped (funds still credited):', err)
+            // V2-MED-06: the user is already credited, but the cNGN never made it
+            // into PawasaveLend — enqueue it so the auto-contribute cron retries
+            // instead of silently leaving the funds idle (no yield).
+            const msg = err instanceof Error ? err.message : String(err)
+            console.warn('PawasaveLend supply failed — queued for retry:', msg)
+            return supabase.rpc('enqueue_lend_supply', {
+              p_user_id: tx.user_id,
+              p_cngn_micro: cngnMicro,
+              p_error: msg.slice(0, 500),
+            }).then(() => undefined)
+          })
+          .catch((qErr: unknown) => {
+            console.error('PawasaveLend supply retry-enqueue also failed:', qErr)
           })
       }
     }

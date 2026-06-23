@@ -10,7 +10,7 @@ import {
   initializeFlipeetOnRamp,
 } from '@/lib/flipeet'
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
-import { sendCngn, cngnToShares, withdrawFromLend } from '@/lib/custody'
+import { sendCngn, cngnToShares, withdrawFromLend, custodyCngnBalance } from '@/lib/custody'
 import { createClient } from '@supabase/supabase-js'
 import { verifyPin } from '@/lib/pin-hash'
 
@@ -231,6 +231,10 @@ async function runFlint(
     type,
     reference,
     network: 'base',
+    // cNGN end-to-end: Flint delivers cNGN to custody so on-ramped funds can be
+    // supplied straight into PawasaveLend as borrower liquidity. Flipeet can't
+    // on-ramp cNGN, so Flint is the fiat→cNGN provider.
+    asset: process.env.FLINT_ASSET || 'cngn',
     amount: Math.round(amount),
     notifyUrl: `${origin}/api/webhook`,
   }
@@ -555,10 +559,31 @@ async function runFlipeet(
         // First pull from PawasaveLend if needed, then send to Flipeet
         const cngnMicro = BigInt(Math.floor(amount * 1_000_000))
 
-        // Withdraw from PawasaveLend back to custody (releases yield-bearing position)
+        // Release the yield-bearing position: redeem enough psNGN shares to cover
+        // the payout. withdrawFromLend returns the cNGN actually realised, which
+        // can be less than requested if the pool exchange rate moved or on rounding.
         const shares = await cngnToShares(cngnMicro)
         if (shares > 0n) {
-          await withdrawFromLend(shares)
+          const { cngnMicro: realised } = await withdrawFromLend(shares)
+          if (realised < cngnMicro) {
+            console.warn('Flipeet off-ramp: lend withdrawal short of payout', {
+              reference, requested: cngnMicro.toString(), realised: realised.toString(),
+            })
+          }
+        }
+
+        // V2-MED-05: never send more cNGN than custody actually holds. If the lend
+        // redemption came up short and the custody float can't cover the gap, refund
+        // and fail cleanly rather than over-drawing the shared float (or reverting
+        // deep inside the ERC-20 transfer and leaking gas).
+        const available = await custodyCngnBalance()
+        if (available < cngnMicro) {
+          console.error('Flipeet off-ramp: custody cNGN shortfall', {
+            reference, needed: cngnMicro.toString(), available: available.toString(),
+          })
+          await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: Number(cngnMicro) })
+          await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+          throw new Error('Withdrawal temporarily unavailable — your balance was refunded. Please try again shortly.')
         }
 
         // Send cNGN from custody to Flipeet's dynamic address
@@ -654,24 +679,28 @@ export async function POST(request: NextRequest) {
     const pawaFee = Math.round((amount * feePercent) / 100)
     const availableProviders: Provider[] = []
 
-    // Flint and Xend are NGN-only. For USD on-ramps, only Flipeet is supported.
+    // Provider routing:
+    //  - On-ramp (fiat → cNGN): Flint delivers cNGN to custody. Flipeet is NOT
+    //    used here — it does not accept cNGN on-ramp (V2 on-ramp fix).
+    //  - Off-ramp (cNGN → fiat): Flipeet (custody sends cNGN to its address).
+    // Flint/Xend are NGN-only.
     if (FLINT_CONFIGURED && type === 'on' && depositCurrency === 'NGN') availableProviders.push('flint')
     if (XEND_CONFIGURED && depositCurrency === 'NGN') availableProviders.push('xend')
-    if (FLIPEET_CONFIGURED) availableProviders.push('flipeet')
+    if (FLIPEET_CONFIGURED && type === 'off') availableProviders.push('flipeet')
 
     if (availableProviders.length === 0) {
-      return NextResponse.json(
-        {
-          error:
-            'No ramp provider is currently configured. Set FLINT_API_KEY in environment variables, or set FLIPEET_API_KEY and FLIPEET_CUSTODY_ADDRESS for Flipeet.',
-        },
-        { status: 503 },
-      )
+      const reason =
+        type === 'on'
+          ? (depositCurrency === 'USD'
+              ? 'USD on-ramp is not currently available.'
+              : 'No on-ramp provider configured. Enable Flint (FLINT_ENABLED=true + FLINT_API_KEY) for fiat → cNGN deposits.')
+          : 'No off-ramp provider configured. Set FLIPEET_API_KEY and FLIPEET_CUSTODY_ADDRESS.'
+      return NextResponse.json({ error: reason }, { status: 503 })
     }
 
     const estimatedFlint = pawaFee + calcFlintFees(amount, type)
     const estimatedXend = pawaFee + await getNumberSetting(supabase, 'xend_estimated_fee_naira', DEFAULT_XEND_ESTIMATED_FEE)
-    const flipeetRate = FLIPEET_CONFIGURED ? await getFlipeetRate(type).catch(() => null) : null
+    const flipeetRate = availableProviders.includes('flipeet') ? await getFlipeetRate(type).catch(() => null) : null
     const estimatedFlipeet = pawaFee + await getNumberSetting(
       supabase,
       'flipeet_estimated_fee_naira',

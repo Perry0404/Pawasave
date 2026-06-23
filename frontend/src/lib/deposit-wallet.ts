@@ -11,7 +11,7 @@
  *
  * NEVER import this into a client component — it reads the master seed.
  */
-import { HDNodeWallet, JsonRpcProvider } from "ethers"
+import { HDNodeWallet, type Provider } from "ethers"
 import { getSecret } from "./secrets"
 
 let cachedMnemonic: string | null = null
@@ -43,7 +43,7 @@ export async function deriveDepositAddress(index: number): Promise<string> {
 }
 
 /** Derive a signer for a deposit address (for sweeping to custody). */
-export async function deriveDepositSigner(index: number, provider: JsonRpcProvider) {
+export async function deriveDepositSigner(index: number, provider: Provider) {
   const m = await mnemonic()
   if (!isConfigured(m)) throw new Error("DEPOSIT_WALLET_MNEMONIC not configured")
   return HDNodeWallet.fromPhrase(m, undefined, pathFor(index)).connect(provider)

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
-import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
+import { ngnToCngnMicro, koboToCngnMicro } from '@/lib/ramp-rate'
+import { supplyToLend } from '@/lib/custody'
 
 const WEBHOOK_SECRET = process.env.FLINT_WEBHOOK_SECRET || ''
 
@@ -95,34 +96,57 @@ export async function POST(request: NextRequest) {
       .eq('id', tx.id)
 
     if (tx.type === 'deposit') {
-      // On-ramp completed: credit user USDC minus platform fee
+      // On-ramp completed. Flint delivered cNGN to custody, so credit the naira
+      // value as cNGN micro 1:1 (no USD rate) — matching the Flipeet path and the
+      // rest of the cNGN-end-to-end app. (*_usdc_micro params are legacy names.)
       const amountNaira = Number(data.processedAmount || data.amount || tx.amount_kobo / 100)
-      const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
-      const grossUsdcMicro = Math.floor((amountNaira / rate) * 1_000_000)
-
-      // Deduct platform fee (stored on transaction as kobo, convert to micro-USDC)
       const feeKobo = Number(tx.platform_fee_kobo || 0)
-      const feeUsdcMicro = feeKobo > 0 ? Math.floor((feeKobo / 100 / rate) * 1_000_000) : 0
-      const userUsdcMicro = Math.max(0, grossUsdcMicro - feeUsdcMicro)
+      const userNaira = Math.max(0, amountNaira - feeKobo / 100)
+
+      const cngnMicro = Number(await ngnToCngnMicro(userNaira)) // ≈ userNaira * 1e6 (cNGN peg)
 
       await supabase.rpc('credit_wallet', {
         p_user_id: tx.user_id,
         p_naira_kobo: 0,
-        p_usdc_micro: userUsdcMicro,
+        p_usdc_micro: cngnMicro,
       })
 
-      // Update the transaction with net USDC amount
       await supabase
         .from('transactions')
-        .update({ amount_usdc_micro: userUsdcMicro })
+        .update({ amount_usdc_micro: cngnMicro })
         .eq('id', tx.id)
 
-      // Allocate 90% of deposited USDC into the cNGN yield pool (earns 27% APY via P-AUTO)
-      // This is the correct call — save_to_vault moves naira→usdc and is NOT for this purpose
       await supabase.rpc('allocate_cngn_pool', {
         p_user_id: tx.user_id,
-        p_usdc_micro: userUsdcMicro,
+        p_usdc_micro: cngnMicro,
       })
+
+      // Supply the on-ramped cNGN into PawasaveLend — this is the borrower
+      // liquidity the pool lends out. Non-blocking so the webhook returns fast;
+      // on failure queue a retry so funds don't sit idle (V2-MED-06).
+      if (cngnMicro > 0) {
+        Promise.resolve(supplyToLend(BigInt(cngnMicro)))
+          .then(({ txHash, shares }) => {
+            console.info(`[flint] Supplied ${cngnMicro} cNGN to PawasaveLend — tx: ${txHash}, shares: ${shares}`)
+            return supabase.from('flexible_pool_positions').upsert({
+              user_id: tx.user_id,
+              cngn_deposited_micro: cngnMicro,
+              last_supply_tx: txHash,
+            }, { onConflict: 'user_id', ignoreDuplicates: false })
+          })
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err)
+            console.warn('[flint] PawasaveLend supply failed — queued for retry:', msg)
+            return supabase.rpc('enqueue_lend_supply', {
+              p_user_id: tx.user_id,
+              p_cngn_micro: cngnMicro,
+              p_error: msg.slice(0, 500),
+            }).then(() => undefined)
+          })
+          .catch((qErr: unknown) => {
+            console.error('[flint] PawasaveLend supply retry-enqueue also failed:', qErr)
+          })
+      }
     }
     // For withdrawal: balance was already debited upfront, nothing more needed
   } else if (isFailed) {
@@ -132,13 +156,12 @@ export async function POST(request: NextRequest) {
       .eq('id', tx.id)
 
     if (tx.type === 'withdrawal') {
-      // Refund the debited USDC
-      const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
-      const usdcMicro = Math.floor((tx.amount_kobo / 100 / rate) * 1_000_000)
+      // Refund the debited balance as cNGN micro 1:1 (no USD rate).
+      const cngnMicro = koboToCngnMicro(Number(tx.amount_kobo))
       await supabase.rpc('credit_wallet', {
         p_user_id: tx.user_id,
         p_naira_kobo: 0,
-        p_usdc_micro: usdcMicro,
+        p_usdc_micro: cngnMicro,
       })
     }
   }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ethers } from 'ethers'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { getSecret } from '@/lib/secrets'
+import { getBaseProvider } from '@/lib/rpc-provider'
 
 /**
  * GET /api/cron/liquidate
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const provider = new ethers.JsonRpcProvider(rpcUrl)
+    const provider = getBaseProvider()
     const keeper   = new ethers.Wallet(keeperKey, provider)
     const lend     = new ethers.Contract(lendAddr, LEND_ABI, keeper)
     const cngn     = new ethers.Contract(CNGN, ERC20_ABI, keeper)

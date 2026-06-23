@@ -3,6 +3,7 @@ import { ethers } from 'ethers'
 import { getNgnUsdRateFromFlipeet } from '@/lib/ramp-rate'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { getSecret } from '@/lib/secrets'
+import { getBaseProvider } from '@/lib/rpc-provider'
 
 /**
  * GET /api/cron/update-oracle
@@ -54,7 +55,7 @@ export async function GET(request: NextRequest) {
     }
     const price = BigInt(Math.round(ngnPerUsd * 1e6))
 
-    const provider = new ethers.JsonRpcProvider(rpcUrl)
+    const provider = getBaseProvider()
     const keeper   = new ethers.Wallet(keeperKey, provider)
     const oracle   = new ethers.Contract(oracleAddr, ORACLE_ABI, keeper)
 

@@ -3,6 +3,29 @@ const FLIPEET_BASE = 'https://api.pay.flipeet.io/api/v1/public'
 const FALLBACK_RATE = Number(process.env.NGN_USD_RATE || 1650) // V1 FIND-3P-04: was 1550
 
 /**
+ * Last-good rate cache (V2-LOW-03). Two jobs:
+ *  1. Within RATE_CACHE_TTL_MS, return the cached value so a burst of calls
+ *     (e.g. the oracle cron pricing several tokens) doesn't hammer the provider.
+ *  2. When the provider is unreachable, return the last value we successfully
+ *     fetched instead of jumping to the static FALLBACK_RATE — a stale-but-real
+ *     rate is safer for crediting/pricing than a hard-coded guess.
+ */
+const RATE_TTL_MS = Number(process.env.RATE_CACHE_TTL_MS || 60_000)
+const rateCache = new Map<string, { at: number; value: number }>()
+
+function freshRate(key: string): number | null {
+  const c = rateCache.get(key)
+  return c && Date.now() - c.at < RATE_TTL_MS ? c.value : null
+}
+function lastGoodRate(key: string): number | null {
+  return rateCache.get(key)?.value ?? null
+}
+function rememberRate(key: string, value: number): number {
+  rateCache.set(key, { at: Date.now(), value })
+  return value
+}
+
+/**
  * Canonical kobo ↔ cNGN-micro conversions (V2-LOW-01). cNGN is pegged 1:1 to NGN
  * with 6 decimals, so these are exact and provider-independent — use these
  * instead of inline magic numbers or USD/NGN rate detours.
@@ -56,6 +79,10 @@ function extractRate(payload: any): number | null {
  * This is Flipeet's own rate — use for crediting users after Flipeet deposits.
  */
 export async function getNgnUsdRateFromFlipeet(): Promise<number> {
+  const KEY = 'flipeet:ngnusd'
+  const cached = freshRate(KEY)
+  if (cached !== null) return cached
+
   const apiKey = process.env.FLIPEET_API_KEY
   if (apiKey) {
     try {
@@ -68,11 +95,11 @@ export async function getNgnUsdRateFromFlipeet(): Promise<number> {
       if (res.ok) {
         const data = await res.json()
         const rate = asNumber(data?.data?.data?.rate || data?.data?.rate || data?.rate)
-        if (rate) return rate
+        if (rate) return rememberRate(KEY, rate)
       }
     } catch {}
   }
-  return FALLBACK_RATE
+  return lastGoodRate(KEY) ?? FALLBACK_RATE
 }
 
 /**
@@ -81,6 +108,10 @@ export async function getNgnUsdRateFromFlipeet(): Promise<number> {
  * Falls back to 1.0 (perfect peg) if the API is unreachable.
  */
 export async function getCngnNgnRate(): Promise<number> {
+  const KEY = 'cngn:ngn'
+  const cached = freshRate(KEY)
+  if (cached !== null) return cached
+
   try {
     const res = await fetch('https://api.cngn.co/v1/rates', {
       headers: { Accept: 'application/json' },
@@ -93,12 +124,12 @@ export async function getCngnNgnRate(): Promise<number> {
         || asNumber(data?.data?.rate)
         || asNumber(data?.cngnNgn)
         || asNumber(data?.data?.cngnNgn)
-      if (rate && rate > 0) return rate
+      if (rate && rate > 0) return rememberRate(KEY, rate)
     }
   } catch {
-    // cNGN API unreachable — use peg of 1:1
+    // cNGN API unreachable — use last good, else the 1:1 peg
   }
-  return 1.0 // 1 cNGN = 1 NGN (the peg)
+  return lastGoodRate(KEY) ?? 1.0 // 1 cNGN = 1 NGN (the peg)
 }
 
 /**
@@ -111,6 +142,10 @@ export async function ngnToCngnMicro(ngnAmount: number): Promise<bigint> {
 }
 
 export async function getNgnUsdRateFromFlint(apiKey?: string): Promise<number> {
+  const KEY = 'flint:ngnusd'
+  const cached = freshRate(KEY)
+  if (cached !== null) return cached
+
   // Try Flint endpoints first
   if (apiKey) {
     const endpoints = [
@@ -128,7 +163,7 @@ export async function getNgnUsdRateFromFlint(apiKey?: string): Promise<number> {
         if (!res.ok) continue
         const data = await res.json()
         const rate = extractRate(data)
-        if (rate) return rate
+        if (rate) return rememberRate(KEY, rate)
       } catch {
         // Try next endpoint
       }
@@ -155,12 +190,12 @@ export async function getNgnUsdRateFromFlint(apiKey?: string): Promise<number> {
           || data?.data?.rate
           || data?.rate,
         )
-        if (flipeetRate) return flipeetRate
+        if (flipeetRate) return rememberRate(KEY, flipeetRate)
       }
     } catch {
-      // Fall through to static fallback
+      // Fall through to last-good, then static fallback
     }
   }
 
-  return FALLBACK_RATE
+  return lastGoodRate(KEY) ?? FALLBACK_RATE
 }

@@ -216,13 +216,23 @@ contract PawasaveAutoVault is ERC4626, Ownable2Step, ReentrancyGuard, Pausable, 
         }
     }
 
-    /// @dev Pull funds back from the primary strategy on the way out if needed.
+    /// @dev Pull funds back from the strategies on the way out if needed.
+    /// V2-MED-01: act on the amount each strategy ACTUALLY returns, not the
+    /// amount requested. A strategy may return less than asked (rounding / shares
+    /// cap), so we top up from the fallback and then require the vault genuinely
+    /// holds `assets` before burning shares — never deliver less than promised or
+    /// desync `deployedAssets`.
     function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares)
         internal override
     {
         uint256 bal = assetToken.balanceOf(address(this));
         if (bal < assets) {
-            _withdrawFromStrategy(primaryStrategy, assets - bal);
+            uint256 need = assets - bal;
+            uint256 got = _withdrawFromStrategy(primaryStrategy, need);
+            if (got < need && fallbackStrategy != address(0)) {
+                _withdrawFromStrategy(fallbackStrategy, need - got);
+            }
+            require(assetToken.balanceOf(address(this)) >= assets, "Strategy withdraw shortfall");
         }
         super._withdraw(caller, receiver, owner, assets, shares);
     }

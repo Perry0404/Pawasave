@@ -340,6 +340,38 @@ export async function getMorphoApy(): Promise<number> {
   return data ? parseFloat(data.value) : 4.0
 }
 
+export interface ApySettings {
+  flexible: number
+  xautoUser: number
+  mmUser: number
+  cngnPool: number
+}
+
+/**
+ * Canonical APYs from platform_settings via get_apy_settings() (V2-LOW-05 /
+ * V2-FE-02). One source of truth so the UI stops hardcoding (and disagreeing on)
+ * rates. Falls back to the historical defaults if a key is unset.
+ */
+export async function getApySettings(): Promise<ApySettings> {
+  const fallback: ApySettings = { flexible: 27, xautoUser: 27, mmUser: 27, cngnPool: 27 }
+  try {
+    const { data } = await supabase.rpc('get_apy_settings')
+    const s = (data || {}) as Record<string, string>
+    const n = (v: string | undefined, d: number) => {
+      const x = v != null ? parseFloat(v) : NaN
+      return Number.isFinite(x) ? x : d
+    }
+    return {
+      flexible: n(s.flexible_apy_percent, fallback.flexible),
+      xautoUser: n(s.xauto_user_apy_percent, fallback.xautoUser),
+      mmUser: n(s.mm_user_apy_percent, fallback.mmUser),
+      cngnPool: n(s.cngn_pool_apy_percent, fallback.cngnPool),
+    }
+  } catch {
+    return fallback
+  }
+}
+
 // ── Admin (uses service role via API) ──
 
 export async function getAdminFeeSummary(): Promise<AdminFeeSummary | null> {

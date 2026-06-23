@@ -28,11 +28,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { CONTRACTS } from "./contracts"
 import { deriveDepositSigner, depositWalletConfigured } from "./deposit-wallet"
 import { getSecret } from "./secrets"
-
-const RPC =
-  process.env.BASE_MAINNET_RPC_URL ||
-  process.env.NEXT_PUBLIC_BASE_RPC_URL ||
-  "https://mainnet.base.org"
+import { getBaseProvider } from "./rpc-provider"
 
 const ERC20_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -79,7 +75,7 @@ export async function sweepDeposits(): Promise<{
   const maxSweeps = Number(process.env.DEPOSIT_SWEEP_MAX || 10)
 
   const supabase = admin()
-  const provider = new ethers.JsonRpcProvider(RPC)
+  const provider = getBaseProvider()
   const funder   = new ethers.Wallet(funderKey, provider)
   const cngnRead = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, provider)
 

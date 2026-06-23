@@ -16,11 +16,7 @@ import { ethers } from "ethers"
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { CONTRACTS } from "./contracts"
 import { deriveDepositAddress, depositWalletConfigured } from "./deposit-wallet"
-
-const RPC =
-  process.env.BASE_MAINNET_RPC_URL ||
-  process.env.NEXT_PUBLIC_BASE_RPC_URL ||
-  "https://mainnet.base.org"
+import { getBaseProvider } from "./rpc-provider"
 
 const TRANSFER_ABI = ["event Transfer(address indexed from, address indexed to, uint256 value)"]
 
@@ -117,7 +113,7 @@ export async function scanAndCredit(opts: { onlyUserId?: string } = {}): Promise
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY not configured")
 
   const supabase = admin()
-  const provider = new ethers.JsonRpcProvider(RPC)
+  const provider = getBaseProvider()
   const cngn     = new ethers.Contract(CONTRACTS.CNGN, TRANSFER_ABI, provider)
 
   const map = await buildAddressMap(supabase, opts.onlyUserId)

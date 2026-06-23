@@ -11,13 +11,12 @@
 import { ethers } from 'ethers'
 import { CONTRACTS, ADDRESSES, LEND_ABI, ERC20_ABI } from './contracts'
 import { getSecret } from './secrets'
-
-const RPC = process.env.NEXT_PUBLIC_BASE_RPC_URL || 'https://mainnet.base.org'
+import { getBaseProvider } from './rpc-provider'
 
 async function getSigner() {
   const key = await getSecret('CUSTODY_PRIVATE_KEY')
   if (!key) throw new Error('CUSTODY_PRIVATE_KEY not configured')
-  return new ethers.Wallet(key, new ethers.JsonRpcProvider(RPC))
+  return new ethers.Wallet(key, getBaseProvider())
 }
 
 const b = (v: unknown): bigint => BigInt(v as any ?? 0)
@@ -99,9 +98,17 @@ export async function withdrawFromLend(shares: bigint): Promise<{ txHash: string
   return { txHash: receipt.hash, cngnMicro }
 }
 
+/** Current cNGN (micro) sitting free in the custody wallet (read-only). */
+export async function custodyCngnBalance(): Promise<bigint> {
+  const provider = getBaseProvider()
+  const cngn     = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, provider)
+  const cust     = process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address
+  return b(await cngn.balanceOf(cust))
+}
+
 /** Get current cNGN value of psNGN shares held by custody (read-only) */
 export async function custodyLendValue(): Promise<bigint> {
-  const provider = new ethers.JsonRpcProvider(RPC)
+  const provider = getBaseProvider()
   const lend     = new ethers.Contract(ADDRESSES.LEND, LEND_ABI, provider)
   const cust     = process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address
 
@@ -121,7 +128,7 @@ export async function custodyLendValue(): Promise<bigint> {
  * shares = cngnAmount * totalShares / totalPoolAssets
  */
 export async function cngnToShares(cngnMicro: bigint): Promise<bigint> {
-  const provider = new ethers.JsonRpcProvider(RPC)
+  const provider = getBaseProvider()
   const lend     = new ethers.Contract(ADDRESSES.LEND, LEND_ABI, provider)
 
   const [totalShares, totalAssets] = await Promise.all([

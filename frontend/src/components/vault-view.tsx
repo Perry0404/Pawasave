@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { formatNaira, formatCngn, koboToMicroUsdc, microUsdcToKobo, getRate } from '@/lib/format'
-import { saveToVault, withdrawFromVault, lockSavings, withdrawLock, useSavingsLocks } from '@/hooks/use-data'
-import { Shield, ArrowDown, ArrowUp, Info, Loader2, Lock, Unlock, TrendingUp, AlertTriangle, Zap, ChevronRight } from 'lucide-react'
+import { lockSavings, withdrawLock, useSavingsLocks, getApySettings } from '@/hooks/use-data'
+import { Shield, Info, Loader2, Lock, Unlock, TrendingUp, AlertTriangle, ChevronRight } from 'lucide-react'
 import type { Wallet, SavingsLock } from '@/lib/types'
 import { useConfirm } from '@/components/confirm-dialog'
 
@@ -21,21 +21,20 @@ const LOCK_DURATIONS = [
 
 // Only fixed/locked savings plan
 type SavingsPlan = null | 'fixed'
-type FlexAction = 'save' | 'withdraw'
-const FLEXIBLE_APY = 27  // Ajo (flexible savings) — supplied to PawasaveLend at ~80% utilization
+const FLEXIBLE_APY = 27  // Ajo (flexible savings) default — overridden live from platform_settings
 const FIXED_APY_MAX = 40 // Maximum fixed APY (1-year lock)
 
 export default function VaultView({ wallet, refresh }: Props) {
   const [plan, setPlan] = useState<SavingsPlan>(null)
-  const [flexAction, setFlexAction] = useState<FlexAction>('save')
   const [amount, setAmount] = useState('')
   const [feedback, setFeedback] = useState('')
   const [busy, setBusy] = useState(false)
   const [lockDuration, setLockDuration] = useState(90)
   const [liveRate, setLiveRate] = useState<number>(getRate())
+  const [flexibleApy, setFlexibleApy] = useState<number>(FLEXIBLE_APY)
   const [showLockConsent, setShowLockConsent] = useState(false)
   const [lockConsented, setLockConsented] = useState(false)
-  const { locks, loading: locksLoading, refresh: refreshLocks } = useSavingsLocks()
+  const { locks, refresh: refreshLocks } = useSavingsLocks()
   const confirm = useConfirm()
 
   useEffect(() => {
@@ -49,12 +48,17 @@ export default function VaultView({ wallet, refresh }: Props) {
       .catch(() => undefined)
   }, [])
 
+  // V2-LOW-05 / V2-FE-02: pull the flexible APY live from platform_settings
+  // instead of showing a hardcoded number.
+  useEffect(() => {
+    getApySettings().then((s) => setFlexibleApy(s.flexible)).catch(() => undefined)
+  }, [])
+
   if (!wallet) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
 
   const rate = liveRate
   const cngnYieldMicro = wallet.cngn_yield_earned_micro || 0
   const cngnTotalMicro = (wallet.cngn_pool_micro || 0) + cngnYieldMicro
-  const savingsKobo = microUsdcToKobo(wallet.usdc_balance_micro, rate)
   const cngnPoolKobo = microUsdcToKobo(wallet.cngn_pool_micro || 0, rate)
   const cngnTotalKobo = microUsdcToKobo(cngnTotalMicro, rate)
   const activeLocks = locks.filter(l => l.status === 'active')
@@ -71,29 +75,6 @@ export default function VaultView({ wallet, refresh }: Props) {
   const flash = (msg: string) => {
     setFeedback(msg)
     setTimeout(() => setFeedback(''), 3500)
-  }
-
-  const executeFlexible = async () => {
-    const naira = parseFloat(amount)
-    if (!naira || naira < 100) { flash('Minimum ₦100'); return }
-    const kobo = Math.round(naira * 100)
-    const usdc = koboToMicroUsdc(kobo, rate)
-    setBusy(true)
-    try {
-      if (flexAction === 'save') {
-        await saveToVault(kobo, usdc)
-        flash(`Saved ${formatCngn(usdc)} to flexible vault`)
-      } else {
-        await withdrawFromVault(kobo, usdc)
-        flash(`Withdrew ${formatNaira(kobo)} from vault`)
-      }
-      setAmount('')
-      refresh()
-    } catch (e: any) {
-      flash(e.message || 'Operation failed')
-    } finally {
-      setBusy(false)
-    }
   }
 
   const executeFixed = async () => {
@@ -222,7 +203,7 @@ export default function VaultView({ wallet, refresh }: Props) {
 
         <h2 className="text-base font-bold text-slate-900 mb-1">Lock your savings</h2>
         <p className="text-xs text-slate-500 mb-4">
-          All deposits automatically earn 27% APY in Ajo (flexible savings). Lock additional funds for higher returns (15–40% APY based on duration).
+          All deposits automatically earn {flexibleApy}% APY in Ajo (flexible savings). Lock additional funds for higher returns (15–40% APY based on duration).
         </p>
 
         {/* Fixed/Locked Savings */}

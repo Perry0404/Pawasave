@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { ethers } from 'ethers'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { getSecret } from '@/lib/secrets'
+import { getBaseProvider } from '@/lib/rpc-provider'
 
 /**
  * GET /api/cron/harvest-vault
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const provider  = new ethers.JsonRpcProvider(rpcUrl)
+    const provider  = getBaseProvider()
     const harvester = new ethers.Wallet(privateKey, provider)
     const vault     = new ethers.Contract(vaultAddr, VAULT_ABI, harvester)
 

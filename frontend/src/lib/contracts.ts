@@ -13,7 +13,7 @@ export const CONTRACTS = {
   /** PawasaveAutoVault — P-AUTO fixed savings vault (Base mainnet) */
   PAUTO_VAULT: (
     process.env.NEXT_PUBLIC_PAUTO_VAULT_ADDRESS ||
-    "0x000B9C8d90B211DB22cbD99c18cA9C41E814b9E2"
+    "0xcBA4ED7CfaE2CCa6f0940bAf6fD5cD8d91b3c37b" // v3
   ) as `0x${string}`,
 
   /** cNGN stablecoin on Base (6 decimals) */
@@ -42,11 +42,11 @@ export const USDT_ADDRESS =
 
 /** ADDRESSES alias for protocol components (same values as CONTRACTS) */
 export const ADDRESSES = {
-  LEND:   (process.env.NEXT_PUBLIC_LEND_ADDRESS || "0x14c524Eb4b77c706D1eb786603F9885377442B93") as `0x${string}`,
+  LEND:   (process.env.NEXT_PUBLIC_LEND_ADDRESS || "0x5583802FB2215d550f80DC42CD44C40E0EF8B7cF") as `0x${string}`, // v3
   CNGN:   CONTRACTS.CNGN,
   USDC:   CONTRACTS.USDC,
   USDT:   USDT_ADDRESS,
-  ORACLE: (process.env.NEXT_PUBLIC_ORACLE_ADDRESS || "0x58a16675C1E898a73c9D3B975b0deEE680B73BdF") as `0x${string}`,
+  ORACLE: (process.env.NEXT_PUBLIC_ORACLE_ADDRESS || "0x6385B4026F6A705696843b4022129555114A183c") as `0x${string}`, // v3
 }
 
 /**

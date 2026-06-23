@@ -16,7 +16,7 @@ dotenv.config()
 
 const RPC  = process.env.BASE_MAINNET_RPC_URL || 'https://base-rpc.publicnode.com'
 const CNGN = '0x46C85152bFe9f96829aA94755D9f915F9B10EF5F'
-const LEND = process.env.PAWASAVE_LEND_ADDRESS || '0x14c524Eb4b77c706D1eb786603F9885377442B93'
+const LEND = process.env.PAWASAVE_LEND_ADDRESS || '0x5583802FB2215d550f80DC42CD44C40E0EF8B7cF' // v3 lend
 const KEY  = process.env.SUPPLIER_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY
 const AMOUNT_WHOLE = Number(process.env.SUPPLY_AMOUNT_CNGN || 0)
 

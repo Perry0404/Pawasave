@@ -10,8 +10,8 @@ const CNGN = '0x46C85152bFe9f96829aA94755D9f915F9B10EF5F'
 // Candidate LEND pools — the live one is whatever NEXT_PUBLIC_LEND_ADDRESS on
 // Vercel points to. We probe both so we can see which has the active borrow.
 const CANDIDATES = {
-  '7d redeploy (frontend default)': process.env.PAWASAVE_LEND_ADDRESS || '0x14c524Eb4b77c706D1eb786603F9885377442B93',
-  'older deployments/baseMainnet-lend.json': '0x07F2365DDd5b720E55d0C04e1391A0aA92f2eaB7',
+  'V3 live (frontend default)': process.env.PAWASAVE_LEND_ADDRESS || '0x5583802FB2215d550f80DC42CD44C40E0EF8B7cF',
+  'abandoned 7d': '0x14c524Eb4b77c706D1eb786603F9885377442B93',
 }
 
 // Wallets that might hold cNGN to supply.

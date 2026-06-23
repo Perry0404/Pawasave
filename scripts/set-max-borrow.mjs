@@ -11,7 +11,7 @@ import * as dotenv from 'dotenv'
 dotenv.config()
 
 const RPC  = process.env.BASE_MAINNET_RPC_URL || 'https://base-rpc.publicnode.com'
-const LEND = process.env.PAWASAVE_LEND_ADDRESS || '0x14c524Eb4b77c706D1eb786603F9885377442B93'
+const LEND = process.env.PAWASAVE_LEND_ADDRESS || '0x5583802FB2215d550f80DC42CD44C40E0EF8B7cF' // v3 lend
 const NEW_MAX_WHOLE = Number(process.env.NEW_MAX_CNGN || 200_000_000)
 const newMax = BigInt(Math.round(NEW_MAX_WHOLE * 1e6)) // 6 decimals
 

@@ -17,7 +17,7 @@ interface Props {
   onBorrow: (amount: bigint, tenorDays: number) => Promise<void>
 }
 
-const TENORS = [30, 90, 180] as const
+const TENORS = [30, 90, 180, 365] as const
 
 /** A row for the selector: every known collateral, enriched with live data. */
 type DisplayToken = CollateralEntry & { live: boolean }

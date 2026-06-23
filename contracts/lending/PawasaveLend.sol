@@ -53,6 +53,13 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     // liquidatable regardless of collateral health. Variable interest still
     // accrues as normal; early repayment has no penalty.
     uint256 public constant DEFAULT_TENOR_DAYS = 90;
+    // Tenor is a configurable range so longer borrowing terms (for partners /
+    // larger borrowers) can be offered without a redeploy. Any tenor between
+    // MIN_TENOR_DAYS and maxTenorDays is accepted; the owner raises maxTenorDays
+    // (up to the hard ceiling) as demand warrants.
+    uint256 public constant MIN_TENOR_DAYS = 7;
+    uint256 public constant MAX_TENOR_CEILING_DAYS = 730; // 2y hard cap on maxTenorDays
+    uint256 public maxTenorDays = 365;                    // longest term currently offered (1y)
     uint256 public gracePeriodSeconds = 4 days;              // grace after maturity before overdue-liquidation
 
     address public treasury;
@@ -113,6 +120,7 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     event MaxSupplyPerUserUpdated(uint256 newMax);
     event LoanTermSet(address indexed borrower, uint256 dueDate, uint256 tenorDays);
     event GracePeriodUpdated(uint256 newGracePeriodSeconds);
+    event MaxTenorUpdated(uint256 newMaxTenorDays);
 
     // ── Constructor ──────────────────────────────────────────────────────────
     constructor(
@@ -265,7 +273,8 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
     /**
      * @notice Borrow cNGN against collateral, choosing the loan tenor.
      * @param cngnAmount Amount of cNGN to borrow (6 decimals)
-     * @param tenorDays  Loan term — 30, 90, or 180 days
+     * @param tenorDays  Loan term in days — any value from MIN_TENOR_DAYS up to
+     *                   the current maxTenorDays (default 365).
      */
     function borrow(uint256 cngnAmount, uint256 tenorDays) external nonReentrant whenNotPaused {
         _borrow(cngnAmount, tenorDays);
@@ -461,8 +470,8 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         return _isHealthy(borrower);
     }
 
-    function _validTenor(uint256 d) internal pure returns (bool) {
-        return d == 30 || d == 90 || d == 180;
+    function _validTenor(uint256 d) internal view returns (bool) {
+        return d >= MIN_TENOR_DAYS && d <= maxTenorDays;
     }
 
     /** @notice True once a loan is past its due date + grace period. */
@@ -562,11 +571,19 @@ contract PawasaveLend is ERC20, Ownable, ReentrancyGuard, Pausable {
         emit InterestRateModelUpdated(newIrm);
     }
 
-    /** @notice Set the max total debt a single borrower may hold (0 = no cap). FIND-SC-17 */
     function setGracePeriod(uint256 newGraceSeconds) external onlyOwner {
         require(newGraceSeconds <= 30 days, "Max 30d grace");
         gracePeriodSeconds = newGraceSeconds;
         emit GracePeriodUpdated(newGraceSeconds);
+    }
+
+    /// @notice Set the longest loan tenor borrowers may choose (in days). Lets us
+    /// offer longer borrowing terms as demand grows, without a redeploy. Bounded
+    /// by MIN_TENOR_DAYS..MAX_TENOR_CEILING_DAYS. Existing loans keep their term.
+    function setMaxTenor(uint256 newMaxTenorDays) external onlyOwner {
+        require(newMaxTenorDays >= MIN_TENOR_DAYS && newMaxTenorDays <= MAX_TENOR_CEILING_DAYS, "Tenor out of range");
+        maxTenorDays = newMaxTenorDays;
+        emit MaxTenorUpdated(newMaxTenorDays);
     }
 
     function setMaxBorrowPerUser(uint256 newMax) external onlyOwner {

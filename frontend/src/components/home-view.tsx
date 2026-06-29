@@ -103,7 +103,14 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
       talkback('deposit_init', profile?.display_name || user?.email || 'Chief',
         `₦${val.toLocaleString('en-NG')}`)
     } catch (e: any) {
-      flash(e.message || 'Deposit failed')
+      // Fiat bank-ramp unavailable → fall back to a cNGN deposit (send cNGN to
+      // the user's own Base address, auto-credited 1:1 by the deposit scanner).
+      if (depositAddr) {
+        setDepositInfo({} as RampResult)
+        setView('deposit-info')
+      } else {
+        flash(e?.message || 'Deposit failed')
+      }
     } finally {
       setBusy(false)
     }
@@ -264,6 +271,29 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
             <div>
               <p className="text-[11px] text-emerald-600 font-medium">Account Name</p>
               <p className="text-sm font-semibold text-emerald-900">{depositInfo.accountName}</p>
+            </div>
+          )}
+          {/* Fallback when no fiat bank account is returned: deposit cNGN to the
+              user's own Base address — auto-credited 1:1 by the deposit scanner. */}
+          {!depositInfo.walletAddress && !depositInfo.bankName && !depositInfo.accountNumber && depositAddr && (
+            <div>
+              <p className="text-[11px] text-emerald-600 font-medium">Send cNGN to this address (Base network)</p>
+              <div className="flex items-center gap-2">
+                <code className="text-xs font-bold text-emerald-900 break-all">{depositAddr}</code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(depositAddr)
+                    setAddrCopied(true)
+                    setTimeout(() => setAddrCopied(false), 2000)
+                  }}
+                  className="text-emerald-600 hover:text-emerald-800 transition p-1 flex-shrink-0"
+                >
+                  {addrCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-[11px] text-emerald-500 mt-1">
+                Send exactly {amount ? parseInt(amount).toLocaleString() : ''} cNGN (1 cNGN = ₦1). Credited automatically once the transfer confirms.
+              </p>
             </div>
           )}
         </div>

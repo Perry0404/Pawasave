@@ -256,6 +256,26 @@ async function runFlint(
     throw new Error(msg)
   }
 
+  // Flint's exact on-ramp response shape (esp. the NGN virtual account) isn't
+  // documented publicly, so: (1) log the raw response so we can confirm the real
+  // field names in the Vercel logs, and (2) read the bank account defensively
+  // from the shapes providers commonly use (flat / nested under deposit|account|
+  // virtualAccount, camelCase or snake_case). This is why the account number was
+  // blank: the old code only checked flat camelCase `data.accountNumber`.
+  console.info('[ramp] flint on-ramp raw response:', JSON.stringify(flintData))
+  const fd = flintData.data ?? flintData
+  const acct = fd.deposit ?? fd.account ?? fd.virtualAccount ?? fd.bankAccount ?? fd.source ?? fd
+  const pick = (...keys: string[]): string | undefined => {
+    for (const k of keys) { const v = acct?.[k] ?? fd?.[k]; if (v) return String(v) }
+    return undefined
+  }
+  const flintBankName    = pick('bankName', 'bank_name', 'bank')
+  const flintBankCode    = pick('bankCode', 'bank_code')
+  const flintAccountNo   = pick('accountNumber', 'account_number', 'accountNo', 'number')
+  const flintAccountName = pick('accountName', 'account_name', 'accountHolder', 'holder_name')
+  const flintDepositAddr = pick('depositAddress', 'deposit_address', 'address')
+  const flintTxId        = pick('transactionId', 'transaction_id', 'id', 'reference')
+
   const pawaFeeKobo = Math.round(pawaFeeNaira * 100)
   await supabase.from('transactions').insert({
     user_id: userId,
@@ -265,7 +285,7 @@ async function runFlint(
     platform_fee_kobo: pawaFeeKobo,
     description: 'Received via FlintAPI',
     reference,
-    paychant_tx_id: flintData.data?.transactionId || null,
+    paychant_tx_id: flintTxId || null,
     status: 'pending',
   })
 
@@ -276,13 +296,13 @@ async function runFlint(
 
   return {
     provider: 'flint',
-    transactionId: flintData.data?.transactionId,
+    transactionId: flintTxId,
     reference,
-    bankName: flintData.data?.bankName,
-    bankCode: flintData.data?.bankCode,
-    accountNumber: flintData.data?.accountNumber,
-    accountName: flintData.data?.accountName,
-    depositAddress: flintData.data?.depositAddress,
+    bankName: flintBankName,
+    bankCode: flintBankCode,
+    accountNumber: flintAccountNo,
+    accountName: flintAccountName,
+    depositAddress: flintDepositAddr,
     pawaFee: pawaFeeNaira,
     providerFee: providerFeeNaira,
     totalFee: pawaFeeNaira + providerFeeNaira,

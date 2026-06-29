@@ -7,17 +7,19 @@ import GroupsView from './groups-view'
 import GoalsView from './goals-view'
 import ActivityView from './activity-view'
 import VaultView from './vault-view'
+import InvestView from './invest-view'
 import KycGate from './kyc-gate'
 import Logo from './logo'
-import { Home, Users, Activity, LifeBuoy, Settings, LogOut, ShieldCheck, X, Vault, Target } from 'lucide-react'
+import { Home, Users, Activity, LifeBuoy, Settings, LogOut, ShieldCheck, X, Vault, Target, TrendingUp } from 'lucide-react'
 import { useConfirm } from '@/components/confirm-dialog'
 
-type Tab = 'home' | 'vault' | 'goals' | 'groups' | 'activity' | 'support' | 'settings'
+type Tab = 'home' | 'vault' | 'goals' | 'invest' | 'groups' | 'activity' | 'support' | 'settings'
 
 const tabs: { id: Tab; label: string; Icon: React.FC<any> }[] = [
   { id: 'home',     label: 'Home',    Icon: Home },
   { id: 'vault',    label: 'Save',    Icon: Vault },
   { id: 'goals',    label: 'Goals',   Icon: Target },
+  { id: 'invest',   label: 'Invest',  Icon: TrendingUp },
   { id: 'groups', label: 'Groups', Icon: Users },
   { id: 'activity', label: 'Activity', Icon: Activity },
   { id: 'support', label: 'Support', Icon: LifeBuoy },
@@ -144,6 +146,7 @@ export default function AppShell() {
           {tab === 'home' && <HomeView wallet={wallet} transactions={transactions} user={user} refresh={refresh} profile={profile} onStartKyc={() => setShowKycGate(true)} onNavigateVault={() => setTab('vault')} />}
           {tab === 'vault' && <VaultView wallet={wallet} refresh={refresh} />}
           {tab === 'goals' && <GoalsView wallet={wallet} refresh={refresh} />}
+          {tab === 'invest' && <InvestView wallet={wallet} profile={profile} refresh={refresh} onStartKyc={() => setShowKycGate(true)} />}
           {tab === 'groups' && <GroupsView user={user} wallet={wallet} />}
           {tab === 'activity' && <ActivityView transactions={transactions} wallet={wallet} profile={profile} />}
           {tab === 'support' && (

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { TrendingUp, Loader2, ArrowLeft, Sparkles, ShieldCheck, Lock } from 'lucide-react'
 import type { Wallet } from '@/lib/types'
-import { StockChart } from './stock-chart'
+import { StockChart, MarketTickers } from './stock-chart'
 
 /**
  * InvestView — buy tokenized stocks (xStocks) and pre-IPO tokens with cNGN.
@@ -31,6 +31,8 @@ const PREIPO: Asset[] = [
   { symbol: 'ANTHROPIC', name: 'Anthropic' },
   { symbol: 'DATABRICKS', name: 'Databricks' },
 ]
+// Stable reference (module-level) for the live ticker cards.
+const STOCK_TICKERS = STOCKS.filter(s => s.tv).map(s => ({ proName: s.tv as string, title: s.name }))
 
 interface Holding { symbol: string; asset_type: Cat; provider: string; invested_cngn_micro: number; shares: number }
 interface Props { wallet: Wallet | null; profile: { kyc_status?: string } | null; refresh: () => void; onStartKyc: () => void }
@@ -163,6 +165,13 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
           </button>
         ))}
       </div>
+
+      {/* Live quotes (price + % change) for the public tickers. */}
+      {cat === 'tokenized_stock' && (
+        <div className="mb-4">
+          <MarketTickers symbols={STOCK_TICKERS} />
+        </div>
+      )}
 
       {msg && <p className="text-sm text-emerald-700 mb-3">{msg}</p>}
 

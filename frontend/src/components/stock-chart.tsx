@@ -38,3 +38,37 @@ export function StockChart({ tvSymbol, height = 200 }: { tvSymbol: string; heigh
 
   return <div ref={ref} className="tradingview-widget-container w-full" style={{ height }} />
 }
+
+/**
+ * MarketTickers — live quote cards (symbol, name, price, % change) via
+ * TradingView's free Tickers widget. Pass a STABLE `symbols` array (module-level
+ * const) so the effect doesn't re-run every render.
+ */
+export function MarketTickers({ symbols }: { symbols: { proName: string; title: string }[] }) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const host = ref.current
+    if (!host) return
+    host.innerHTML = ''
+    const widget = document.createElement('div')
+    widget.className = 'tradingview-widget-container__widget'
+    host.appendChild(widget)
+
+    const script = document.createElement('script')
+    script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-tickers.js'
+    script.async = true
+    script.innerHTML = JSON.stringify({
+      symbols,
+      colorTheme: 'light',
+      isTransparent: true,
+      showSymbolLogo: true,
+      locale: 'en',
+    })
+    host.appendChild(script)
+
+    return () => { host.innerHTML = '' }
+  }, [symbols])
+
+  return <div ref={ref} className="tradingview-widget-container w-full" />
+}

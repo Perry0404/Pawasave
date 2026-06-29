@@ -227,6 +227,9 @@ async function runFlint(
   const providerFeeNaira = calcFlintFees(amount, type)
 
   const origin = request.nextUrl.origin || 'https://pawasave.xyz'
+  // Deliver on-ramped cNGN to the FLIPEET custody address — that's the wallet the
+  // off-ramps draw from, so on-ramped funds land where they can be paid back out.
+  const custodyDest = FLIPEET_CUSTODY_ADDRESS || CUSTODY_ADDRESS
   const flintBody: any = {
     type,
     reference,
@@ -235,11 +238,15 @@ async function runFlint(
     // supplied straight into PawasaveLend as borrower liquidity. Flipeet can't
     // on-ramp cNGN, so Flint is the fiat→cNGN provider.
     asset: process.env.FLINT_ASSET || 'cngn',
+    // Fiat currency to COLLECT — without this Flint won't provision the NGN
+    // virtual bank account (the missing "account number" on the deposit screen).
+    currency: 'NGN',
+    fiatCurrency: 'NGN',
     amount: Math.round(amount),
     notifyUrl: `${origin}/api/webhook`,
   }
 
-  if (CUSTODY_ADDRESS) flintBody.destination = { address: CUSTODY_ADDRESS }
+  if (custodyDest) flintBody.destination = { address: custodyDest }
 
   const flintRes = await fetch(`${FLINT_BASE}/ramp/initialise`, {
     method: 'POST',

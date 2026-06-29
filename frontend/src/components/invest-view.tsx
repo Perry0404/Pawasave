@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { TrendingUp, Loader2, ArrowLeft, Sparkles, ShieldCheck } from 'lucide-react'
+import { TrendingUp, Loader2, ArrowLeft, Sparkles, ShieldCheck, Lock } from 'lucide-react'
 import type { Wallet } from '@/lib/types'
+import { StockChart } from './stock-chart'
 
 /**
  * InvestView — buy tokenized stocks (xStocks) and pre-IPO tokens with cNGN.
@@ -12,17 +13,18 @@ import type { Wallet } from '@/lib/types'
  */
 type Cat = 'tokenized_stock' | 'pre_ipo'
 
-const STOCKS: { symbol: string; name: string }[] = [
-  { symbol: 'AAPL', name: 'Apple' },
-  { symbol: 'NVDA', name: 'NVIDIA' },
-  { symbol: 'TSLA', name: 'Tesla' },
-  { symbol: 'MSFT', name: 'Microsoft' },
-  { symbol: 'GOOGL', name: 'Alphabet' },
-  { symbol: 'AMZN', name: 'Amazon' },
-  { symbol: 'META', name: 'Meta' },
-  { symbol: 'SPY', name: 'S&P 500 ETF' },
+type Asset = { symbol: string; name: string; tv?: string }
+const STOCKS: Asset[] = [
+  { symbol: 'AAPL', name: 'Apple', tv: 'NASDAQ:AAPL' },
+  { symbol: 'NVDA', name: 'NVIDIA', tv: 'NASDAQ:NVDA' },
+  { symbol: 'TSLA', name: 'Tesla', tv: 'NASDAQ:TSLA' },
+  { symbol: 'MSFT', name: 'Microsoft', tv: 'NASDAQ:MSFT' },
+  { symbol: 'GOOGL', name: 'Alphabet', tv: 'NASDAQ:GOOGL' },
+  { symbol: 'AMZN', name: 'Amazon', tv: 'NASDAQ:AMZN' },
+  { symbol: 'META', name: 'Meta', tv: 'NASDAQ:META' },
+  { symbol: 'SPY', name: 'S&P 500 ETF', tv: 'AMEX:SPY' },
 ]
-const PREIPO: { symbol: string; name: string }[] = [
+const PREIPO: Asset[] = [
   { symbol: 'SPCX', name: 'SpaceX' },
   { symbol: 'STRIPE', name: 'Stripe' },
   { symbol: 'OPENAI', name: 'OpenAI' },
@@ -37,7 +39,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
   const [cat, setCat] = useState<Cat>('tokenized_stock')
   const [holdings, setHoldings] = useState<Holding[]>([])
   const [brokerLive, setBrokerLive] = useState(false)
-  const [selected, setSelected] = useState<{ symbol: string; name: string } | null>(null)
+  const [selected, setSelected] = useState<Asset | null>(null)
   const [amount, setAmount] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
@@ -89,9 +91,21 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <h2 className="text-lg font-bold text-slate-900 mb-1">Buy {selected.name}</h2>
-        <p className="text-sm text-slate-400 mb-5">
+        <p className="text-sm text-slate-400 mb-4">
           {cat === 'pre_ipo' ? 'Pre-IPO exposure' : 'Tokenized stock'} · paid from your cNGN balance
         </p>
+
+        {/* Live price chart for public tickers; pre-IPO has no public market. */}
+        {selected.tv ? (
+          <div className="mb-5 rounded-xl border border-slate-200 overflow-hidden bg-white">
+            <StockChart tvSymbol={selected.tv} height={200} />
+          </div>
+        ) : (
+          <div className="mb-5 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-500">
+            <Lock className="w-4 h-4 flex-shrink-0" />
+            <span>{selected.name} is a private company — no public market price. Valued at each funding round.</span>
+          </div>
+        )}
 
         <label className="text-xs text-slate-500">Amount (cNGN)</label>
         <div className="relative mt-1 mb-2">
@@ -104,7 +118,9 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
             autoFocus
           />
         </div>
-        <p className="text-[11px] text-slate-400 mb-4">Minimum ₦1,000 · 1 cNGN = ₦1</p>
+        <p className="text-[11px] text-slate-400 mb-4">
+          Minimum ₦1,000 · Available ₦{((wallet?.usdc_balance_micro || 0) / 1_000_000).toLocaleString()}
+        </p>
 
         {!brokerLive && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4">

@@ -94,7 +94,9 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
 
   const handleDeposit = async () => {
     const val = parseFloat(amount)
-    if (!val || val < 100) { flash('Minimum amount is ₦100'); return }
+    // Flint (fiat → cNGN on-ramp) rejects amounts below ₦2,000, so enforce it here
+    // too — users see the real minimum before submitting instead of a server error.
+    if (!val || val < 2000) { flash('Minimum deposit is ₦2,000'); return }
     setBusy(true)
     try {
       const result = await initiateDeposit(val)
@@ -189,8 +191,10 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
               autoFocus
             />
           </div>
-          {val > 0 && (
+          {val > 0 ? (
             <p className="text-xs text-slate-400 mt-2">≈ {val.toLocaleString('en-NG', { maximumFractionDigits: 0 })} cNGN</p>
+          ) : (
+            <p className="text-xs text-slate-400 mt-2">Minimum deposit ₦2,000</p>
           )}
         </div>
 

@@ -10,7 +10,7 @@ import {
   initializeFlipeetOnRamp,
 } from '@/lib/flipeet'
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
-import { sendCngn, cngnToShares, withdrawFromLend, custodyCngnBalance } from '@/lib/custody'
+import { sendCngn, cngnToShares, withdrawFromLend, custodyCngnBalance, custodyAddress } from '@/lib/custody'
 import { createClient } from '@supabase/supabase-js'
 import { verifyPin } from '@/lib/pin-hash'
 
@@ -30,6 +30,9 @@ const FLIPEET_CUSTODY_ADDRESS =
 const DEFAULT_FEE_PERCENT = 1.5
 const DEFAULT_XEND_ESTIMATED_FEE = 120
 const DEFAULT_FLIPEET_ESTIMATED_FEE = 100
+// Flint rejects on-ramp amounts below ₦2,000 (Zod min). Enforce up-front so users
+// see a clear minimum instead of an opaque provider validation error. Configurable.
+const FLINT_MIN_ONRAMP_NGN = Number(process.env.FLINT_MIN_ONRAMP_NGN) || 2000
 // PawaSave uses Flipeet only (cNGN end-to-end). Flint and Xend are disabled
 // until explicitly re-enabled with FLINT_ENABLED=true / XEND_ENABLED=true —
 // even if their API keys are present. This keeps them easy to switch back on.
@@ -229,7 +232,10 @@ async function runFlint(
   const origin = request.nextUrl.origin || 'https://pawasave.xyz'
   // Deliver on-ramped cNGN to the FLIPEET custody address — that's the wallet the
   // off-ramps draw from, so on-ramped funds land where they can be paid back out.
-  const custodyDest = FLIPEET_CUSTODY_ADDRESS || CUSTODY_ADDRESS
+  // Derive the custody destination from the signer when the env address isn't set
+  // (it's Sensitive in prod). Flint REQUIRES destination or it 422s with no account.
+  const custodyDest = FLIPEET_CUSTODY_ADDRESS || CUSTODY_ADDRESS || (await custodyAddress())
+  if (!custodyDest) throw new Error('On-ramp custody destination not configured')
   const flintBody: any = {
     type,
     reference,
@@ -246,7 +252,7 @@ async function runFlint(
     notifyUrl: `${origin}/api/webhook`,
   }
 
-  if (custodyDest) flintBody.destination = { address: custodyDest }
+  flintBody.destination = { address: custodyDest }
 
   const flintRes = await fetch(`${FLINT_BASE}/ramp/initialise`, {
     method: 'POST',
@@ -258,9 +264,17 @@ async function runFlint(
   })
 
   const flintData = await flintRes.json()
-  if (!flintRes.ok || flintData.status === 'error') {
-    const msg = flintData.message || flintData.error || 'Service temporarily unavailable'
-    throw new Error(msg)
+  if (!flintRes.ok || flintData.status === 'error' || flintData.success === false) {
+    // Flint returns Zod validation errors as { error: { issues: [{ message }] } }.
+    // Flatten them so the real reason (e.g. "amount must be >= 2000") surfaces.
+    let msg = 'Service temporarily unavailable'
+    const fe: any = flintData.error
+    if (typeof fe === 'string') msg = fe
+    else if (Array.isArray(fe?.issues) && fe.issues.length) msg = fe.issues.map((i: any) => i.message).join('; ')
+    else if (typeof flintData.message === 'string') msg = flintData.message
+    const err: any = new Error(msg)
+    err.isValidation = flintRes.status === 422 || /too small|minimum|at least|expected/i.test(msg)
+    throw err
   }
 
   // Flint's exact on-ramp response shape (esp. the NGN virtual account) isn't
@@ -271,7 +285,7 @@ async function runFlint(
   // blank: the old code only checked flat camelCase `data.accountNumber`.
   console.info('[ramp] flint on-ramp raw response:', JSON.stringify(flintData))
   const fd = flintData.data ?? flintData
-  const acct = fd.deposit ?? fd.account ?? fd.virtualAccount ?? fd.bankAccount ?? fd.source ?? fd
+  const acct = fd.depositAccount ?? fd.deposit ?? fd.account ?? fd.virtualAccount ?? fd.bankAccount ?? fd.source ?? fd
   const pick = (...keys: string[]): string | undefined => {
     for (const k of keys) { const v = acct?.[k] ?? fd?.[k]; if (v) return String(v) }
     return undefined
@@ -282,6 +296,7 @@ async function runFlint(
   const flintAccountName = pick('accountName', 'account_name', 'accountHolder', 'holder_name')
   const flintDepositAddr = pick('depositAddress', 'deposit_address', 'address')
   const flintTxId        = pick('transactionId', 'transaction_id', 'id', 'reference')
+  const flintAmount      = Number(pick('amountToTransfer', 'amount') ?? amount)
 
   const pawaFeeKobo = Math.round(pawaFeeNaira * 100)
   await supabase.from('transactions').insert({
@@ -305,6 +320,7 @@ async function runFlint(
     provider: 'flint',
     transactionId: flintTxId,
     reference,
+    amount: flintAmount,
     bankName: flintBankName,
     bankCode: flintBankCode,
     accountNumber: flintAccountNo,
@@ -684,13 +700,13 @@ export async function POST(request: NextRequest) {
     const holderName = body.holderName as string | undefined
     const depositCurrency = (body.currency === 'USD' ? 'USD' : 'NGN') as 'NGN' | 'USD'
 
-    // USD on-ramp: minimum $1; NGN on-ramp: minimum ₦100
-    const minAmount = depositCurrency === 'USD' ? 1 : 100
+    // USD on-ramp: min $1. NGN on-ramp: Flint's ₦2,000 floor. NGN off-ramp: ₦100.
+    const minAmount = depositCurrency === 'USD' ? 1 : (type === 'on' ? FLINT_MIN_ONRAMP_NGN : 100)
     if ((type !== 'on' && type !== 'off') || !Number.isFinite(amount) || amount < minAmount) {
-      return NextResponse.json(
-        { error: depositCurrency === 'USD' ? 'Minimum deposit is $1' : 'Amount must be at least ₦100' },
-        { status: 400 },
-      )
+      const minMsg = depositCurrency === 'USD'
+        ? 'Minimum deposit is $1'
+        : `Minimum ${type === 'off' ? 'withdrawal' : 'deposit'} is ₦${minAmount.toLocaleString()}`
+      return NextResponse.json({ error: minMsg }, { status: 400 })
     }
 
     if (type === 'off' && (!bankCode || !accountNumber)) {
@@ -758,6 +774,11 @@ export async function POST(request: NextRequest) {
       const result = await run(orderedProviders[0])
       return NextResponse.json({ ...result, selectedBy: 'best_rate' })
     } catch (primaryErr: any) {
+      // Surface genuine validation errors (e.g. amount below the provider minimum)
+      // with their real message — safe and actionable, not a provider outage.
+      if (primaryErr?.isValidation) {
+        return NextResponse.json({ error: primaryErr.message }, { status: 400 })
+      }
       // Never fall back for off-ramps: every run*() debits the user's balance before
       // calling the provider and refunds on failure. A fallback would debit a second time.
       if (type === 'off') {

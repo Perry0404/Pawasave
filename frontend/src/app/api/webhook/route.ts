@@ -51,7 +51,15 @@ export async function POST(request: NextRequest) {
 
   const { event, data } = body
 
-  if (!data?.reference) {
+  // Log the raw verified payload so the real field names are confirmable in logs.
+  console.info('[flint-webhook] payload:', JSON.stringify(body))
+
+  // Flint's "credit reference" is its own transactionId (trx_…) — it does NOT echo
+  // the reference we send. So reconcile against ALL candidate identifiers, matched
+  // against both our `reference` column and the provider id we stored (paychant_tx_id).
+  const candidates = [data?.reference, data?.transactionId, data?.id, data?.transaction_id]
+    .filter((v): v is string => typeof v === 'string' && v.length > 0)
+  if (candidates.length === 0) {
     return NextResponse.json({ error: 'Missing reference' }, { status: 400 })
   }
 
@@ -66,21 +74,22 @@ export async function POST(request: NextRequest) {
     { auth: { persistSession: false } },
   )
 
-  // Find the pending transaction
-  const { data: tx, error: txErr } = await supabase
-    .from('transactions')
-    .select('*')
-    .eq('reference', data.reference)
-    .eq('status', 'pending')
-    .single()
+  // Find the pending transaction by any candidate ref, on either column.
+  const findTx = async (status?: 'pending') => {
+    for (const col of ['reference', 'paychant_tx_id'] as const) {
+      let q = supabase.from('transactions').select('*').in(col, candidates)
+      if (status) q = q.eq('status', status)
+      const { data: rows } = await q.limit(1)
+      if (rows && rows.length) return rows[0]
+    }
+    return null
+  }
 
-  if (txErr || !tx) {
-    // Already processed — return 200 so the provider stops retrying
-    const { data: existingTx } = await supabase
-      .from('transactions')
-      .select('status')
-      .eq('reference', data.reference)
-      .single()
+  const tx = await findTx('pending')
+
+  if (!tx) {
+    // Already processed (any status) — return 200 so the provider stops retrying
+    const existingTx = await findTx()
     if (existingTx) return NextResponse.json({ ok: true, already_processed: true })
     return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
   }

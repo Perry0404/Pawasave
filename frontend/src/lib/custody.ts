@@ -21,6 +21,17 @@ async function getSigner() {
 
 const b = (v: unknown): bigint => BigInt(v as any ?? 0)
 
+/**
+ * The custody wallet address — where on-ramped cNGN is delivered and the wallet
+ * off-ramps draw from. Falls back to the CUSTODY_PRIVATE_KEY wallet address when
+ * FLIPEET_CUSTODY_ADDRESS isn't readable (it's marked "Sensitive" in production,
+ * so code must never depend on reading the env var). Deriving from the signer
+ * guarantees the on-ramp `destination` is always present.
+ */
+export async function custodyAddress(): Promise<string> {
+  return process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address
+}
+
 // ── Token transfers ──────────────────────────────────────────────────────────
 
 /** Send USDC from custody to an address (used for Flipeet off-ramp) */

@@ -180,6 +180,34 @@ async function maybeDebitForWithdrawal(
 ): Promise<NextResponse | null> {
   // cNGN balance: 1 NGN = 1 cNGN. Debit the naira value as cNGN micro (no rate).
   const cngnMicro = Math.floor(amountNaira * 1_000_000)
+
+  // Deposits auto-allocate 90% into the savings pool (cngn_pool_micro), leaving
+  // only ~10% spendable. A withdrawal must be able to reach the pooled savings, so
+  // if the spendable balance is short, redeem the shortfall from the pool first.
+  const { data: wallet } = await supabase
+    .from('wallets')
+    .select('usdc_balance_micro, cngn_pool_micro')
+    .eq('user_id', userId)
+    .single()
+
+  const spendable = Number(wallet?.usdc_balance_micro || 0)
+  if (spendable < cngnMicro) {
+    const shortfall = cngnMicro - spendable
+    const pool = Number(wallet?.cngn_pool_micro || 0)
+    if (pool < shortfall) {
+      await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+      return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 })
+    }
+    const { data: moved } = await supabase.rpc('withdraw_cngn_pool', {
+      p_user_id: userId,
+      p_amount_micro: shortfall,
+    })
+    if (!moved) {
+      await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+      return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 })
+    }
+  }
+
   const { data: ok } = await supabase.rpc('debit_wallet', {
     p_user_id: userId,
     p_naira_kobo: 0,
@@ -536,7 +564,7 @@ async function runFlipeet(
       status: 'pending',
     })
     const debitError = await maybeDebitForWithdrawal(supabase, userId, amount, reference)
-    if (debitError) throw new Error('Insufficient USDC balance')
+    if (debitError) throw new Error('INSUFFICIENT_BALANCE')
   }
 
   // ── Call Flipeet API ─────────────────────────────────────────────────────────
@@ -782,6 +810,9 @@ export async function POST(request: NextRequest) {
       // Never fall back for off-ramps: every run*() debits the user's balance before
       // calling the provider and refunds on failure. A fallback would debit a second time.
       if (type === 'off') {
+        if (primaryErr?.message === 'INSUFFICIENT_BALANCE') {
+          return NextResponse.json({ error: 'Insufficient balance for this withdrawal.' }, { status: 400 })
+        }
         const errMsg = formatProviderError(orderedProviders[0], primaryErr)
         console.error('Ramp off-ramp failure', { provider: orderedProviders[0], primaryErr })
         return NextResponse.json({ error: errMsg }, { status: 422 })

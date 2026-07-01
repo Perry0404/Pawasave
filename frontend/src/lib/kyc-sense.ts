@@ -57,7 +57,13 @@ export async function createSenseSession(opts: {
 
   const res = await fetch(`${SENSE_BASE}/v1/sessions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+    // Sense accepts either header; send both so it works regardless of which the
+    // endpoint enforces (docs show x-api-key; the API Keys page shows Bearer).
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': API_KEY,
+      Authorization: `Bearer ${API_KEY}`,
+    },
     body: JSON.stringify({
       session_type: opts.sessionType || 'enrollment',
       platform: 'web',

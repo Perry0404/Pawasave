@@ -13,6 +13,7 @@
     "@aws-sdk/client-secrets-manager": "3.1068.0",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.0",
+    "@usesense/web-sdk": "^4.6.0",
     "clsx": "^2.1.1",
     "ethers": "^6.10.0",
     "lucide-react": "^0.441.0",

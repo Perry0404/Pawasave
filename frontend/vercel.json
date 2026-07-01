@@ -5,6 +5,10 @@
   "outputDirectory": ".next",
   "crons": [
     {
+      "path": "/api/cron/update-yield-apy",
+      "schedule": "0 */6 * * *"
+    },
+    {
       "path": "/api/cron/accrue-yield",
       "schedule": "0 0 * * *"
     },

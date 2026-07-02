@@ -203,34 +203,28 @@ export async function POST(request: NextRequest) {
         p_usdc_micro: cngnMicro,
       })
 
-      // Supply cNGN to PawasaveLend for yield (flexible savings)
-      // Done async so webhook returns fast — failure logged but does not block credit
+      // Supply cNGN to PawasaveLend for yield (flexible savings). AWAIT it —
+      // fire-and-forget work after the response is killed on serverless, so the
+      // supply (and its retry-enqueue) never runs, stranding cNGN in custody.
+      // On failure, enqueue synchronously so the auto-contribute cron retries.
       if (cngnMicro > 0) {
-        Promise.resolve(supplyToLend(BigInt(cngnMicro)))
-          .then(({ txHash, shares }) => {
-            console.info(`Supplied ${cngnMicro} cNGN to PawasaveLend — tx: ${txHash}, shares: ${shares}`)
-            // Record shares in Supabase for proportional yield tracking
-            return supabase.from('flexible_pool_positions').upsert({
-              user_id: tx.user_id,
-              cngn_deposited_micro: cngnMicro,
-              last_supply_tx: txHash,
-            }, { onConflict: 'user_id', ignoreDuplicates: false })
+        try {
+          const { txHash, shares } = await supplyToLend(BigInt(cngnMicro))
+          console.info(`Supplied ${cngnMicro} cNGN to PawasaveLend — tx: ${txHash}, shares: ${shares}`)
+          await supabase.from('flexible_pool_positions').upsert({
+            user_id: tx.user_id,
+            cngn_deposited_micro: cngnMicro,
+            last_supply_tx: txHash,
+          }, { onConflict: 'user_id', ignoreDuplicates: false })
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.warn('PawasaveLend supply failed — queued for retry:', msg)
+          await supabase.rpc('enqueue_lend_supply', {
+            p_user_id: tx.user_id,
+            p_cngn_micro: cngnMicro,
+            p_error: msg.slice(0, 500),
           })
-          .catch((err: unknown) => {
-            // V2-MED-06: the user is already credited, but the cNGN never made it
-            // into PawasaveLend — enqueue it so the auto-contribute cron retries
-            // instead of silently leaving the funds idle (no yield).
-            const msg = err instanceof Error ? err.message : String(err)
-            console.warn('PawasaveLend supply failed — queued for retry:', msg)
-            return supabase.rpc('enqueue_lend_supply', {
-              p_user_id: tx.user_id,
-              p_cngn_micro: cngnMicro,
-              p_error: msg.slice(0, 500),
-            }).then(() => undefined)
-          })
-          .catch((qErr: unknown) => {
-            console.error('PawasaveLend supply retry-enqueue also failed:', qErr)
-          })
+        }
       }
     }
   } else if (isFailedStatus(status)) {

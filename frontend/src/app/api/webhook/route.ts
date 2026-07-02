@@ -4,6 +4,10 @@ import crypto from 'crypto'
 import { ngnToCngnMicro, koboToCngnMicro } from '@/lib/ramp-rate'
 import { supplyToLend } from '@/lib/custody'
 
+// The deposit path supplies cNGN into PawasaveLend on-chain (approve + supply,
+// two txs). Await it inline (see below), so give the request room to finish.
+export const maxDuration = 60
+
 const WEBHOOK_SECRET = process.env.FLINT_WEBHOOK_SECRET || ''
 
 function verifySignature(bodyObj: any, signature: string): boolean {
@@ -130,31 +134,30 @@ export async function POST(request: NextRequest) {
         p_usdc_micro: cngnMicro,
       })
 
-      // Supply the on-ramped cNGN into PawasaveLend — this is the borrower
-      // liquidity the pool lends out. Non-blocking so the webhook returns fast;
-      // on failure queue a retry so funds don't sit idle (V2-MED-06).
+      // Supply the on-ramped cNGN into PawasaveLend — the liquidity the pool
+      // lends out. AWAIT it: on serverless, work fired AFTER the response is
+      // returned gets killed, so a fire-and-forget supply never completes — and
+      // its retry-enqueue never runs either — leaving cNGN stranded in custody.
+      // If the on-chain supply fails, enqueue synchronously so the auto-contribute
+      // cron retries it (V2-MED-06).
       if (cngnMicro > 0) {
-        Promise.resolve(supplyToLend(BigInt(cngnMicro)))
-          .then(({ txHash, shares }) => {
-            console.info(`[flint] Supplied ${cngnMicro} cNGN to PawasaveLend — tx: ${txHash}, shares: ${shares}`)
-            return supabase.from('flexible_pool_positions').upsert({
-              user_id: tx.user_id,
-              cngn_deposited_micro: cngnMicro,
-              last_supply_tx: txHash,
-            }, { onConflict: 'user_id', ignoreDuplicates: false })
+        try {
+          const { txHash, shares } = await supplyToLend(BigInt(cngnMicro))
+          console.info(`[flint] Supplied ${cngnMicro} cNGN to PawasaveLend — tx: ${txHash}, shares: ${shares}`)
+          await supabase.from('flexible_pool_positions').upsert({
+            user_id: tx.user_id,
+            cngn_deposited_micro: cngnMicro,
+            last_supply_tx: txHash,
+          }, { onConflict: 'user_id', ignoreDuplicates: false })
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.warn('[flint] PawasaveLend supply failed — queued for retry:', msg)
+          await supabase.rpc('enqueue_lend_supply', {
+            p_user_id: tx.user_id,
+            p_cngn_micro: cngnMicro,
+            p_error: msg.slice(0, 500),
           })
-          .catch((err: unknown) => {
-            const msg = err instanceof Error ? err.message : String(err)
-            console.warn('[flint] PawasaveLend supply failed — queued for retry:', msg)
-            return supabase.rpc('enqueue_lend_supply', {
-              p_user_id: tx.user_id,
-              p_cngn_micro: cngnMicro,
-              p_error: msg.slice(0, 500),
-            }).then(() => undefined)
-          })
-          .catch((qErr: unknown) => {
-            console.error('[flint] PawasaveLend supply retry-enqueue also failed:', qErr)
-          })
+        }
       }
     }
     // For withdrawal: balance was already debited upfront, nothing more needed

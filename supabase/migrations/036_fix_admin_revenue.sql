@@ -63,6 +63,9 @@ COMMIT;
 
 -- 5) Total Revenue = lifetime EARNED (the three real earning types only, so a payout
 --    row doesn't shrink lifetime revenue). Only real fees remain after step 3.
+--    NOTE: every SUM(bigint) returns NUMERIC — it MUST be cast ::bigint to match the
+--    declared return columns, or the whole function throws "structure of query does
+--    not match function result type" and the dashboard silently shows 0 everywhere.
 CREATE OR REPLACE FUNCTION public.admin_fee_summary()
 RETURNS TABLE (
   total_fees_kobo bigint,
@@ -76,20 +79,44 @@ RETURNS TABLE (
 BEGIN
   RETURN QUERY
   SELECT
-    COALESCE(SUM(fee_amount_kobo), 0),
-    COALESCE(SUM(CASE WHEN fee_type = 'ramp_onramp' THEN fee_amount_kobo ELSE 0 END), 0),
-    COALESCE(SUM(CASE WHEN fee_type = 'ramp_offramp' THEN fee_amount_kobo ELSE 0 END), 0),
-    COALESCE(SUM(CASE WHEN fee_type = 'vault_lock_penalty' THEN fee_amount_kobo ELSE 0 END), 0),
+    COALESCE(SUM(fee_amount_kobo), 0)::bigint,
+    COALESCE(SUM(CASE WHEN fee_type = 'ramp_onramp' THEN fee_amount_kobo ELSE 0 END), 0)::bigint,
+    COALESCE(SUM(CASE WHEN fee_type = 'ramp_offramp' THEN fee_amount_kobo ELSE 0 END), 0)::bigint,
+    COALESCE(SUM(CASE WHEN fee_type = 'vault_lock_penalty' THEN fee_amount_kobo ELSE 0 END), 0)::bigint,
     COUNT(*)::bigint,
-    COALESCE(SUM(CASE WHEN created_at::date = current_date THEN fee_amount_kobo ELSE 0 END), 0),
-    COALESCE(SUM(CASE WHEN date_trunc('month', created_at) = date_trunc('month', current_date) THEN fee_amount_kobo ELSE 0 END), 0)
+    COALESCE(SUM(CASE WHEN created_at::date = current_date THEN fee_amount_kobo ELSE 0 END), 0)::bigint,
+    COALESCE(SUM(CASE WHEN date_trunc('month', created_at) = date_trunc('month', current_date) THEN fee_amount_kobo ELSE 0 END), 0)::bigint
   FROM public.platform_fees
   WHERE fee_type IN ('ramp_onramp', 'ramp_offramp', 'vault_lock_penalty');
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- 5b) User stats — same SUM(bigint)->numeric cast bug as above (was returning null,
+--     which is why Total Users / TVL showed 0). cNGN Savings now includes the pool +
+--     accrued yield, not just the spendable balance, so TVL reflects real custody.
+CREATE OR REPLACE FUNCTION public.admin_user_stats()
+RETURNS TABLE (
+  total_users bigint,
+  total_wallets bigint,
+  total_naira_kobo bigint,
+  total_usdc_micro bigint,
+  total_locked_usdc_micro bigint,
+  active_locks bigint
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    (SELECT COUNT(*) FROM public.profiles)::bigint,
+    (SELECT COUNT(*) FROM public.wallets)::bigint,
+    COALESCE((SELECT SUM(naira_balance_kobo) FROM public.wallets), 0)::bigint,
+    COALESCE((SELECT SUM(usdc_balance_micro + COALESCE(cngn_pool_micro, 0) + COALESCE(cngn_yield_earned_micro, 0)) FROM public.wallets), 0)::bigint,
+    COALESCE((SELECT SUM(amount_usdc_micro) FROM public.savings_locks WHERE status = 'active'), 0)::bigint,
+    (SELECT COUNT(*) FROM public.savings_locks WHERE status = 'active')::bigint;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- 6) Total Transactions = settled (completed) only; failed/pending test rows no longer
---    inflate the count. The volume sums already filter to completed.
+--    inflate the count. The volume sums already filter to completed. (Cast SUM->bigint.)
 CREATE OR REPLACE FUNCTION public.admin_tx_volume()
 RETURNS TABLE (
   total_deposits_kobo bigint,
@@ -101,9 +128,9 @@ RETURNS TABLE (
 BEGIN
   RETURN QUERY
   SELECT
-    COALESCE(SUM(CASE WHEN type = 'deposit' AND status = 'completed' THEN amount_kobo ELSE 0 END), 0),
-    COALESCE(SUM(CASE WHEN type = 'withdrawal' AND status = 'completed' THEN amount_kobo ELSE 0 END), 0),
-    COALESCE(SUM(CASE WHEN type = 'save_to_vault' AND status = 'completed' THEN amount_kobo ELSE 0 END), 0),
+    COALESCE(SUM(CASE WHEN type = 'deposit' AND status = 'completed' THEN amount_kobo ELSE 0 END), 0)::bigint,
+    COALESCE(SUM(CASE WHEN type = 'withdrawal' AND status = 'completed' THEN amount_kobo ELSE 0 END), 0)::bigint,
+    COALESCE(SUM(CASE WHEN type = 'save_to_vault' AND status = 'completed' THEN amount_kobo ELSE 0 END), 0)::bigint,
     (SELECT COUNT(*) FROM public.transactions WHERE status = 'completed')::bigint,
     (SELECT COUNT(*) FROM public.transactions WHERE status = 'pending')::bigint
   FROM public.transactions;

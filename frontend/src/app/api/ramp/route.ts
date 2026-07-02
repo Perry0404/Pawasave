@@ -659,7 +659,9 @@ async function runFlipeet(
           })
           await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: Number(cngnMicro) })
           await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
-          throw new Error('Withdrawal temporarily unavailable — your balance was refunded. Please try again shortly.')
+          const e: any = new Error(`Not enough settled cNGN to cover this withdrawal (have ${(Number(available) / 1e6).toFixed(2)}, need ${(Number(cngnMicro) / 1e6).toFixed(2)}) — your balance was refunded.`)
+          e.onChainFail = true
+          throw e
         }
 
         // Send cNGN from custody to Flipeet's dynamic address
@@ -672,11 +674,14 @@ async function runFlipeet(
 
         console.info('Flipeet off-ramp: sent cNGN on-chain', { reference, depositAddress, onChainTxHash })
       } catch (sendErr: unknown) {
-        // If the on-chain send fails, refund user and mark failed
+        // If the on-chain send fails, refund user and mark failed.
         console.error('Flipeet off-ramp on-chain transfer failed:', sendErr)
         await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: Math.floor(amount * 1_000_000) })
         await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
-        throw new Error('Failed to send withdrawal on-chain — balance refunded')
+        const reason = sendErr instanceof Error ? ((sendErr as any).shortMessage || sendErr.message) : String(sendErr)
+        const e: any = new Error(`Withdrawal couldn't be settled on-chain (${reason}). Your balance was refunded.`)
+        e.onChainFail = true
+        throw e
       }
     } else {
       // V2-MED-03: no deposit address means we can't settle on-chain. The user was
@@ -817,6 +822,12 @@ export async function POST(request: NextRequest) {
       if (type === 'off') {
         if (primaryErr?.message === 'INSUFFICIENT_BALANCE') {
           return NextResponse.json({ error: 'Insufficient balance for this withdrawal.' }, { status: 400 })
+        }
+        // On-chain settlement failures are our OWN custody errors (not a provider
+        // secret) and are actionable — surface the real reason instead of masking.
+        if (primaryErr?.onChainFail) {
+          console.error('Ramp off-ramp on-chain failure', { message: primaryErr?.message })
+          return NextResponse.json({ error: primaryErr.message }, { status: 422 })
         }
         const errMsg = formatProviderError(orderedProviders[0], primaryErr)
         console.error('Ramp off-ramp failure', { provider: orderedProviders[0], primaryErr })

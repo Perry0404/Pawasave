@@ -1,4 +1,4 @@
--- 034_fail_stale_withdrawals.sql
+-- 035_fail_stale_withdrawals.sql
 -- Mark ramp transactions that never completed as 'failed' (not stuck 'pending').
 --
 -- A serverless timeout (or any mid-flow death) can leave a ramp tx 'pending'

@@ -11,12 +11,15 @@
 import { ethers } from 'ethers'
 import { CONTRACTS, ADDRESSES, LEND_ABI, ERC20_ABI } from './contracts'
 import { getSecret } from './secrets'
-import { getBaseProvider } from './rpc-provider'
+import { getBaseProvider, getWriteProvider } from './rpc-provider'
 
 async function getSigner() {
   const key = await getSecret('CUSTODY_PRIVATE_KEY')
   if (!key) throw new Error('CUSTODY_PRIVATE_KEY not configured')
-  return new ethers.Wallet(key, getBaseProvider())
+  // Sign through a SINGLE RPC (not the FallbackProvider) so sequential custody
+  // txs — e.g. off-ramp's withdraw-from-pool then send-to-provider — get a
+  // consistent nonce and don't stall with funds stuck in custody.
+  return new ethers.Wallet(key, getWriteProvider())
 }
 
 const b = (v: unknown): bigint => BigInt(v as any ?? 0)

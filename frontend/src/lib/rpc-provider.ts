@@ -59,3 +59,21 @@ export function getBaseProvider(): ethers.AbstractProvider {
   }))
   return new ethers.FallbackProvider(configs, BASE_CHAIN_ID, { quorum: 1 })
 }
+
+/**
+ * A SINGLE reliable Base RPC for SIGNING transactions. FallbackProvider is great
+ * for resilient reads, but it races nonces across endpoints on SEQUENTIAL writes:
+ * a lagging RPC reports a stale transaction count, so the 2nd of two back-to-back
+ * txs (e.g. off-ramp: withdraw-from-pool THEN send-to-provider) reuses the 1st's
+ * nonce and silently fails — leaving funds stranded in custody. Signing through
+ * ONE endpoint gives a consistent, monotonic nonce. Use this for the custody
+ * signer; keep getBaseProvider() for reads.
+ */
+export function getWriteProvider(): ethers.JsonRpcProvider {
+  const url =
+    process.env.BASE_WRITE_RPC_URL ||
+    process.env.BASE_MAINNET_RPC_URL ||
+    process.env.NEXT_PUBLIC_BASE_RPC_URL ||
+    'https://base.publicnode.com'
+  return new ethers.JsonRpcProvider(url, BASE_CHAIN_ID)
+}

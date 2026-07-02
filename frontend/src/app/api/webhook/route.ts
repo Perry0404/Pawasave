@@ -134,6 +134,20 @@ export async function POST(request: NextRequest) {
         p_usdc_micro: cngnMicro,
       })
 
+      // Book the platform fee on ACTUAL completion so revenue reflects paid
+      // deposits only (the on-ramp initialise no longer records it). Idempotent:
+      // a retry finds the tx already non-pending and never reaches here again.
+      if (feeKobo > 0) {
+        await supabase.rpc('record_platform_fee', {
+          p_user_id: tx.user_id,
+          p_reference: tx.reference,
+          p_fee_type: 'ramp_onramp',
+          p_gross_kobo: Math.round(amountNaira * 100),
+          p_fee_kobo: feeKobo,
+          p_fee_percent: amountNaira > 0 ? Math.round((feeKobo / amountNaira) * 100) / 100 : 0,
+        })
+      }
+
       // Supply the on-ramped cNGN into PawasaveLend — the liquidity the pool
       // lends out. AWAIT it: on serverless, work fired AFTER the response is
       // returned gets killed, so a fire-and-forget supply never completes — and

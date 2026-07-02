@@ -345,10 +345,9 @@ async function runFlint(
     status: 'pending',
   })
 
-  await recordPlatformFee(
-    supabase, userId, reference, 'ramp_onramp',
-    Math.round(amount * 100), pawaFeeKobo, feePercent,
-  )
+  // Platform fee is booked on COMPLETION (in the Flint webhook), not here — a
+  // deposit that's only initialised (never paid) must not count as revenue.
+  void feePercent
 
   return {
     provider: 'flint',

@@ -667,9 +667,16 @@ async function runFlipeet(
         // Send cNGN from custody to Flipeet's dynamic address
         const onChainTxHash = await sendCngn(depositAddress, cngnMicro)
 
+        // Mark the withdrawal COMPLETED now. Sending cNGN to Flipeet's deposit
+        // address is the point of no return — PawaSave's side of the off-ramp is
+        // irrevocably done and the user's balance was already debited. Flipeet's
+        // callback isn't reliable for off-ramps (it often never fires), which used
+        // to leave settled withdrawals stuck 'pending' forever even after the bank
+        // was credited. The webhook's 'failed' path still refunds if Flipeet later
+        // reports a genuine failure.
         await supabase
           .from('transactions')
-          .update({ description: `Sent via Flipeet — on-chain: ${onChainTxHash}` })
+          .update({ status: 'completed', description: `Sent via Flipeet — on-chain: ${onChainTxHash}` })
           .eq('reference', reference)
 
         console.info('Flipeet off-ramp: sent cNGN on-chain', { reference, depositAddress, onChainTxHash })

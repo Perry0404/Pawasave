@@ -26,11 +26,16 @@ export const CONTRACTS = {
   USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as `0x${string}`,
 } as const
 
-/** Minimal ERC-20 ABI for approvals and balance checks */
+/** Minimal ERC-20 ABI for approvals, balance checks, and transfers */
 export const ERC20_ABI = [
   "function approve(address spender, uint256 amount) external returns (bool)",
   "function allowance(address owner, address spender) external view returns (uint256)",
   "function balanceOf(address account) external view returns (uint256)",
+  // transfer/transferFrom are REQUIRED for custody off-ramp sends. Their absence
+  // is why sendCngn() threw "transfer is not a function" and stranded withdrawals
+  // in custody — the redeem succeeded but the send to the provider could not run.
+  "function transfer(address to, uint256 amount) external returns (bool)",
+  "function transferFrom(address from, address to, uint256 amount) external returns (bool)",
   "function decimals() external view returns (uint8)",
   "function symbol() external view returns (string)",
 ] as const

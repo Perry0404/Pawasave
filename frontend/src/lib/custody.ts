@@ -11,7 +11,7 @@
 import { ethers } from 'ethers'
 import { CONTRACTS, ADDRESSES, LEND_ABI, ERC20_ABI } from './contracts'
 import { getSecret } from './secrets'
-import { getBaseProvider, getWriteProvider } from './rpc-provider'
+import { getWriteProvider, withBaseRead } from './rpc-provider'
 
 async function getSigner() {
   const key = await getSecret('CUSTODY_PRIVATE_KEY')
@@ -23,6 +23,24 @@ async function getSigner() {
 }
 
 const b = (v: unknown): bigint => BigInt(v as any ?? 0)
+
+// Public Base RPCs (mainnet.base.org, etc.) are load balancers over many nodes
+// with inconsistent state. ethers' default estimateGas preflight runs against
+// whichever node answers "latest" — which may lag a just-mined tx (e.g. an
+// approve), making the preflight revert ("insufficient allowance", "transfer
+// exceeds balance") even though the real tx would succeed against consensus.
+// Passing an explicit gasLimit skips that preflight so the tx goes straight to
+// the mempool and executes against real state. Base gas is fractions of a cent,
+// so generous headroom is free. (The durable fix is a paid, single-node RPC via
+// BASE_WRITE_RPC_URL — these caps just make public RPCs survivable.)
+const GAS = {
+  erc20Transfer: 120_000n,
+  approve:       120_000n,
+  supply:        500_000n,
+  withdraw:      500_000n,
+} as const
+
+const MAX_UINT256 = (1n << 256n) - 1n
 
 /**
  * The custody wallet address — where on-ramped cNGN is delivered and the wallet
@@ -42,7 +60,7 @@ export async function sendUsdc(to: string, amountUsdc: number): Promise<string> 
   const signer = await getSigner()
   const usdc    = new ethers.Contract(CONTRACTS.USDC, ERC20_ABI, signer)
   const micro   = BigInt(Math.floor(amountUsdc * 1_000_000))
-  const tx      = await usdc.transfer(to, micro)
+  const tx      = await usdc.transfer(to, micro, { gasLimit: GAS.erc20Transfer })
   const receipt = await tx.wait()
   return receipt.hash
 }
@@ -51,7 +69,7 @@ export async function sendUsdc(to: string, amountUsdc: number): Promise<string> 
 export async function sendCngn(to: string, cngnMicro: bigint): Promise<string> {
   const signer  = await getSigner()
   const cngn    = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, signer)
-  const tx      = await cngn.transfer(to, cngnMicro)
+  const tx      = await cngn.transfer(to, cngnMicro, { gasLimit: GAS.erc20Transfer })
   const receipt = await tx.wait()
   return receipt.hash
 }
@@ -65,11 +83,20 @@ export async function sendCngn(to: string, cngnMicro: bigint): Promise<string> {
 export async function supplyToLend(cngnMicro: bigint): Promise<{ txHash: string; shares: bigint }> {
   if (cngnMicro <= 0n) throw new Error('Zero supply amount')
   const signer = await getSigner()
+  const owner  = await signer.getAddress()
   const cngn   = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, signer)
   const lend   = new ethers.Contract(ADDRESSES.LEND, LEND_ABI, signer)
 
-  await (await cngn.approve(ADDRESSES.LEND, cngnMicro)).wait()
-  const tx      = await lend.supply(cngnMicro)
+  // Approve only when the standing allowance is short, and approve the MAX so
+  // future supplies never re-approve — that removes the approve→supply read-after
+  // -write race on public RPCs (the "insufficient allowance" revert) for every
+  // supply after the first. Wait a full confirmation so the approve is in a block
+  // before we submit supply (which skips its own estimateGas via GAS.supply).
+  const current = b(await cngn.allowance(owner, ADDRESSES.LEND))
+  if (current < cngnMicro) {
+    await (await cngn.approve(ADDRESSES.LEND, MAX_UINT256, { gasLimit: GAS.approve })).wait(1)
+  }
+  const tx      = await lend.supply(cngnMicro, { gasLimit: GAS.supply })
   const receipt = await tx.wait()
 
   const iface = new ethers.Interface([
@@ -95,7 +122,7 @@ export async function withdrawFromLend(shares: bigint): Promise<{ txHash: string
   const signer = await getSigner()
   const lend   = new ethers.Contract(ADDRESSES.LEND, LEND_ABI, signer)
 
-  const tx      = await lend.withdraw(shares)
+  const tx      = await lend.withdraw(shares, { gasLimit: GAS.withdraw })
   const receipt = await tx.wait()
 
   const iface = new ethers.Interface([
@@ -114,44 +141,48 @@ export async function withdrawFromLend(shares: bigint): Promise<{ txHash: string
 
 /** Current cNGN (micro) sitting free in the custody wallet (read-only). */
 export async function custodyCngnBalance(): Promise<bigint> {
-  const provider = getBaseProvider()
-  const cngn     = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, provider)
-  const cust     = process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address
-  return b(await cngn.balanceOf(cust))
+  const cust = process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address
+  // Read via withBaseRead (single endpoint at a time) — this runs inside the
+  // off-ramp critical path, where the FallbackProvider's "could not coalesce
+  // error" on simultaneously rate-limited public RPCs stranded funds mid-flow.
+  return withBaseRead(async (provider) => {
+    const cngn = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, provider)
+    return b(await cngn.balanceOf(cust))
+  })
 }
 
 /** Get current cNGN value of psNGN shares held by custody (read-only) */
 export async function custodyLendValue(): Promise<bigint> {
-  const provider = getBaseProvider()
-  const lend     = new ethers.Contract(ADDRESSES.LEND, LEND_ABI, provider)
-  const cust     = process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address
-
-  const [totalShares, totalAssets, custShares] = await Promise.all([
-    lend.totalSupply(),
-    lend.totalPoolAssets(),
-    lend.balanceOf(cust),
-  ])
-
-  const ts = b(totalShares)
-  if (ts === 0n) return 0n
-  return (b(custShares) * b(totalAssets)) / ts
+  const cust = process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address
+  return withBaseRead(async (provider) => {
+    const lend = new ethers.Contract(ADDRESSES.LEND, LEND_ABI, provider)
+    const [totalShares, totalAssets, custShares] = await Promise.all([
+      lend.totalSupply(),
+      lend.totalPoolAssets(),
+      lend.balanceOf(cust),
+    ])
+    const ts = b(totalShares)
+    if (ts === 0n) return 0n
+    return (b(custShares) * b(totalAssets)) / ts
+  })
 }
 
 /**
  * Calculate psNGN shares for a given cNGN withdrawal amount.
  * shares = cngnAmount * totalShares / totalPoolAssets
+ * Reads via withBaseRead — it feeds the off-ramp redeem, so an opaque
+ * FallbackProvider "coalesce" failure here must not strand the withdrawal.
  */
 export async function cngnToShares(cngnMicro: bigint): Promise<bigint> {
-  const provider = getBaseProvider()
-  const lend     = new ethers.Contract(ADDRESSES.LEND, LEND_ABI, provider)
-
-  const [totalShares, totalAssets] = await Promise.all([
-    lend.totalSupply(),
-    lend.totalPoolAssets(),
-  ])
-
-  const ts = b(totalShares)
-  const ta = b(totalAssets)
-  if (ta === 0n || ts === 0n) return cngnMicro // 1:1 fallback
-  return (cngnMicro * ts) / ta
+  return withBaseRead(async (provider) => {
+    const lend = new ethers.Contract(ADDRESSES.LEND, LEND_ABI, provider)
+    const [totalShares, totalAssets] = await Promise.all([
+      lend.totalSupply(),
+      lend.totalPoolAssets(),
+    ])
+    const ts = b(totalShares)
+    const ta = b(totalAssets)
+    if (ta === 0n || ts === 0n) return cngnMicro // 1:1 fallback
+    return (cngnMicro * ts) / ta
+  })
 }

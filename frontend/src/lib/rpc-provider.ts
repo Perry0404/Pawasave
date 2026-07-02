@@ -77,3 +77,34 @@ export function getWriteProvider(): ethers.JsonRpcProvider {
     'https://base.publicnode.com'
   return new ethers.JsonRpcProvider(url, BASE_CHAIN_ID)
 }
+
+/**
+ * Run a Base read, trying each configured RPC in turn with its OWN single-endpoint
+ * provider, returning the first success.
+ *
+ * Why not just use getBaseProvider() (FallbackProvider)? When every configured
+ * endpoint is a public one (mainnet.base.org, publicnode, llamarpc, …) they all
+ * rate-limit at the same time, and ethers' FallbackProvider can't reconcile the
+ * simultaneous errors — it throws an opaque "could not coalesce error" (UNKNOWN_ERROR)
+ * that stranded the off-ramp mid-flow. Trying one clean provider at a time instead
+ * (a) never coalesces, so a genuine revert surfaces as a real "execution reverted"
+ * message, and (b) is gentler on rate limits than hammering all endpoints at once.
+ * Two passes cover a transient 429 on the first sweep.
+ */
+export async function withBaseRead<T>(
+  fn: (provider: ethers.JsonRpcProvider) => Promise<T>,
+  passes = 2,
+): Promise<T> {
+  const urls = baseRpcUrls()
+  let lastErr: unknown
+  for (let pass = 0; pass < passes; pass++) {
+    for (const url of urls) {
+      try {
+        return await fn(new ethers.JsonRpcProvider(url, BASE_CHAIN_ID))
+      } catch (err) {
+        lastErr = err
+      }
+    }
+  }
+  throw lastErr ?? new Error('All Base RPC endpoints failed')
+}

@@ -4,6 +4,10 @@ import crypto from 'crypto'
 import { ngnToCngnMicro } from '@/lib/ramp-rate'
 import { supplyToLend } from '@/lib/custody'
 
+// Deposit webhooks supply cNGN into PawasaveLend on-chain (a tx + confirmation);
+// give it headroom over the default serverless timeout.
+export const maxDuration = 60
+
 function readString(...values: unknown[]) {
   for (const value of values) {
     if (typeof value === 'string' && value.trim()) return value.trim()

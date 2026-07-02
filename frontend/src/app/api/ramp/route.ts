@@ -14,6 +14,12 @@ import { sendCngn, cngnToShares, withdrawFromLend, custodyCngnBalance, custodyAd
 import { createClient } from '@supabase/supabase-js'
 import { verifyPin } from '@/lib/pin-hash'
 
+// Off-ramp does a Flipeet API call + TWO sequential Base txs (redeem from the
+// pool, then send cNGN to Flipeet), each awaiting confirmation. That can exceed
+// the default serverless timeout and strand funds mid-flow (redeemed to custody
+// but never sent to Flipeet). Give the request room to finish both on-chain legs.
+export const maxDuration = 60
+
 const FLINT_API_KEY = process.env.FLINT_API_KEY || ''
 const FLINT_BASE = 'https://stables.flintapi.io/v1'
 // Custody address where on-ramped cNGN is received. Shared across providers.

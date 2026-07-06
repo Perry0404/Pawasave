@@ -6,19 +6,22 @@ import { isAuthorisedAdmin } from '@/lib/admin-session'
  * POST /api/admin/reconcile-withdrawals
  * Admin-only. Fixes off-ramp withdrawals stuck in 'pending'.
  *
- * An off-ramp that reached the on-chain send ("… on-chain: 0x…" in the
- * description) has irrevocably delivered cNGN to the provider — that's the point
- * of no return, so it is COMPLETED. New off-ramps mark themselves completed at
- * send time (see ramp/route.ts), but ones settled BEFORE that fix, or whose
- * Flipeet callback never fired, sit 'pending' forever. Mark them completed so the
- * app and the admin transaction-volume numbers reflect reality.
+ * Modes (body):
+ *   {}                        → complete every pending withdrawal that carries an
+ *                               on-chain send hash ("… on-chain: 0x…"); those have
+ *                               irrevocably delivered cNGN to the provider.
+ *   { markRecentPending: N }  → complete the N most-recent pending withdrawals,
+ *                               regardless of description (operator asserts they
+ *                               settled to the bank). Use when the description
+ *                               update never landed so the on-chain marker is absent.
+ *   { references: [ ... ] }   → complete these exact references.
  *
- * Body: { password? }
+ * Always returns the current pending withdrawals so the operator can see state.
  */
 export const maxDuration = 30
 
 export async function POST(request: NextRequest) {
-  let body: { password?: string } = {}
+  let body: { password?: string; markRecentPending?: number; references?: string[] } = {}
   try { body = await request.json() } catch { /* no body */ }
 
   if (!process.env.ADMIN_PASSWORD || !isAuthorisedAdmin(request, body.password)) {
@@ -34,25 +37,57 @@ export async function POST(request: NextRequest) {
     { auth: { persistSession: false } },
   )
 
-  // Only complete withdrawals that actually settled on-chain — never a bare
-  // 'pending' with no send (that's a genuine failure the reconcile cron refunds).
-  const { data, error } = await supabase
+  // Snapshot the pending withdrawals up front (for visibility + recent-N mode).
+  const { data: pending } = await supabase
     .from('transactions')
-    .update({ status: 'completed' })
+    .select('id, reference, amount_kobo, description, created_at')
     .eq('type', 'withdrawal')
     .eq('status', 'pending')
-    .like('description', '%on-chain:%')
-    .select('id, reference, amount_kobo, description')
+    .order('created_at', { ascending: false })
+    .limit(20)
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  let completed: any[] = []
+
+  if (Array.isArray(body.references) && body.references.length) {
+    const { data, error } = await supabase
+      .from('transactions')
+      .update({ status: 'completed' })
+      .eq('type', 'withdrawal').eq('status', 'pending')
+      .in('reference', body.references)
+      .select('id, reference, amount_kobo')
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    completed = data ?? []
+  } else if (typeof body.markRecentPending === 'number' && body.markRecentPending > 0) {
+    const ids = (pending ?? []).slice(0, body.markRecentPending).map((r) => r.id)
+    if (ids.length) {
+      const { data, error } = await supabase
+        .from('transactions')
+        .update({ status: 'completed' })
+        .in('id', ids)
+        .select('id, reference, amount_kobo')
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      completed = data ?? []
+    }
+  } else {
+    // Default: complete only withdrawals that actually settled on-chain.
+    const { data, error } = await supabase
+      .from('transactions')
+      .update({ status: 'completed' })
+      .eq('type', 'withdrawal').eq('status', 'pending')
+      .like('description', '%on-chain:%')
+      .select('id, reference, amount_kobo')
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    completed = data ?? []
   }
 
   return NextResponse.json({
-    completed: data?.length ?? 0,
-    withdrawals: (data ?? []).map((r) => ({
+    completed: completed.length,
+    completedRefs: completed.map((r) => ({ reference: r.reference, naira: Number(r.amount_kobo) / 100 })),
+    pendingBefore: (pending ?? []).map((r) => ({
       reference: r.reference,
       naira: Number(r.amount_kobo) / 100,
+      description: r.description,
+      created_at: r.created_at,
     })),
   })
 }

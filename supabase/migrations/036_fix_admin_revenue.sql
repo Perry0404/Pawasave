@@ -26,7 +26,7 @@ BEGIN;
 --    so future operator payouts are properly ledgered and net out of the counter.
 ALTER TABLE public.platform_fees DROP CONSTRAINT IF EXISTS platform_fees_fee_type_check;
 ALTER TABLE public.platform_fees ADD CONSTRAINT platform_fees_fee_type_check
-  CHECK (fee_type IN ('ramp_onramp', 'ramp_offramp', 'vault_lock_penalty', 'admin_revenue_withdrawal'));
+  CHECK (fee_type IN ('ramp_onramp', 'ramp_offramp', 'vault_lock_penalty', 'admin_revenue_withdrawal', 'esusu_penalty'));
 
 -- 2) Off-ramp withdrawals that were already settled on-chain (cNGN sent to the
 --    provider) but left 'pending' because Flipeet's callback never fired — the fiat
@@ -82,12 +82,12 @@ BEGIN
     COALESCE(SUM(fee_amount_kobo), 0)::bigint,
     COALESCE(SUM(CASE WHEN fee_type = 'ramp_onramp' THEN fee_amount_kobo ELSE 0 END), 0)::bigint,
     COALESCE(SUM(CASE WHEN fee_type = 'ramp_offramp' THEN fee_amount_kobo ELSE 0 END), 0)::bigint,
-    COALESCE(SUM(CASE WHEN fee_type = 'vault_lock_penalty' THEN fee_amount_kobo ELSE 0 END), 0)::bigint,
+    COALESCE(SUM(CASE WHEN fee_type IN ('vault_lock_penalty', 'esusu_penalty') THEN fee_amount_kobo ELSE 0 END), 0)::bigint,
     COUNT(*)::bigint,
     COALESCE(SUM(CASE WHEN created_at::date = current_date THEN fee_amount_kobo ELSE 0 END), 0)::bigint,
     COALESCE(SUM(CASE WHEN date_trunc('month', created_at) = date_trunc('month', current_date) THEN fee_amount_kobo ELSE 0 END), 0)::bigint
   FROM public.platform_fees
-  WHERE fee_type IN ('ramp_onramp', 'ramp_offramp', 'vault_lock_penalty');
+  WHERE fee_type IN ('ramp_onramp', 'ramp_offramp', 'vault_lock_penalty', 'esusu_penalty');
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -154,7 +154,7 @@ BEGIN
   SELECT f.id, f.user_id, f.transaction_ref, f.fee_type,
          f.gross_amount_kobo, f.fee_amount_kobo, f.fee_percent, f.created_at
   FROM public.platform_fees f
-  WHERE f.fee_type IN ('ramp_onramp', 'ramp_offramp', 'vault_lock_penalty')
+  WHERE f.fee_type IN ('ramp_onramp', 'ramp_offramp', 'vault_lock_penalty', 'esusu_penalty')
   ORDER BY f.created_at DESC
   LIMIT p_limit;
 END;

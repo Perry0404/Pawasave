@@ -664,6 +664,16 @@ async function runFlipeet(
           throw e
         }
 
+        // Write an on-chain marker BEFORE sending. If the serverless function dies
+        // after the send confirms but before we can record the hash, the stale-
+        // transaction reconciler must see this marker and NOT refund money that has
+        // already left custody (that false-refund is what inflated a user's balance
+        // when a delivered ₦28k off-ramp got marked failed + refunded).
+        await supabase
+          .from('transactions')
+          .update({ description: `Sent via Flipeet — on-chain: settling → ${depositAddress}` })
+          .eq('reference', reference)
+
         // Send cNGN from custody to Flipeet's dynamic address
         const onChainTxHash = await sendCngn(depositAddress, cngnMicro)
 

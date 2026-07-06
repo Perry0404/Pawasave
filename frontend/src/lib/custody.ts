@@ -65,13 +65,20 @@ export async function sendUsdc(to: string, amountUsdc: number): Promise<string> 
   return receipt.hash
 }
 
-/** Send cNGN from custody to an address (used for Flipeet off-ramp with cNGN) */
+/**
+ * Send cNGN from custody to an address (used for Flipeet off-ramp with cNGN).
+ * Returns the tx hash as soon as the transfer is BROADCAST — it does NOT block on
+ * confirmation. Waiting for the receipt (5s+ on a slow public RPC) is what pushed
+ * the off-ramp request past its serverless timeout, so the DB "completed" update
+ * never ran and delivered withdrawals sat stuck on 'pending'. The tx is already in
+ * the mempool and will mine on its own even after the function returns; custody's
+ * balance is verified before this is called, and gas is fixed, so it won't revert.
+ */
 export async function sendCngn(to: string, cngnMicro: bigint): Promise<string> {
-  const signer  = await getSigner()
-  const cngn    = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, signer)
-  const tx      = await cngn.transfer(to, cngnMicro, { gasLimit: GAS.erc20Transfer })
-  const receipt = await tx.wait()
-  return receipt.hash
+  const signer = await getSigner()
+  const cngn   = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, signer)
+  const tx     = await cngn.transfer(to, cngnMicro, { gasLimit: GAS.erc20Transfer })
+  return tx.hash
 }
 
 // ── PawasaveLend interactions ────────────────────────────────────────────────

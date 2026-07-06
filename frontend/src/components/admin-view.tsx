@@ -305,6 +305,16 @@ export default function AdminView() {
             <span className="text-slate-500">Vault Saves</span>
             <span className="font-semibold text-blue-600">{formatNaira(volume?.total_vault_saves_kobo || 0)}</span>
           </div>
+          <div className="flex justify-between pt-2.5 mt-0.5 border-t border-slate-200">
+            <span className="font-semibold text-slate-700">Total Volume</span>
+            <span className="font-bold text-slate-900">
+              {formatNaira(
+                (volume?.total_deposits_kobo || 0)
+                + (volume?.total_withdrawals_kobo || 0)
+                + (volume?.total_vault_saves_kobo || 0),
+              )}
+            </span>
+          </div>
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth, useProfile, useWallet, useTransactions } from '@/hooks/use-data'
 import HomeView from './home-view'
 import GroupsView from './groups-view'
@@ -45,6 +45,19 @@ export default function AppShell() {
   const [settingsFeedback, setSettingsFeedback] = useState('')
 
   const refresh = async () => { await Promise.all([refreshWallet(), refreshTx()]) }
+
+  // A deposit/withdrawal settles a few seconds after it's initiated, but the app
+  // wouldn't re-fetch, so it sat on "Pending" until a manual reload. Poll while any
+  // deposit/withdrawal is still pending and stop once everything has resolved.
+  const hasPendingRamp = transactions.some(
+    (t) => t.status === 'pending' && (t.type === 'deposit' || t.type === 'withdrawal'),
+  )
+  useEffect(() => {
+    if (!hasPendingRamp) return
+    const id = setInterval(() => { refresh() }, 8000)
+    return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasPendingRamp])
 
   const gradients = {
     mint: 'from-emerald-600 via-teal-700 to-slate-900',

@@ -87,6 +87,18 @@ export async function GET(request: NextRequest) {
     lendSupplies = { error: e instanceof Error ? e.message : String(e) }
   }
 
-  console.log('Auto-contribute result:', data, 'lend supplies:', lendSupplies)
-  return NextResponse.json({ ok: true, result: data, lendSupplies })
+  // Esusu defaulter handling: auto-debit members who haven't paid past the grace
+  // window, cover any shortfall from the group's emergency pot (recovered later
+  // from that member's payout), and pay out cycles that are now complete. Runs on
+  // the same daily schedule — no separate Vercel cron. Best-effort.
+  let esusu: Record<string, unknown> = {}
+  try {
+    const { data: e } = await supabase.rpc('esusu_autodebit', { p_grace_hours: 24 })
+    esusu = (e as Record<string, unknown>) ?? {}
+  } catch (e: unknown) {
+    esusu = { error: e instanceof Error ? e.message : String(e) }
+  }
+
+  console.log('Auto-contribute result:', data, 'lend supplies:', lendSupplies, 'esusu:', esusu)
+  return NextResponse.json({ ok: true, result: data, lendSupplies, esusu })
 }

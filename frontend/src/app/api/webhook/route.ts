@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
 import { ngnToCngnMicro, koboToCngnMicro } from '@/lib/ramp-rate'
-import { supplyToLend } from '@/lib/custody'
 
-// The deposit path supplies cNGN into PawasaveLend on-chain (approve + supply,
-// two txs). Await it inline (see below), so give the request room to finish.
+// Deposit path is DB-only now (deposits stay as spendable custody cNGN — no
+// on-chain PawasaveLend supply until a real yield source is live). maxDuration
+// kept generous for headroom.
 export const maxDuration = 60
 
 const WEBHOOK_SECRET = process.env.FLINT_WEBHOOK_SECRET || ''
@@ -129,10 +129,11 @@ export async function POST(request: NextRequest) {
         .update({ amount_usdc_micro: cngnMicro })
         .eq('id', tx.id)
 
-      await supabase.rpc('allocate_cngn_pool', {
-        p_user_id: tx.user_id,
-        p_usdc_micro: cngnMicro,
-      })
+      // Deposits land 100% spendable in custody (like crypto deposits): no 90%
+      // pool auto-allocation and no PawasaveLend supply until a real yield source
+      // exists. The pool earns 0 without borrowers, and auto-supply added the
+      // share-accounting that broke off-ramps. Withdrawals settle from raw custody
+      // cNGN. Re-enable ONE unified supply for all flexible balances when yield is real.
 
       // Book the platform fee on ACTUAL completion so revenue reflects paid
       // deposits only (the on-ramp initialise no longer records it). Idempotent:
@@ -148,31 +149,8 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      // Supply the on-ramped cNGN into PawasaveLend — the liquidity the pool
-      // lends out. AWAIT it: on serverless, work fired AFTER the response is
-      // returned gets killed, so a fire-and-forget supply never completes — and
-      // its retry-enqueue never runs either — leaving cNGN stranded in custody.
-      // If the on-chain supply fails, enqueue synchronously so the auto-contribute
-      // cron retries it (V2-MED-06).
-      if (cngnMicro > 0) {
-        try {
-          const { txHash, shares } = await supplyToLend(BigInt(cngnMicro))
-          console.info(`[flint] Supplied ${cngnMicro} cNGN to PawasaveLend — tx: ${txHash}, shares: ${shares}`)
-          await supabase.from('flexible_pool_positions').upsert({
-            user_id: tx.user_id,
-            cngn_deposited_micro: cngnMicro,
-            last_supply_tx: txHash,
-          }, { onConflict: 'user_id', ignoreDuplicates: false })
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err)
-          console.warn('[flint] PawasaveLend supply failed — queued for retry:', msg)
-          await supabase.rpc('enqueue_lend_supply', {
-            p_user_id: tx.user_id,
-            p_cngn_micro: cngnMicro,
-            p_error: msg.slice(0, 500),
-          })
-        }
-      }
+      // (PawasaveLend supply intentionally removed — see note above. Deposits stay
+      // as spendable custody cNGN; re-enable a unified supply when yield is real.)
     }
     // For withdrawal: balance was already debited upfront, nothing more needed
   } else if (isFailed) {

@@ -2,10 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
 import { ngnToCngnMicro } from '@/lib/ramp-rate'
-import { supplyToLend } from '@/lib/custody'
 
-// Deposit webhooks supply cNGN into PawasaveLend on-chain (a tx + confirmation);
-// give it headroom over the default serverless timeout.
+// Deposits are DB-only now (spendable custody cNGN — no on-chain PawasaveLend
+// supply until a real yield source is live). maxDuration kept for headroom.
 export const maxDuration = 60
 
 function readString(...values: unknown[]) {
@@ -198,34 +197,10 @@ export async function POST(request: NextRequest) {
         .update({ amount_usdc_micro: cngnMicro })
         .eq('id', tx.id)
 
-      await supabase.rpc('allocate_cngn_pool', {
-        p_user_id: tx.user_id,
-        p_usdc_micro: cngnMicro,
-      })
-
-      // Supply cNGN to PawasaveLend for yield (flexible savings). AWAIT it —
-      // fire-and-forget work after the response is killed on serverless, so the
-      // supply (and its retry-enqueue) never runs, stranding cNGN in custody.
-      // On failure, enqueue synchronously so the auto-contribute cron retries.
-      if (cngnMicro > 0) {
-        try {
-          const { txHash, shares } = await supplyToLend(BigInt(cngnMicro))
-          console.info(`Supplied ${cngnMicro} cNGN to PawasaveLend — tx: ${txHash}, shares: ${shares}`)
-          await supabase.from('flexible_pool_positions').upsert({
-            user_id: tx.user_id,
-            cngn_deposited_micro: cngnMicro,
-            last_supply_tx: txHash,
-          }, { onConflict: 'user_id', ignoreDuplicates: false })
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err)
-          console.warn('PawasaveLend supply failed — queued for retry:', msg)
-          await supabase.rpc('enqueue_lend_supply', {
-            p_user_id: tx.user_id,
-            p_cngn_micro: cngnMicro,
-            p_error: msg.slice(0, 500),
-          })
-        }
-      }
+      // Deposits land 100% spendable in custody (like crypto deposits): no pool
+      // auto-allocation and no PawasaveLend supply until a real yield source exists.
+      // Withdrawals settle from raw custody cNGN. (Flipeet is off-ramp-only today,
+      // so this deposit branch is effectively dormant — kept consistent regardless.)
     }
   } else if (isFailedStatus(status)) {
     await supabase

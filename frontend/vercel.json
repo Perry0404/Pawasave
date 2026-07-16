@@ -35,6 +35,10 @@
     {
       "path": "/api/cron/sweep-deposits",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/reconcile-withdrawals",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

@@ -13,6 +13,7 @@ import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
 import { sendCngn, cngnToShares, withdrawFromLend, custodyCngnBalance, custodyAddress } from '@/lib/custody'
 import { createClient } from '@supabase/supabase-js'
 import { verifyPin } from '@/lib/pin-hash'
+import { custodyLendShares } from '@/lib/custody'
 
 // Off-ramp does a Flipeet API call + TWO sequential Base txs (redeem from the
 // pool, then send cNGN to Flipeet), each awaiting confirmation. That can exceed
@@ -635,24 +636,39 @@ async function runFlipeet(
         // First pull from PawasaveLend if needed, then send to Flipeet
         const cngnMicro = BigInt(Math.floor(amount * 1_000_000))
 
-        // Release the yield-bearing position: redeem enough psNGN shares to cover
-        // the payout. withdrawFromLend returns the cNGN actually realised, which
-        // can be less than requested if the pool exchange rate moved or on rounding.
-        const shares = await cngnToShares(cngnMicro)
-        if (shares > 0n) {
-          const { cngnMicro: realised } = await withdrawFromLend(shares)
-          if (realised < cngnMicro) {
-            console.warn('Flipeet off-ramp: lend withdrawal short of payout', {
-              reference, requested: cngnMicro.toString(), realised: realised.toString(),
-            })
+        // Pay from custody's RAW cNGN when it already covers the payout, and only
+        // tap PawasaveLend for the shortfall — redeeming at most the psNGN shares
+        // custody actually holds. Deposits sit in custody as raw cNGN until they're
+        // supplied to the pool, so custody usually holds FEWER shares than the DB
+        // pool balance implies; the old code always redeemed shares sized to the
+        // FULL payout, so lend.withdraw reverted "Insufficient shares" and aborted a
+        // withdrawal the raw balance could have settled. Pool redemption is best-effort.
+        let available = await custodyCngnBalance()
+        if (available < cngnMicro) {
+          const custShares = await custodyLendShares()
+          if (custShares > 0n) {
+            const wantShares = await cngnToShares(cngnMicro - available)
+            const redeem     = wantShares < custShares ? wantShares : custShares
+            if (redeem > 0n) {
+              try {
+                const { cngnMicro: realised } = await withdrawFromLend(redeem)
+                console.info('Flipeet off-ramp: redeemed pool shortfall', {
+                  reference, redeem: redeem.toString(), realised: realised.toString(),
+                })
+              } catch (poolErr: unknown) {
+                console.warn('Flipeet off-ramp: pool redemption failed, using raw custody cNGN', {
+                  reference, err: poolErr instanceof Error ? poolErr.message : String(poolErr),
+                })
+              }
+              available = await custodyCngnBalance()
+            }
           }
         }
 
-        // V2-MED-05: never send more cNGN than custody actually holds. If the lend
+        // V2-MED-05: never send more cNGN than custody actually holds. If the pool
         // redemption came up short and the custody float can't cover the gap, refund
         // and fail cleanly rather than over-drawing the shared float (or reverting
         // deep inside the ERC-20 transfer and leaking gas).
-        const available = await custodyCngnBalance()
         if (available < cngnMicro) {
           console.error('Flipeet off-ramp: custody cNGN shortfall', {
             reference, needed: cngnMicro.toString(), available: available.toString(),

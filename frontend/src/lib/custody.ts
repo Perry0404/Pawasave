@@ -174,6 +174,15 @@ export async function custodyLendValue(): Promise<bigint> {
   })
 }
 
+/** psNGN (Lend) shares currently held by custody (read-only). */
+export async function custodyLendShares(): Promise<bigint> {
+  const cust = process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address
+  return withBaseRead(async (provider) => {
+    const lend = new ethers.Contract(ADDRESSES.LEND, LEND_ABI, provider)
+    return b(await lend.balanceOf(cust))
+  })
+}
+
 /**
  * Calculate psNGN shares for a given cNGN withdrawal amount.
  * shares = cngnAmount * totalShares / totalPoolAssets

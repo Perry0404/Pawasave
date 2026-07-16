@@ -97,6 +97,22 @@ export function shortAddr(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
 }
 
+/**
+ * Strip internal engineering markers from a transaction description before showing
+ * it to a user. The `description` column doubles as an audit/reconciliation trail:
+ * the off-ramp writes " — on-chain: 0x…"/" — on-chain: settling → 0x…" onto it, and
+ * the reconciler appends "[reconciled: …]"/"[manual: …]" tags. Those are internal —
+ * customers should just see "Sent via Flipeet", not the hash or the audit note.
+ * (The raw column is untouched; only the rendered text is cleaned.)
+ */
+export function cleanDescription(desc?: string | null): string {
+  if (!desc) return ''
+  return desc
+    .replace(/\s*[—-]\s*on-chain:.*$/i, '') // drop the on-chain hash / settling suffix
+    .replace(/(\s*\[[^\]]*\])+\s*$/g, '')   // drop one or more trailing [audit] tags
+    .trim()
+}
+
 // ── Time ───────────────────────────────────────────────────────────────────────
 export function timeAgo(ts: string | number): string {
   const date = typeof ts === 'string' ? new Date(ts).getTime() : ts

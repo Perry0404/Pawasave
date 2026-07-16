@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { formatNaira, microUsdcToKobo, getRate, timeAgo } from '@/lib/format'
+import { formatNaira, microUsdcToKobo, getRate, timeAgo, cleanDescription } from '@/lib/format'
 import { initiateDeposit, initiateWithdrawal, getBanks, type RampResult, type Bank } from '@/lib/flint'
 import { talkback } from '@/lib/voice'
 import { ArrowUpRight, ArrowDownLeft, Vault, TrendingUp, Wallet, Plus, Minus, CreditCard, Loader2, ArrowLeft, Copy, Check, ChevronDown, Building2 } from 'lucide-react'
@@ -592,7 +592,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
                   {tx.direction === 'credit' ? <Plus className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-slate-800 truncate">{tx.description}</p>
+                  <p className="text-sm text-slate-800 truncate">{cleanDescription(tx.description)}</p>
                   <p className="text-[11px] text-slate-400">
                     {timeAgo(tx.created_at)}
                     {tx.status === 'pending' && <span className="ml-1 text-amber-500 font-medium">pending</span>}

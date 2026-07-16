@@ -13,11 +13,14 @@
  *   2. transfer its full cNGN balance → DEPOSIT_SWEEP_DESTINATION
  *
  * Required env:
- *   DEPOSIT_SWEEP_DESTINATION       — address to receive funds. Use a COLD address
- *                                     (hardware wallet / Safe) for best security.
  *   DEPOSIT_WALLET_MNEMONIC, BASE_MAINNET_RPC_URL, SUPABASE_SERVICE_ROLE_KEY,
  *   NEXT_PUBLIC_SUPABASE_URL
  * Optional env:
+ *   DEPOSIT_SWEEP_DESTINATION       — address to receive funds. DEFAULTS to the
+ *                                     custody wallet (custodyAddress()) so swept
+ *                                     deposits fund off-ramps. Override with a COLD
+ *                                     address (hardware wallet / Safe) for extra
+ *                                     security — but then top up custody separately.
  *   DEPOSIT_GAS_FUNDER_PRIVATE_KEY  — hot key paying gas top-ups (defaults to
  *                                     CUSTODY_PRIVATE_KEY)
  *   DEPOSIT_SWEEP_MIN_CNGN          — micro-cNGN floor to bother sweeping (default 100 cNGN)
@@ -27,6 +30,7 @@ import { ethers } from "ethers"
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { CONTRACTS } from "./contracts"
 import { deriveDepositSigner, depositWalletConfigured } from "./deposit-wallet"
+import { custodyAddress } from "./custody"
 import { getSecret } from "./secrets"
 import { getBaseProvider } from "./rpc-provider"
 
@@ -62,9 +66,13 @@ export async function sweepDeposits(): Promise<{
   if (!(await depositWalletConfigured())) throw new Error("DEPOSIT_WALLET_MNEMONIC not configured")
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY not configured")
 
-  const destination = process.env.DEPOSIT_SWEEP_DESTINATION
+  // Default to the custody wallet — where Flint on-ramps are delivered and where
+  // off-ramps draw cNGN from — so crypto deposits actually fund withdrawals.
+  // Sweeping still empties the hot HD deposit addresses (CRIT-03) regardless of
+  // destination; override with a cold address only if you top custody up elsewhere.
+  const destination = process.env.DEPOSIT_SWEEP_DESTINATION || (await custodyAddress())
   if (!destination || !ethers.isAddress(destination)) {
-    throw new Error("DEPOSIT_SWEEP_DESTINATION not set or invalid")
+    throw new Error("Sweep destination unresolved — set DEPOSIT_SWEEP_DESTINATION or CUSTODY_PRIVATE_KEY")
   }
   const funderKey = (await getSecret("DEPOSIT_GAS_FUNDER_PRIVATE_KEY")) || (await getSecret("CUSTODY_PRIVATE_KEY"))
   if (!funderKey || funderKey === "0x") {

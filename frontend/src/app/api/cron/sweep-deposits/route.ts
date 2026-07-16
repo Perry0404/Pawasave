@@ -45,14 +45,12 @@ export async function GET(request: NextRequest) {
   const auth = checkCronAuth(request)
   if (auth) return auth
 
-  // Always reconcile stale ramp txs — independent of the sweep, so it runs even
-  // when DEPOSIT_SWEEP_DESTINATION isn't configured.
+  // Always reconcile stale ramp txs — independent of the sweep.
   const reconcile = await reconcileStale()
 
-  if (!process.env.DEPOSIT_SWEEP_DESTINATION) {
-    return NextResponse.json({ ok: true, skipped: true, reason: 'DEPOSIT_SWEEP_DESTINATION not set', reconcile })
-  }
-
+  // Sweep always runs now: sweepDeposits() defaults its destination to the custody
+  // wallet when DEPOSIT_SWEEP_DESTINATION isn't set, so crypto deposits reach
+  // custody (and can fund off-ramps) without extra config.
   try {
     const res = await sweepDeposits()
     return NextResponse.json({ ok: true, ...res, reconcile })

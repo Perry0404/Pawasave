@@ -189,8 +189,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
 
         <button
           onClick={() => setView('deposit')}
-          disabled={checking || nairaDown}
-          className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 mb-3 flex items-start gap-3 transition active:scale-[0.99] disabled:opacity-75 disabled:active:scale-100"
+          className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 mb-3 flex items-start gap-3 transition active:scale-[0.99]"
         >
           <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
             <Building2 className="w-5 h-5 text-emerald-600" />
@@ -200,9 +199,12 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
             <p className="text-xs text-slate-400 mt-0.5">Send ₦ from your bank account. Minimum ₦2,000.</p>
             {checking && <p className="text-[11px] text-slate-400 mt-1.5">Checking availability…</p>}
             {nairaDown && (
-              <span className="inline-block mt-2 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
-                Temporarily unavailable{rampStatus?.naira.reason ? ' — ' + rampStatus.naira.reason : ''}
-              </span>
+              <>
+                <span className="inline-block mt-2 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                  Temporarily unavailable{rampStatus?.naira.reason ? ' — ' + rampStatus.naira.reason : ''}
+                </span>
+                <p className="text-[11px] text-slate-400 mt-1.5">Tap to try anyway — it may be back up.</p>
+              </>
             )}
           </div>
         </button>
@@ -601,29 +603,6 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           <span>Savings held in cNGN · 1 cNGN = ₦1</span>
         </div>
       </div>
-
-      {/* Personal Deposit Address — fund with cNGN instead of fiat */}
-      {depositAddr && (
-        <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 mt-3">
-          <div className="flex items-center justify-between mb-1.5">
-            <p className="text-[11px] text-slate-500 font-medium">Your cNGN Deposit Address (Base)</p>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(depositAddr)
-                setAddrCopied(true)
-                setTimeout(() => setAddrCopied(false), 2000)
-              }}
-              className="text-emerald-600 hover:text-emerald-700 transition p-0.5"
-            >
-              {addrCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-          <code className="text-xs text-slate-700 break-all leading-relaxed">{depositAddr}</code>
-          <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
-            Send <span className="font-semibold text-slate-600">cNGN on Base</span> only. Your balance updates automatically once the transfer confirms.
-          </p>
-        </div>
-      )}
 
       {/* Quick Actions */}
       <div className="grid grid-cols-3 gap-3 mt-5">

@@ -8,7 +8,10 @@ import { ArrowUpRight, ArrowDownLeft, Vault, TrendingUp, Wallet, Plus, Minus, Cr
 import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
-type View = 'main' | 'deposit' | 'deposit-info' | 'withdraw'
+type View = 'main' | 'deposit-choose' | 'deposit' | 'deposit-crypto' | 'deposit-info' | 'withdraw'
+
+/** Live availability of each deposit rail (from /api/ramp/status). */
+type RampStatus = { naira: { available: boolean; reason?: string }; crypto?: { available: boolean } }
 
 interface Props {
   wallet: WalletType | null
@@ -30,6 +33,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   const [addrCopied, setAddrCopied] = useState(false)
   const [liveRate, setLiveRate] = useState<number>(getRate())
   const [depositAddr, setDepositAddr] = useState<string | null>(wallet?.deposit_address ?? null)
+  const [rampStatus, setRampStatus] = useState<RampStatus | null>(null)
 
   // Withdraw state
   const [banks, setBanks] = useState<Bank[]>([])
@@ -59,6 +63,15 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           setLiveRate(Number(data.rate))
         }
       })
+      .catch(() => undefined)
+  }, [])
+
+  // Ask whether the fiat (naira) rail is actually usable, so the Receive screen
+  // can show it as "temporarily unavailable" instead of hiding it on an outage.
+  useEffect(() => {
+    fetch('/api/ramp/status')
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => { if (data?.naira) setRampStatus(data as RampStatus) })
       .catch(() => undefined)
   }, [])
 
@@ -105,14 +118,12 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
       talkback('deposit_init', profile?.display_name || user?.email || 'Chief',
         `₦${val.toLocaleString('en-NG')}`)
     } catch (e: any) {
-      // Fiat bank-ramp unavailable → fall back to a cNGN deposit (send cNGN to
-      // the user's own Base address, auto-credited 1:1 by the deposit scanner).
-      if (depositAddr) {
-        setDepositInfo({} as RampResult)
-        setView('deposit-info')
-      } else {
-        flash(e?.message || 'Deposit failed')
-      }
+      // Never silently swap to the crypto address: that made a provider outage
+      // look like the naira option had been removed. Mark the rail down, say why,
+      // and return to the chooser so the user can pick crypto deliberately.
+      setRampStatus({ naira: { available: false, reason: 'Our bank partner is currently unavailable' } })
+      setView('deposit-choose')
+      flash(e?.message || 'Naira deposit is temporarily unavailable — you can deposit crypto instead.')
     } finally {
       setBusy(false)
     }
@@ -162,6 +173,99 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     }
   }
 
+  // --- Receive: pick a rail (naira bank transfer or crypto cNGN) ---
+  if (view === 'deposit-choose') {
+    const checking = rampStatus === null
+    const nairaDown = rampStatus ? !rampStatus.naira.available : false
+    return (
+      <div className="px-4 pt-5">
+        <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <h2 className="text-lg font-bold text-slate-900 mb-1">Receive Money</h2>
+        <p className="text-sm text-slate-400 mb-5">Choose how you want to add money. Both are credited as cNGN (1 cNGN = ₦1).</p>
+
+        {feedback && <div className="mb-3 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>}
+
+        <button
+          onClick={() => setView('deposit')}
+          disabled={checking || nairaDown}
+          className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 mb-3 flex items-start gap-3 transition active:scale-[0.99] disabled:opacity-75 disabled:active:scale-100"
+        >
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
+            <Building2 className="w-5 h-5 text-emerald-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-slate-900">Naira bank transfer</p>
+            <p className="text-xs text-slate-400 mt-0.5">Send ₦ from your bank account. Minimum ₦2,000.</p>
+            {checking && <p className="text-[11px] text-slate-400 mt-1.5">Checking availability…</p>}
+            {nairaDown && (
+              <span className="inline-block mt-2 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                Temporarily unavailable{rampStatus?.naira.reason ? ' — ' + rampStatus.naira.reason : ''}
+              </span>
+            )}
+          </div>
+        </button>
+
+        <button
+          onClick={() => setView('deposit-crypto')}
+          className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 flex items-start gap-3 transition active:scale-[0.99]"
+        >
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
+            <Wallet className="w-5 h-5 text-emerald-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-slate-900">Crypto deposit (cNGN)</p>
+            <p className="text-xs text-slate-400 mt-0.5">Send cNGN on Base to your address. Credited 1:1 automatically.</p>
+          </div>
+        </button>
+      </div>
+    )
+  }
+
+  // --- Receive: crypto (cNGN) address ---
+  if (view === 'deposit-crypto') {
+    return (
+      <div className="px-4 pt-5">
+        <button onClick={() => setView('deposit-choose')} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <h2 className="text-lg font-bold text-slate-900 mb-1">Crypto Deposit</h2>
+        <p className="text-sm text-slate-400 mb-5">Send cNGN on the Base network to the address below. Your balance is credited automatically once it confirms.</p>
+
+        {depositAddr ? (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5">
+            <p className="text-[11px] text-emerald-600 font-medium">Your cNGN address (Base network)</p>
+            <div className="flex items-center gap-2 mt-1">
+              <code className="text-xs font-bold text-emerald-900 break-all">{depositAddr}</code>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(depositAddr)
+                  setAddrCopied(true)
+                  setTimeout(() => setAddrCopied(false), 2000)
+                }}
+                className="text-emerald-600 hover:text-emerald-800 transition p-1 flex-shrink-0"
+              >
+                {addrCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-[11px] text-emerald-500 mt-2">1 cNGN = ₦1. Credited automatically, usually within 1–5 minutes.</p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-sm text-slate-400 py-6">
+            <Loader2 className="w-4 h-4 animate-spin" /> Generating your address…
+          </div>
+        )}
+
+        <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          <p className="text-xs text-amber-700 leading-relaxed">
+            Only send <strong>cNGN on Base</strong> to this address. Any other token or network will be lost.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   // --- Deposit amount form ---
   if (view === 'deposit') {
     const val = parseFloat(amount) || 0
@@ -170,8 +274,8 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <h2 className="text-lg font-bold text-slate-900 mb-1">Receive Money</h2>
-        <p className="text-sm text-slate-400 mb-4">Deposit naira via bank transfer. Funds are saved as cNGN (1 cNGN = ₦1). To deposit crypto instead, use your cNGN deposit address on the home screen.</p>
+        <h2 className="text-lg font-bold text-slate-900 mb-1">Naira Deposit</h2>
+        <p className="text-sm text-slate-400 mb-4">Send naira from your bank. Funds are credited as cNGN (1 cNGN = ₦1).</p>
 
         <div className="mb-5 bg-slate-100 rounded-xl px-3 py-2.5">
           <p className="text-xs text-slate-600">Provider is selected automatically for best rate and uptime.</p>
@@ -524,7 +628,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
       {/* Quick Actions */}
       <div className="grid grid-cols-3 gap-3 mt-5">
         <button
-          onClick={() => setView('deposit')}
+          onClick={() => setView('deposit-choose')}
           className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-slate-200 bg-white active:bg-slate-50 transition"
         >
           <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">

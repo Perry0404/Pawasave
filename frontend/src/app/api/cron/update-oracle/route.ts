@@ -3,15 +3,20 @@ import { ethers } from 'ethers'
 import { getNgnUsdRateFromFlipeet } from '@/lib/ramp-rate'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { getSecret } from '@/lib/secrets'
-import { getBaseProvider } from '@/lib/rpc-provider'
+import { getWriteProvider } from '@/lib/rpc-provider'
 
 /**
  * GET /api/cron/update-oracle
  *
  * Pushes the live NGN/USD price for the USD-stable collateral tokens (USDC, USDT)
- * to the PriceOracle so the lending pool never serves a stale price. The oracle
- * rejects prices older than 1 hour, so this must run well under hourly — it's
- * scheduled every 30 min in vercel.json.
+ * to the PriceOracle so the lending pool never serves a stale price.
+ *
+ * Cadence is set by the CONTRACT, not the RPC: PriceOracle.MAX_PRICE_AGE = 1 hour,
+ * and PawasaveLend prices collateral via the staleness-enforced getPrice (FIND-SC-13),
+ * so once the oracle goes stale borrows AND liquidations stop working. At the old
+ * every-30-min cadence that was only 2 attempts per hour — two consecutive failures
+ * and the pool breaks. Now every 10 min (see vercel.json): ~6 attempts inside every
+ * staleness window, so a run has to fail 5 times running to hurt. Cheap on a paid RPC.
  *
  * RWAs / T-bills are NOT priced here — they need their own per-asset NAV feed.
  *
@@ -35,6 +40,9 @@ const CNGN_DEFAULT = '0x46C85152bFe9f96829aA94755D9f915F9B10EF5F'
 const CNGN_PRICE = 1000000n // 1 cNGN = 1 cNGN (peg), 6 decimals
 
 export const dynamic = 'force-dynamic'
+// Three sequential setPrice txs, each awaiting a receipt. The default timeout can
+// kill the function midway, leaving some tokens unpriced — give it real headroom.
+export const maxDuration = 60
 
 export async function GET(request: NextRequest) {
   const denied = checkCronAuth(request)
@@ -55,7 +63,11 @@ export async function GET(request: NextRequest) {
     }
     const price = BigInt(Math.round(ngnPerUsd * 1e6))
 
-    const provider = getBaseProvider()
+    // Sign through ONE endpoint. This keeper sends THREE sequential setPrice txs,
+    // and FallbackProvider races nonces across endpoints on sequential writes — the
+    // 2nd/3rd would reuse the 1st's nonce and silently drop, leaving tokens unpriced
+    // until the oracle went stale. Same fix already applied to custody/sweep/off-ramp.
+    const provider = getWriteProvider()
     const keeper   = new ethers.Wallet(keeperKey, provider)
     const oracle   = new ethers.Contract(oracleAddr, ORACLE_ABI, keeper)
 

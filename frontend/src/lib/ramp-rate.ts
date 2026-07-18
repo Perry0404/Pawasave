@@ -1,6 +1,12 @@
 const FLINT_BASE = 'https://stables.flintapi.io/v1'
 const FLIPEET_BASE = 'https://api.pay.flipeet.io/api/v1/public'
-const FALLBACK_RATE = Number(process.env.NGN_USD_RATE || 1650) // V1 FIND-3P-04: was 1550
+// Last-resort NGN/USD when every live source fails. Deliberately CONSERVATIVE
+// (below the live rate, ~1399 as of 2026-07): this prices USD-stable collateral
+// in the oracle, so guessing LOW under-values collateral (safe — a borrower can
+// borrow less) while guessing HIGH silently over-values it and lets borrows exceed
+// what the collateral backs. The old 1650 was ~18% above the real rate and was
+// pushed on-chain every oracle run. Floor 1350; override with NGN_USD_RATE.
+const FALLBACK_RATE = Number(process.env.NGN_USD_RATE || 1350)
 
 /**
  * Last-good rate cache (V2-LOW-03). Two jobs:
@@ -89,7 +95,9 @@ export async function getNgnUsdRateFromFlipeet(): Promise<number> {
       const res = await fetch(`${FLIPEET_BASE}/on-ramp/rate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-        body: JSON.stringify({ asset: 'cngn', network: 'base', currency: 'NGN', country: 'NG' }),
+        // USD-stable asset, not cngn: cNGN is 1:1 with NGN, so a cNGN rate can never
+      // express NGN/USD — asking for it always fell through to FALLBACK_RATE.
+      body: JSON.stringify({ asset: 'usdc', network: 'base', currency: 'NGN', country: 'NG' }),
         next: { revalidate: 30 },
       })
       if (res.ok) {

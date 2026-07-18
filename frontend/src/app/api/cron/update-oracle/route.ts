@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ethers } from 'ethers'
-import { getNgnUsdRateFromFlipeet } from '@/lib/ramp-rate'
+import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { getSecret } from '@/lib/secrets'
 import { getWriteProvider } from '@/lib/rpc-provider'
@@ -57,7 +57,12 @@ export async function GET(request: NextRequest) {
 
   try {
     // NGN per 1 USD (e.g. ~1650). Oracle price = cNGN(1e6) per 1 whole token.
-    const ngnPerUsd = await getNgnUsdRateFromFlipeet()
+    // Use the SAME rate path as /api/ramp/rate and the ramp: getNgnUsdRateFromFlint
+    // → Flint, then Flipeet-usdc, then last-good, then fallback. The old
+    // getNgnUsdRateFromFlipeet() asked Flipeet for a cNGN rate — which can't express
+    // NGN/USD — so it silently returned FALLBACK_RATE, pushing a hardcoded FX onto
+    // the oracle every run (1650 vs the live 1399, over-pricing collateral ~18%).
+    const ngnPerUsd = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
     if (!Number.isFinite(ngnPerUsd) || ngnPerUsd < 100 || ngnPerUsd > 100000) {
       return NextResponse.json({ error: `Implausible rate ${ngnPerUsd} — refusing to update` }, { status: 502 })
     }

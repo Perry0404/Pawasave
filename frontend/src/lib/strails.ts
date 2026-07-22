@@ -144,19 +144,44 @@ export async function cngnOfframp(input: {
  * documented; we try the configured webhook secret, then the aesKey, then the
  * apiKey. Compute against the raw body EXACTLY as received (do not re-stringify).
  */
-export function verifyStrailsWebhook(rawBody: string, signature: string | null): boolean {
-  if (!signature) return false
-  const secrets = [
-    process.env.STRAILS_WEBHOOK_SECRET,
-    process.env.STRAILS_AES_KEY,
-    process.env.STRAILS_API_KEY,
-  ].filter((s): s is string => Boolean(s))
-  const sig = signature.trim().toLowerCase().replace(/^sha256=/, '')
-  for (const secret of secrets) {
-    const expected = crypto.createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex')
-    if (expected.length === sig.length && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig))) {
-      return true
+export function verifyStrailsWebhook(
+  rawBody: string,
+  signature: string | null,
+  timestamp?: string | null,
+): { ok: boolean; matched?: string } {
+  if (!signature) return { ok: false }
+  const sig = signature.trim().replace(/^sha256=/i, '')
+
+  // Strails documents "hex-hmac" in X-Strails-Signature but never says which secret
+  // signs it or what is signed. Rather than guess one combination, try the realistic
+  // matrix once and report which matched, so it can be pinned afterwards.
+  const keys: Array<[string, Buffer]> = []
+  const add = (label: string, raw?: string) => {
+    if (!raw) return
+    keys.push([`${label}:utf8`, Buffer.from(raw, 'utf8')])
+    if (/^[0-9a-f]+$/i.test(raw) && raw.length % 2 === 0) {
+      keys.push([`${label}:hexbytes`, Buffer.from(raw, 'hex')]) // 64-char hex is 32 raw bytes
     }
   }
-  return false
+  add('webhookSecret', process.env.STRAILS_WEBHOOK_SECRET)
+  add('aesKey', process.env.STRAILS_AES_KEY)
+  add('apiKey', process.env.STRAILS_API_KEY)
+
+  const payloads: Array<[string, string]> = [['body', rawBody]]
+  if (timestamp) {
+    payloads.push(['ts.body', `${timestamp}.${rawBody}`], ['ts+body', `${timestamp}${rawBody}`])
+  }
+
+  for (const [kLabel, key] of keys) {
+    for (const [pLabel, payload] of payloads) {
+      for (const enc of ['hex', 'base64'] as const) {
+        const expected = crypto.createHmac('sha256', key).update(payload, 'utf8').digest(enc)
+        if (expected.length === sig.length &&
+            crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig))) {
+          return { ok: true, matched: `${kLabel} | ${pLabel} | ${enc}` }
+        }
+      }
+    }
+  }
+  return { ok: false }
 }

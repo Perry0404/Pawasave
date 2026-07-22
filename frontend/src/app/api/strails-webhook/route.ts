@@ -29,13 +29,24 @@ function readNumber(...v: unknown[]) {
 export async function POST(request: NextRequest) {
   const raw = await request.text()
   const signature = request.headers.get('x-strails-signature')
-  if (!verifyStrailsWebhook(raw, signature)) {
-    console.error('[strails-webhook] signature verification failed')
+  const ts = request.headers.get('x-strails-timestamp')
+  const verdict = verifyStrailsWebhook(raw, signature, ts)
+  if (!verdict.ok) {
+    // Log enough to identify the scheme without leaking the payload or any secret:
+    // the signature is a digest, and lengths/encodings are what we need to compare.
+    console.error('[strails-webhook] signature verification failed', {
+      sigLen: signature?.length ?? 0,
+      sigPrefix: signature?.slice(0, 12) ?? null,
+      looksHex: signature ? /^[0-9a-f]+$/i.test(signature.replace(/^sha256=/i, '')) : null,
+      hasTimestamp: Boolean(ts),
+      bodyLen: raw.length,
+      headers: Object.fromEntries(
+        [...request.headers.entries()].filter(([k]) => k.toLowerCase().startsWith('x-')),
+      ),
+    })
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
-
-  // Replay protection when a timestamp is supplied.
-  const ts = request.headers.get('x-strails-timestamp')
+  console.info('[strails-webhook] signature verified via', verdict.matched)
   if (ts) {
     const t = new Date(ts).getTime()
     if (Number.isFinite(t) && Math.abs(Date.now() - t) > 300_000) {

@@ -8,7 +8,7 @@ import { ArrowUpRight, ArrowDownLeft, Vault, TrendingUp, Wallet, Plus, Minus, Cr
 import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
-type View = 'main' | 'deposit-choose' | 'deposit' | 'deposit-crypto' | 'deposit-info' | 'withdraw'
+type View = 'main' | 'deposit-choose' | 'deposit-naira' | 'deposit' | 'deposit-crypto' | 'deposit-info' | 'withdraw'
 
 /** Live availability of each deposit rail (from /api/ramp/status). */
 type RampStatus = { naira: { available: boolean; reason?: string }; crypto?: { available: boolean } }
@@ -31,6 +31,8 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   const [depositInfo, setDepositInfo] = useState<RampResult | null>(null)
   const [copied, setCopied] = useState(false)
   const [addrCopied, setAddrCopied] = useState(false)
+  const [bvn, setBvn] = useState('')
+  const [acctCopied, setAcctCopied] = useState(false)
   const [liveRate, setLiveRate] = useState<number>(getRate())
   const [depositAddr, setDepositAddr] = useState<string | null>(wallet?.deposit_address ?? null)
   const [rampStatus, setRampStatus] = useState<RampStatus | null>(null)
@@ -165,6 +167,29 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     }
   }
 
+  // Request a permanent Naira account: Strails verifies the BVN against the national
+  // database and issues a dedicated NUBAN (~2 min, delivered via webhook/reconciler).
+  const submitBvn = async () => {
+    if (!/^\d{11}$/.test(bvn)) { flash('Enter your 11-digit BVN'); return }
+    setBusy(true)
+    try {
+      const res = await fetch('/api/strails/onboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bvn }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || 'Could not create your account')
+      setBvn('')
+      flash('')
+      await refresh()
+    } catch (e: any) {
+      flash(e?.message || 'Could not create your account')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const copyAccount = () => {
     if (depositInfo?.accountNumber) {
       navigator.clipboard.writeText(depositInfo.accountNumber)
@@ -188,7 +213,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
         {feedback && <div className="mb-3 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>}
 
         <button
-          onClick={() => setView('deposit')}
+          onClick={() => setView('deposit-naira')}
           className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 mb-3 flex items-start gap-3 transition active:scale-[0.99]"
         >
           <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
@@ -221,6 +246,109 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
             <p className="text-xs text-slate-400 mt-0.5">Send cNGN on Base to your address. Credited 1:1 automatically.</p>
           </div>
         </button>
+      </div>
+    )
+  }
+
+  // --- Receive: naira — permanent account, or BVN capture to create one ---
+  if (view === 'deposit-naira') {
+    const p = profile as any
+    const acct = p?.strails_va_account_number as string | undefined
+    const pending = p?.strails_onboard_status === 'processing' && !acct
+    const verified = profile?.kyc_status === 'verified'
+
+    return (
+      <div className="px-4 pt-5">
+        <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <h2 className="text-lg font-bold text-slate-900 mb-1">Naira bank transfer</h2>
+
+        {acct ? (
+          <>
+            <p className="text-sm text-slate-400 mb-4">
+              This account is permanently yours. Money sent to it is credited as cNGN automatically.
+            </p>
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-3">
+              <div>
+                <p className="text-[11px] text-emerald-600 font-medium">Account Number</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-2xl font-bold text-emerald-900 tracking-wider">{acct}</p>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(acct)
+                      setAcctCopied(true)
+                      setTimeout(() => setAcctCopied(false), 2000)
+                    }}
+                    className="text-emerald-600 p-1"
+                  >
+                    {acctCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <p className="text-[11px] text-emerald-600 font-medium">Bank</p>
+                <p className="text-sm font-semibold text-emerald-900">{p?.strails_va_bank_name}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-emerald-600 font-medium">Account Name</p>
+                <p className="text-sm font-semibold text-emerald-900">{p?.strails_va_account_name}</p>
+              </div>
+            </div>
+            <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+              <p className="text-xs text-amber-800">
+                Transfer only from a bank account in <span className="font-semibold">your own name</span>.
+                Deposits from someone else&apos;s account are automatically returned.
+              </p>
+            </div>
+          </>
+        ) : pending ? (
+          <div className="mt-6 text-center">
+            <Loader2 className="w-6 h-6 animate-spin text-emerald-600 mx-auto mb-3" />
+            <p className="text-sm font-medium text-slate-700">Creating your account…</p>
+            <p className="text-xs text-slate-400 mt-1">This usually takes about 2 minutes.</p>
+            <button onClick={() => refresh()} className="mt-4 text-sm text-emerald-600 font-medium">
+              Check again
+            </button>
+          </div>
+        ) : !verified ? (
+          <div className="mt-4">
+            <p className="text-sm text-slate-400 mb-4">Verify your identity first to get your own Naira account.</p>
+            <button
+              onClick={onStartKyc}
+              className="w-full bg-emerald-600 text-white font-semibold py-3.5 rounded-xl"
+            >
+              Verify identity
+            </button>
+          </div>
+        ) : (
+          <>
+            <p className="text-sm text-slate-400 mb-4">
+              Get your own dedicated Naira account. Enter your BVN — we use it only to verify your
+              identity with your bank and never store it.
+            </p>
+            <label className="text-xs text-slate-500 block mb-1.5">BVN</label>
+            <input
+              type="tel"
+              inputMode="numeric"
+              maxLength={11}
+              value={bvn}
+              onChange={(e) => setBvn(e.target.value.replace(/\D/g, ''))}
+              placeholder="11-digit BVN"
+              className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-lg font-semibold tracking-wider focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              autoFocus
+            />
+            {feedback && <div className="mt-3 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>}
+            <button
+              onClick={submitBvn}
+              disabled={busy || bvn.length !== 11}
+              className="w-full mt-5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-60"
+            >
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Building2 className="w-4 h-4" />}
+              Create my account
+            </button>
+          </>
+        )}
       </div>
     )
   }

@@ -169,6 +169,46 @@ export async function getFintechVirtualAccount(): Promise<VirtualAccount> {
   return parseVirtualAccount(await call('/getfintechvirtualaccount', undefined, 'GET'))
 }
 
+// ── Sweep: move a user's minted cNGN into PawaSave custody ─────────────────────
+// Confirmed working live (tx 0xf171c7ed…, 0xd9648e46…): Strails charges NO fee for
+// this; you pay only Base gas. Their response warns "High gas fees relative to
+// withdrawal amount", so sweep on a THRESHOLD, never per-deposit.
+
+/** Whitelist a destination address. Required before withdrawAsset will send to it. */
+export async function addExternalWallet(input: {
+  address: string
+  label: string
+  blockchain?: string
+  type?: 'hot' | 'cold' | 'custodial' | 'other'
+}): Promise<any> {
+  return call('/addexternalwallet', {
+    blockchain: 'Base', type: 'custodial', ...input,
+  })
+}
+
+/**
+ * Move cNGN from a user's Strails wallet to an external (whitelisted) address.
+ * `internalWallet` is the SOURCE — the user's own EVM wallet from getUserDetails.
+ */
+export async function withdrawAsset(input: {
+  internalWallet: string
+  userId: string
+  destinationWallet: string
+  amount: number
+  ticker?: string
+  network?: string
+}): Promise<{ txHash?: string; amount?: string; raw: any }> {
+  const d = await call('/withdrawasset', { ticker: 'CNGN', network: 'Base', ...input })
+  return { txHash: pick(d, 'transactionHash', 'txHash'), amount: pick(d, 'amount'), raw: d }
+}
+
+/** Recent Strails activity — the reconciliation source when a webhook is missed. */
+export async function listTransactions(): Promise<any[]> {
+  const d = await call('/transactions', undefined, 'GET')
+  const list = (d as any)?.transactions ?? d
+  return Array.isArray(list) ? list : []
+}
+
 // ── Off-ramp (cNGN → NGN bank payout) ──────────────────────────────────────────
 
 export async function cngnOfframp(input: {

@@ -57,12 +57,18 @@ export async function GET(request: NextRequest) {
     const status = String(t.status ?? '')
     if (!/onramp|deposit/i.test(type) || !/completed|success/i.test(status)) continue
 
-    const ref = String(t.reference ?? t.id ?? t.transactionId ?? t.createdAt ?? '')
+    // Their field is `transactionReference` (there is no `reference`); `id` carries
+    // the same value. Key on it so a deposit is credited exactly once.
+    const ref = String(t.transactionReference ?? t.id ?? t.transactionId ?? '')
     if (!ref) continue
     const reference = `strails_${ref}`
 
-    const { data: seen } = await admin.from('transactions').select('id').eq('reference', reference).maybeSingle()
-    if (seen) continue // already credited (by webhook or an earlier run)
+    // NOT maybeSingle(): it errors when more than one row matches and returns null,
+    // which reads as "not credited" and credits AGAIN — compounding every run. A
+    // duplicate must still count as already-processed.
+    const { data: seen } = await admin
+      .from('transactions').select('id').eq('reference', reference).limit(1)
+    if (seen && seen.length > 0) continue // already credited (webhook or earlier run)
 
     // Map Strails' user id back to our profile.
     const sUser = String(t.userId ?? t.user_id ?? '')
@@ -70,13 +76,20 @@ export async function GET(request: NextRequest) {
     const { data: profile } = await admin.from('profiles').select('id').eq('strails_user_id', sUser).maybeSingle()
     if (!profile?.id) continue
 
-    const ngn = num(t.amount)
+    // Credit what was actually MINTED, not what the user sent. Strails deducts its
+    // fee at source: amount 1000 -> fundingAmount 983 (strailsFee 17). Crediting
+    // `amount` would put more on the ledger than exists on-chain — the ledger must
+    // never claim more cNGN than backs it.
+    const gross = num(t.amount)
+    const ngn = num(t.fundingAmount) || gross
     if (ngn <= 0) continue
     const micro = Math.floor(ngn * 1_000_000)
+    const feeKobo = Math.round(Math.max(0, gross - ngn) * 100)
 
     await admin.from('transactions').insert({
       user_id: profile.id, type: 'deposit', direction: 'credit',
       amount_kobo: Math.round(ngn * 100), amount_usdc_micro: micro,
+      platform_fee_kobo: feeKobo,
       description: 'Received via Strails', reference, status: 'completed',
     })
     await admin.rpc('credit_wallet', { p_user_id: profile.id, p_naira_kobo: 0, p_usdc_micro: micro })

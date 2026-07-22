@@ -57,13 +57,9 @@ export async function GET(request: NextRequest) {
   }
 
   // ── 2. try to register it (payload shape is undocumented) ──────────────────
+  // The API told us the exact contract: action + ipAddress.
   const shapes: Array<[string, unknown]> = [
-    ['ips[]', { ips: [egressIp] }],
-    ['ip', { ip: egressIp }],
-    ['ipAddresses[]', { ipAddresses: [egressIp] }],
-    ['action+ips[]', { action: 'add', ips: [egressIp] }],
-    ['action+ip', { action: 'add', ip: egressIp }],
-    ['whitelist[]', { whitelist: [egressIp] }],
+    ['action+ipAddress', { action: 'add', ipAddress: egressIp }],
   ]
   const allowlistAttempts: any[] = []
   let allowlisted = false

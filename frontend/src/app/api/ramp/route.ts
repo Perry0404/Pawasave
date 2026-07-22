@@ -677,6 +677,11 @@ async function runFlipeet(
           await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
           const e: any = new Error(`Not enough settled cNGN to cover this withdrawal (have ${(Number(available) / 1e6).toFixed(2)}, need ${(Number(cngnMicro) / 1e6).toFixed(2)}) — your balance was refunded.`)
           e.onChainFail = true
+          // This path ALREADY refunded. Without this flag the catch below treats the
+          // throw as a failed send and refunds a SECOND time — which silently paid a
+          // user +₦1,500 per failed withdrawal (observed live, balance ₦1,500→₦4,500
+          // after two attempts). Never refund twice for one debit.
+          e.alreadyRefunded = true
           throw e
         }
 
@@ -707,9 +712,13 @@ async function runFlipeet(
 
         console.info('Flipeet off-ramp: sent cNGN on-chain', { reference, depositAddress, onChainTxHash })
       } catch (sendErr: unknown) {
-        // If the on-chain send fails, refund user and mark failed.
+        // If the on-chain send fails, refund user and mark failed — UNLESS the inner
+        // guard already refunded (see e.alreadyRefunded above), otherwise one debit
+        // gets refunded twice and inflates the balance.
         console.error('Flipeet off-ramp on-chain transfer failed:', sendErr)
-        await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: Math.floor(amount * 1_000_000) })
+        if (!(sendErr as any)?.alreadyRefunded) {
+          await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: Math.floor(amount * 1_000_000) })
+        }
         await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
         const reason = sendErr instanceof Error ? ((sendErr as any).shortMessage || sendErr.message) : String(sendErr)
         const e: any = new Error(`Withdrawal couldn't be settled on-chain (${reason}). Your balance was refunded.`)

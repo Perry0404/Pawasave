@@ -52,10 +52,6 @@ export async function GET(request: NextRequest) {
     result.errors.push(`listTransactions: ${e instanceof Error ? e.message : e}`)
   }
   ;(result as any).txsSeen = txs.length
-  if (txs.length) {
-    const t0 = txs[0]
-    ;(result as any).sample = { type: t0?.type, status: t0?.status, ref: t0?.transactionReference, user: t0?.userId }
-  }
 
   for (const t of txs) {
     const type = String(t.type ?? t.transactionType ?? '')

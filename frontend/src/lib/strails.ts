@@ -61,6 +61,11 @@ async function call<T = any>(path: string, body?: unknown, method: 'POST' | 'GET
       method,
       headers,
       body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
+      // Next.js caches fetch GETs by default in the App Router. That silently served
+      // a stale /transactions snapshot to the reconciler: a ₦5,000 deposit was
+      // invisible for its whole cache lifetime, so it swept the cNGN but never
+      // credited it. Financial reads must never be cached.
+      cache: 'no-store',
       signal: AbortSignal.timeout(25_000),
     })
   } catch (e) {

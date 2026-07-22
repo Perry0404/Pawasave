@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { STRAILS_ENABLED, listTransactions, getUserDetails, addExternalWallet, withdrawAsset } from '@/lib/strails'
-import { custodyAddress, custodyCngnBalance, supplyToLend } from '@/lib/custody'
+import { custodyAddress, custodyCngnBalance, cngnBalanceOf, supplyToLend } from '@/lib/custody'
 
 /**
  * GET /api/cron/strails-reconcile
@@ -110,9 +110,10 @@ export async function GET(request: NextRequest) {
         const details = await getUserDetails(u.strails_user_id as string)
         const wallet = details.evmWallet
         if (!wallet) continue
-        // Strails reports the spendable balance per asset; fall back to skipping
-        // rather than guessing an amount we might not have.
-        const bal = num((details.raw as any)?.balances?.CNGN ?? (details.raw as any)?.cngnBalance)
+        // Read the wallet's REAL cNGN balance on Base. getuserdetails returns no
+        // balance field at all, so an earlier version read undefined -> 0 and never
+        // swept, leaving the ledger credited but unbacked. The chain is the truth.
+        const bal = Number(await cngnBalanceOf(wallet)) / 1e6
         if (bal < SWEEP_MIN) continue
 
         await addExternalWallet({ address: dest, label: 'PawaSave custody' }).catch(() => {})

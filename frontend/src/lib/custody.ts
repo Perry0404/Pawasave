@@ -146,6 +146,18 @@ export async function withdrawFromLend(shares: bigint): Promise<{ txHash: string
   return { txHash: receipt.hash, cngnMicro }
 }
 
+/**
+ * cNGN (micro) held by ANY address. Used to size a Strails sweep: their
+ * getuserdetails response carries no balance field, so the chain is the only
+ * authoritative source for how much a user's Strails wallet actually holds.
+ */
+export async function cngnBalanceOf(address: string): Promise<bigint> {
+  return withBaseRead(async (provider) => {
+    const cngn = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, provider)
+    return b(await cngn.balanceOf(address))
+  })
+}
+
 /** Current cNGN (micro) sitting free in the custody wallet (read-only). */
 export async function custodyCngnBalance(): Promise<bigint> {
   const cust = process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address

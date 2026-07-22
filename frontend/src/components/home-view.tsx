@@ -221,7 +221,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-slate-900">Naira bank transfer</p>
-            <p className="text-xs text-slate-400 mt-0.5">Send ₦ from your bank account. Minimum ₦2,000.</p>
+            <p className="text-xs text-slate-400 mt-0.5">Get your own account number. Transfer from your bank anytime.</p>
             {checking && <p className="text-[11px] text-slate-400 mt-1.5">Checking availability…</p>}
             {nairaDown && (
               <>

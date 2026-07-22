@@ -2,50 +2,41 @@ import { NextRequest, NextResponse } from 'next/server'
 import { checkCronAuth } from '@/lib/cron-auth'
 
 /**
- * GET /api/strails/probe  — TEMPORARY diagnostic (cron-auth gated).
+ * GET /api/strails/probe — TEMPORARY diagnostic (cron-auth gated).
  *
- * The Strails API hosts sit behind Cloudflare and drop connections from some
- * networks, and their docs never say how the issued `aesKey` is used. Rather than
- * guess an encryption scheme, this endpoint calls a harmless read-only Strails
- * endpoint FROM Vercel's egress (the real integration path) and reports exactly
- * what comes back: HTTP status, content-type, and whether the body is plain JSON
- * or an encrypted blob. That single answer decides how the client is built.
+ * Strails requires calls to come from a pre-allowlisted IP, but /manageipallowlist
+ * must itself be reachable to bootstrap that (chicken-and-egg), so it is very likely
+ * exempt. This does the whole bootstrap in ONE invocation — so the egress IP stays
+ * constant across all three steps:
+ *   1. discover this function's outbound IP
+ *   2. register it via /manageipallowlist (payload shape undocumented → try several)
+ *   3. immediately retry a read call on both prod and sandbox
  *
- * Delete this route once the integration is wired.
+ * Delete once the integration is wired.
  */
 export const dynamic = 'force-dynamic'
-export const maxDuration = 30
+export const maxDuration = 60
 
 const KEY = process.env.STRAILS_API_KEY || ''
+const PROD = 'https://api.strails.io/v1'
+const SANDBOX = 'https://beta.stablesrail.io/v1'
 
-function shape(text: string) {
-  const trimmed = text.trim()
-  let json: unknown = null
-  try { json = JSON.parse(trimmed) } catch { /* not json */ }
-  const isHex = /^[0-9a-fA-F]{32,}$/.test(trimmed)
-  const isB64 = /^[A-Za-z0-9+/=]{40,}$/.test(trimmed) && !json
-  return {
-    isJson: json !== null,
-    looksEncrypted: isHex || isB64,
-    preview: trimmed.slice(0, 300),
-    json: json ?? undefined,
-  }
+async function jsonOrText(res: Response) {
+  const text = await res.text()
+  try { return JSON.parse(text) } catch { return { raw: text.slice(0, 300) } }
 }
 
-async function hit(base: string, path: string, method: 'GET' | 'POST', body?: unknown) {
-  const url = `${base}${path}`
+async function call(url: string, method: 'GET' | 'POST', body?: unknown) {
   try {
     const res = await fetch(url, {
       method,
       headers: { 'x-api-key': KEY, 'Content-Type': 'application/json' },
       body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
-      // fail fast — we just want the shape
       signal: AbortSignal.timeout(12_000),
     })
-    const text = await res.text()
-    return { url, method, status: res.status, contentType: res.headers.get('content-type'), ...shape(text) }
+    return { status: res.status, body: await jsonOrText(res) }
   } catch (e) {
-    return { url, method, status: 0, error: e instanceof Error ? e.message : String(e) }
+    return { status: 0, error: e instanceof Error ? e.message : String(e) }
   }
 }
 
@@ -54,15 +45,43 @@ export async function GET(request: NextRequest) {
   if (denied) return denied
   if (!KEY) return NextResponse.json({ error: 'STRAILS_API_KEY not set' }, { status: 503 })
 
-  const bases = [
-    process.env.STRAILS_BASE_URL || 'https://api.strails.io/v1',
-    'https://beta.stablesrail.io/v1',
-  ]
-  const results = []
-  for (const base of bases) {
-    // read-only: retrieve our own fintech virtual account
-    results.push(await hit(base, '/getfintechvirtualaccount', 'GET'))
-    results.push(await hit(base, '/getfintechvirtualaccount', 'POST'))
+  // ── 1. what IP do we call out from? ────────────────────────────────────────
+  let egressIp = 'unknown'
+  for (const svc of ['https://api.ipify.org?format=json', 'https://ifconfig.me/all.json']) {
+    try {
+      const r = await fetch(svc, { signal: AbortSignal.timeout(8_000) })
+      const j: any = await r.json()
+      egressIp = j.ip || j.ip_addr || egressIp
+      if (egressIp !== 'unknown') break
+    } catch { /* try next */ }
   }
-  return NextResponse.json({ ok: true, keyLen: KEY.length, results })
+
+  // ── 2. try to register it (payload shape is undocumented) ──────────────────
+  const shapes: Array<[string, unknown]> = [
+    ['ips[]', { ips: [egressIp] }],
+    ['ip', { ip: egressIp }],
+    ['ipAddresses[]', { ipAddresses: [egressIp] }],
+    ['action+ips[]', { action: 'add', ips: [egressIp] }],
+    ['action+ip', { action: 'add', ip: egressIp }],
+    ['whitelist[]', { whitelist: [egressIp] }],
+  ]
+  const allowlistAttempts: any[] = []
+  let allowlisted = false
+  for (const base of [PROD, SANDBOX]) {
+    for (const [label, payload] of shapes) {
+      const r = await call(`${base}/manageipallowlist`, 'POST', payload)
+      const ok = r.status === 200 && !/failed/i.test(String((r.body as any)?.status ?? ''))
+      allowlistAttempts.push({ base, shape: label, status: r.status, body: r.body })
+      if (ok) { allowlisted = true; break }
+    }
+    if (allowlisted) break
+  }
+
+  // ── 3. retry the read on both environments ────────────────────────────────
+  const after = {
+    prod: await call(`${PROD}/getfintechvirtualaccount`, 'GET'),
+    sandbox: await call(`${SANDBOX}/getfintechvirtualaccount`, 'GET'),
+  }
+
+  return NextResponse.json({ ok: true, egressIp, allowlisted, allowlistAttempts, after })
 }

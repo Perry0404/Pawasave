@@ -41,13 +41,25 @@ function pick(obj: any, ...keys: string[]): string | undefined {
   return undefined
 }
 
+/**
+ * Strails allowlists a single caller IP, but Vercel egresses from a rotating pool
+ * (proven: a registered IP still got IP_NOT_ALLOWED on the next call). So in
+ * production we route through strails-relay, a fixed-IP hop that holds the API key.
+ * When STRAILS_RELAY_SECRET is set, STRAILS_BASE_URL points at the relay and we
+ * authenticate to it instead of sending the Strails key from here.
+ */
+const RELAY_SECRET = process.env.STRAILS_RELAY_SECRET || ''
+
 async function call<T = any>(path: string, body?: unknown, method: 'POST' | 'GET' = 'POST'): Promise<T> {
-  if (!KEY) throw new StrailsError('STRAILS_API_KEY not configured', 0)
+  if (!KEY && !RELAY_SECRET) throw new StrailsError('STRAILS_API_KEY not configured', 0)
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (RELAY_SECRET) headers['x-relay-secret'] = RELAY_SECRET
+  else headers['x-api-key'] = KEY
   let res: Response
   try {
     res = await fetch(`${BASE}${path}`, {
       method,
-      headers: { 'x-api-key': KEY, 'Content-Type': 'application/json' },
+      headers,
       body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
       signal: AbortSignal.timeout(25_000),
     })

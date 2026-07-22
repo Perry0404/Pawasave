@@ -72,10 +72,12 @@ export async function POST(request: NextRequest) {
       lastName: (profile as any)?.kyc_last_name || undefined,
     })
 
+    // Store Strails' OWN identity (userHash) — it does not adopt our uuid, and every
+    // later lookup and webhook keys off this value.
     await admin.rpc('set_strails_onboarding', {
       p_user_id: user.id,
       p_request_id: result.requestId || null,
-      p_strails_uid: result.userId || null,
+      p_strails_uid: result.userHash || null,
       p_status: 'processing',
       p_bvn_hash: bvnHash,
     })

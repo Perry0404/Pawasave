@@ -79,25 +79,51 @@ async function call<T = any>(path: string, body?: unknown, method: 'POST' | 'GET
 
 // ── Onboarding (BVN → permanent virtual account) ───────────────────────────────
 
-export type OnboardResult = { requestId?: string; userId?: string; status?: string }
+export type OnboardResult = { requestId?: string; userHash?: string; status?: string }
 
-/** Start BVN onboarding. Strails verifies the BVN and (async) issues the NUBAN. */
+/**
+ * Start BVN onboarding. Strails verifies the BVN against the national database and
+ * asynchronously issues the permanent NUBAN (~2 min).
+ *
+ * IMPORTANT (confirmed live): Strails does NOT adopt the `userId` we pass — it mints
+ * its own identity, returned as `userHash`, and every later call (`getuserdetails`)
+ * and webhook keys off THAT. Store it as profiles.strails_user_id. Passing our own id
+ * and expecting it back is the bug this comment exists to prevent.
+ */
 export async function onboardUser(input: {
   bvn: string
-  userId: string          // our Supabase user id — echoed back on webhooks
+  userId: string
   email?: string
   phoneNumber?: string
   firstName?: string
   lastName?: string
 }): Promise<OnboardResult> {
   const d = await call('/onboarduser', input)
-  return { requestId: pick(d, 'requestId', 'request_id', 'id'), userId: pick(d, 'userId', 'user_id'), status: pick(d, 'status') }
+  return {
+    requestId: pick(d, 'requestId', 'request_id'),
+    userHash: pick(d, 'userHash', 'user_hash'),
+    status: pick(d, 'status'), // "processing"
+  }
 }
 
-/** Poll onboarding status (webhook `user.onboarded` is the primary signal). */
-export async function onboardStatus(requestId: string): Promise<OnboardResult & { raw: any }> {
+/**
+ * Poll onboarding. Returns `verified` and, once complete, `strailsUserId` — which is
+ * the same value as `userHash` above. (Webhook `user.onboarded` is the primary signal;
+ * this is the fallback / reconciliation path.)
+ */
+export async function onboardStatus(requestId: string): Promise<{
+  status?: string
+  verified: boolean
+  strailsUserId?: string
+  raw: any
+}> {
   const d = await call('/onboardstatus', { requestId })
-  return { requestId, userId: pick(d, 'userId', 'user_id'), status: pick(d, 'status'), raw: d }
+  return {
+    status: pick(d, 'status'), // requested | completed
+    verified: (d as any)?.verified === true,
+    strailsUserId: pick(d, 'userId', 'user_id'),
+    raw: d,
+  }
 }
 
 export type VirtualAccount = { accountNumber?: string; accountName?: string; bankName?: string }
@@ -112,10 +138,30 @@ function parseVirtualAccount(d: any): VirtualAccount {
   }
 }
 
-/** Fetch a user's details including their permanent virtual account. */
-export async function getUserDetails(userId: string): Promise<{ strailsUserId?: string; account: VirtualAccount; raw: any }> {
-  const d = await call('/getuserdetails', { userId })
-  return { strailsUserId: pick(d, 'userId', 'user_id', 'id'), account: parseVirtualAccount(d), raw: d }
+/**
+ * Fetch a user's details + permanent virtual account.
+ * `userId` here is Strails' own id (the `userHash`) — NOT our Supabase uuid, which
+ * returns "Invalid user credentials for fintech". A `bvn` is also accepted.
+ * Confirmed shape: data.virtualAccounts[0], data.walletDetails.evmWallet.
+ */
+export async function getUserDetails(strailsUserId: string): Promise<{
+  strailsUserId?: string
+  account: VirtualAccount
+  evmWallet?: string
+  fullName?: string
+  raw: any
+}> {
+  const d = await call('/getuserdetails', { userId: strailsUserId })
+  const p = (d as any)?.personalDetails ?? {}
+  const name = [p.firstName, p.middleName, p.lastName].filter(Boolean).join(' ') || undefined
+  return {
+    strailsUserId: pick(d, 'userId', 'user_id'),
+    account: parseVirtualAccount(d),
+    // The Base wallet the minted cNGN lands in — needed for any future sweep.
+    evmWallet: pick((d as any)?.walletDetails ?? {}, 'evmWallet', 'evm_wallet'),
+    fullName: name,
+    raw: d,
+  }
 }
 
 /** The fintech's own permanent funding account (read-only sanity check). */

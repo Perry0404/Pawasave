@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { ethers } from 'ethers'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { withBaseRead } from '@/lib/rpc-provider'
-import { custodyAddress } from '@/lib/custody'
-import { CONTRACTS } from '@/lib/contracts'
+import { custodyCngnTransferTo } from '@/lib/custody'
 
 /**
  * GET /api/cron/reconcile-withdrawals
@@ -33,8 +31,6 @@ import { CONTRACTS } from '@/lib/contracts'
  */
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
-
-const TRANSFER_ABI = ['event Transfer(address indexed from, address indexed to, uint256 value)']
 
 type Tx = {
   id: string
@@ -75,25 +71,6 @@ async function resolve(
     }
   }
   return true
-}
-
-/** Did custody ever send cNGN to this (unique per-off-ramp) Flipeet address? */
-async function custodySentTo(target: string, ageMinutes: number): Promise<boolean> {
-  const custody = await custodyAddress()
-  return withBaseRead(async (provider) => {
-    const cngn = new ethers.Contract(CONTRACTS.CNGN, TRANSFER_ABI, provider)
-    const now = await provider.getBlockNumber()
-    // Base ≈ 2s/block (~30 blocks/min). Cover the row's whole lifetime + headroom,
-    // scanned in <=9k-block chunks so a range-capped RPC doesn't reject the query.
-    const span = Math.min(120_000, Math.ceil(ageMinutes * 30) + 1_000)
-    const chunk = 9_000
-    for (let end = now; end > now - span; end -= chunk) {
-      const start = Math.max(0, end - chunk + 1)
-      const logs = await cngn.queryFilter(cngn.filters.Transfer(custody, target), start, end)
-      if (logs.length > 0) return true
-    }
-    return false
-  })
 }
 
 export async function GET(request: NextRequest) {
@@ -153,11 +130,13 @@ export async function GET(request: NextRequest) {
           summary.skipped++ // still within grace, could yet mine
         }
       } else if (addrMatch) {
-        // Shape B: send was attempted but no hash came back. Ask the chain whether
-        // custody ever paid that unique Flipeet address.
-        const sent = await custodySentTo(addrMatch[1], ageMinutes)
-        if (sent) {
-          if (await resolve(supabase, row, 'completed', ' [reconciled: custody transfer found ✓]')) summary.completed++
+        // Shape B: the send was attempted (the durable settling marker is written
+        // and confirmed BEFORE the send). Ask the chain whether custody actually
+        // paid that unique deposit address — deterministic, no amount/time guessing.
+        const found = await custodyCngnTransferTo(addrMatch[1], ageMinutes)
+        if (found) {
+          // Stamp the REAL send hash so the row is auditable and a later run hash-matches it.
+          if (await resolve(supabase, row, 'completed', ` [reconciled: custody transfer ${found.hash} ✓]`)) summary.completed++
         } else if (past) {
           if (await resolve(supabase, row, 'failed', ' [reconciled: no custody transfer, refunded]',
             async () => { await supabase.rpc('credit_wallet', { p_user_id: row.user_id, p_naira_kobo: 0, p_usdc_micro: refundMicro(row.amount_kobo) }) })) summary.refunded++

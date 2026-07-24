@@ -108,3 +108,49 @@ export async function withBaseRead<T>(
   }
   throw lastErr ?? new Error('All Base RPC endpoints failed')
 }
+
+/**
+ * The first configured Base RPC that is an Alchemy endpoint, or null. Alchemy's
+ * enhanced APIs (alchemy_getAssetTransfers) only work against its own endpoints,
+ * so callers that use them must be able to find one — and fall back otherwise.
+ */
+export function alchemyRpcUrl(): string | null {
+  const candidates = [
+    process.env.BASE_WRITE_RPC_URL,
+    process.env.BASE_MAINNET_RPC_URL,
+    process.env.NEXT_PUBLIC_BASE_RPC_URL,
+    ...(process.env.BASE_RPC_FALLBACKS?.split(',') ?? []),
+  ]
+  for (const u of candidates) {
+    const url = u?.trim()
+    if (url && /g\.alchemy\.com/i.test(url)) return url
+  }
+  return null
+}
+
+/**
+ * Raw `alchemy_getAssetTransfers`. Unlike `eth_getLogs` — which Alchemy's FREE tier
+ * caps at a 10-block range (a chunked scan there 400s: "up to a 10 block range") —
+ * this has NO range cap, so full transfer history is queryable in one call even
+ * without a paid RPC. That cap is exactly why the withdrawal reconciler's on-chain
+ * verification was silently failing in production.
+ *
+ * Throws if no Alchemy endpoint is configured; callers should fall back to a
+ * chunked getLogs scan (which works on a paid/uncapped RPC).
+ */
+export async function alchemyAssetTransfers(
+  params: Record<string, unknown>,
+): Promise<Array<{ hash: string; to: string; from: string; value: number; rawContract?: { value?: string } }>> {
+  const url = alchemyRpcUrl()
+  if (!url) throw new Error('no Alchemy RPC configured for alchemy_getAssetTransfers')
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'alchemy_getAssetTransfers', params: [params] }),
+    signal: AbortSignal.timeout(20_000),
+  })
+  if (!res.ok) throw new Error(`alchemy_getAssetTransfers HTTP ${res.status}`)
+  const j = await res.json()
+  if (j.error) throw new Error(`alchemy_getAssetTransfers: ${JSON.stringify(j.error)}`)
+  return j.result?.transfers ?? []
+}

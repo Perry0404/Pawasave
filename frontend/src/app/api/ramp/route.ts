@@ -249,6 +249,42 @@ async function recordPlatformFee(
   })
 }
 
+/**
+ * Durably record WHERE an off-ramp is about to send cNGN, BEFORE sending it, and
+ * CONFIRM the write persisted (read-after-write, with retries).
+ *
+ * The settling marker is the ONLY thing that lets the reconciler later verify a
+ * stranded withdrawal on-chain and complete it. A mid-flight Supabase update whose
+ * error is ignored can silently no-op — which is exactly how a delivered ₦4,900
+ * off-ramp ended up with NO marker at all: the cNGN left custody, the row stayed
+ * 'pending', and the reconciler was blind to it. So write, read it back, and only
+ * return true once the address is confirmed on the row. If it can't be confirmed the
+ * caller MUST NOT send — an unverifiable send is worse than a refunded retry.
+ */
+async function commitSettlementMarker(
+  supabase: any,
+  reference: string,
+  depositAddress: string,
+): Promise<boolean> {
+  const marker = `Sent via Flipeet — on-chain: settling → ${depositAddress}`
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { error } = await supabase
+      .from('transactions')
+      .update({ description: marker })
+      .eq('reference', reference)
+    if (!error) {
+      const { data } = await supabase
+        .from('transactions')
+        .select('description')
+        .eq('reference', reference)
+        .maybeSingle()
+      if (data?.description?.includes(depositAddress)) return true
+    }
+    await new Promise((r) => setTimeout(r, 400 * (attempt + 1)))
+  }
+  return false
+}
+
 async function runFlint(
   request: NextRequest,
   supabase: any,
@@ -685,15 +721,16 @@ async function runFlipeet(
           throw e
         }
 
-        // Write an on-chain marker BEFORE sending. If the serverless function dies
-        // after the send confirms but before we can record the hash, the stale-
-        // transaction reconciler must see this marker and NOT refund money that has
-        // already left custody (that false-refund is what inflated a user's balance
-        // when a delivered ₦28k off-ramp got marked failed + refunded).
-        await supabase
-          .from('transactions')
-          .update({ description: `Sent via Flipeet — on-chain: settling → ${depositAddress}` })
-          .eq('reference', reference)
+        // Record the destination BEFORE the irreversible send, and CONFIRM it
+        // persisted. This marker is what lets the reconciler verify a stranded
+        // withdrawal on-chain and complete it. If it can't be durably written, do
+        // NOT send: an un-markered send is exactly what stranded a delivered ₦4,900
+        // (cNGN left custody, row stuck 'pending', reconciler blind). Throwing here
+        // hits the catch below, which refunds — correct, because nothing was sent.
+        const marked = await commitSettlementMarker(supabase, reference, depositAddress)
+        if (!marked) {
+          throw new Error('could not record settlement marker before send — aborted, nothing sent')
+        }
 
         // Send cNGN from custody to Flipeet's dynamic address
         const onChainTxHash = await sendCngn(depositAddress, cngnMicro)

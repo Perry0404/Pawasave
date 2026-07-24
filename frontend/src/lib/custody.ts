@@ -11,7 +11,7 @@
 import { ethers } from 'ethers'
 import { CONTRACTS, ADDRESSES, LEND_ABI, ERC20_ABI } from './contracts'
 import { getSecret } from './secrets'
-import { getWriteProvider, withBaseRead } from './rpc-provider'
+import { getWriteProvider, withBaseRead, alchemyAssetTransfers } from './rpc-provider'
 
 async function getSigner() {
   const key = await getSecret('CUSTODY_PRIVATE_KEY')
@@ -156,6 +156,65 @@ export async function cngnBalanceOf(address: string): Promise<bigint> {
     const cngn = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, provider)
     return b(await cngn.balanceOf(address))
   })
+}
+
+const TRANSFER_ABI = ['event Transfer(address indexed from, address indexed to, uint256 value)']
+
+/**
+ * Did custody send cNGN to `target`? Returns the matching transfer's tx hash +
+ * amount (micro), or null if none. This is the DETERMINISTIC settlement proof for
+ * off-ramp reconciliation: `target` is the provider's unique per-withdrawal deposit
+ * address, so a custody→target cNGN transfer proves that exact withdrawal left
+ * custody — no amount/time guessing.
+ *
+ * Primary path is Alchemy's alchemy_getAssetTransfers (no block-range cap, so it
+ * works on the free tier where a chunked getLogs scan 400s). Falls back to a
+ * chunked getLogs scan for a non-Alchemy/paid RPC; `ageMinutes` sizes that window.
+ */
+export async function custodyCngnTransferTo(
+  target: string,
+  ageMinutes = 180,
+): Promise<{ hash: string; amountMicro: bigint } | null> {
+  const custody = await custodyAddress()
+
+  // Primary: Alchemy enhanced API — no getLogs range cap.
+  try {
+    const transfers = await alchemyAssetTransfers({
+      fromBlock: '0x0',
+      toBlock: 'latest',
+      fromAddress: custody,
+      toAddress: target,
+      contractAddresses: [CONTRACTS.CNGN],
+      category: ['erc20'],
+      excludeZeroValue: true,
+      maxCount: '0xa',
+      order: 'desc',
+    })
+    if (transfers.length > 0) {
+      const t = transfers[0]
+      const micro = t.rawContract?.value ? b(t.rawContract.value) : 0n
+      return { hash: t.hash, amountMicro: micro }
+    }
+    return null
+  } catch {
+    // Fallback: chunked getLogs (works on a paid/uncapped RPC).
+    return withBaseRead(async (provider) => {
+      const cngn = new ethers.Contract(CONTRACTS.CNGN, TRANSFER_ABI, provider)
+      const now = await provider.getBlockNumber()
+      const span = Math.min(120_000, Math.ceil(ageMinutes * 30) + 1_000) // Base ~30 blk/min
+      const chunk = 9_000
+      for (let end = now; end > now - span; end -= chunk) {
+        const start = Math.max(0, end - chunk + 1)
+        const logs = await cngn.queryFilter(cngn.filters.Transfer(custody, target), start, end)
+        if (logs.length > 0) {
+          const l = logs[logs.length - 1] as ethers.EventLog
+          return { hash: l.transactionHash, amountMicro: b(l.args.value) }
+        }
+        if (start === 0) break
+      }
+      return null
+    })
+  }
 }
 
 /** Current cNGN (micro) sitting free in the custody wallet (read-only). */

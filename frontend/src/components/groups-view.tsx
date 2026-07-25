@@ -682,6 +682,10 @@ export default function GroupsView({ user, wallet }: Props) {
             <label className="text-xs text-slate-500 block mb-1">Frequency</label>
             <div className="flex bg-slate-100 rounded-xl p-1">
               <button
+                onClick={() => setFormFreq('daily')}
+                className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition ${formFreq === 'daily' ? 'bg-white shadow-sm text-purple-700' : 'text-slate-500'}`}
+              >Daily</button>
+              <button
                 onClick={() => setFormFreq('weekly')}
                 className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition ${formFreq === 'weekly' ? 'bg-white shadow-sm text-purple-700' : 'text-slate-500'}`}
               >Weekly</button>

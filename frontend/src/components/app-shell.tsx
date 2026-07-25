@@ -8,18 +8,20 @@ import GoalsView from './goals-view'
 import ActivityView from './activity-view'
 import VaultView from './vault-view'
 import InvestView from './invest-view'
+import BorrowView from './borrow-view'
 import KycGate from './kyc-gate'
 import Logo from './logo'
-import { Home, Users, Activity, LifeBuoy, Settings, LogOut, ShieldCheck, X, Vault, Target, TrendingUp } from 'lucide-react'
+import { Home, Users, Activity, LifeBuoy, Settings, LogOut, ShieldCheck, X, Vault, Target, TrendingUp, HandCoins } from 'lucide-react'
 import { useConfirm } from '@/components/confirm-dialog'
 
-type Tab = 'home' | 'vault' | 'goals' | 'invest' | 'groups' | 'activity' | 'support' | 'settings'
+type Tab = 'home' | 'vault' | 'goals' | 'invest' | 'borrow' | 'groups' | 'activity' | 'support' | 'settings'
 
 const tabs: { id: Tab; label: string; Icon: React.FC<any> }[] = [
   { id: 'home',     label: 'Home',    Icon: Home },
   { id: 'vault',    label: 'Save',    Icon: Vault },
   { id: 'goals',    label: 'Goals',   Icon: Target },
   { id: 'invest',   label: 'Invest',  Icon: TrendingUp },
+  { id: 'borrow',   label: 'Borrow',  Icon: HandCoins },
   { id: 'groups', label: 'Groups', Icon: Users },
   { id: 'activity', label: 'Activity', Icon: Activity },
   { id: 'support', label: 'Support', Icon: LifeBuoy },
@@ -42,6 +44,7 @@ export default function AppShell() {
   const [requestHuman, setRequestHuman] = useState(false)
   const [pin, setPin] = useState('')
   const [pinConfirm, setPinConfirm] = useState('')
+  const [pinCurrent, setPinCurrent] = useState('')
   const [settingsFeedback, setSettingsFeedback] = useState('')
 
   const refresh = async () => { await Promise.all([refreshWallet(), refreshTx()]) }
@@ -103,11 +106,18 @@ export default function AppShell() {
       return
     }
     try {
-      const { updateTransactionPin } = await import('@/hooks/use-data')
-      await updateTransactionPin(user?.id || '', pin)
+      // Server-verified change (requires the current PIN when one already exists).
+      const res = await fetch('/api/security/pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPin: pin, currentPin: pinCurrent || undefined }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error || 'Failed to update PIN')
       await refreshProfile()
       setPin('')
       setPinConfirm('')
+      setPinCurrent('')
       setSettingsFeedback('Transaction PIN updated successfully')
     } catch (e: any) {
       setSettingsFeedback(e?.message || 'Failed to update PIN')
@@ -160,6 +170,7 @@ export default function AppShell() {
           {tab === 'vault' && <VaultView wallet={wallet} refresh={refresh} />}
           {tab === 'goals' && <GoalsView wallet={wallet} refresh={refresh} />}
           {tab === 'invest' && <InvestView wallet={wallet} profile={profile} refresh={refresh} onStartKyc={() => setShowKycGate(true)} />}
+          {tab === 'borrow' && <BorrowView wallet={wallet} refresh={refresh} />}
           {tab === 'groups' && <GroupsView user={user} wallet={wallet} />}
           {tab === 'activity' && <ActivityView transactions={transactions} wallet={wallet} profile={profile} />}
           {tab === 'support' && (
@@ -249,6 +260,17 @@ export default function AppShell() {
               <div className="bg-white/95 rounded-2xl p-5 border border-white/60">
                 <h3 className="text-sm font-semibold text-slate-900">Payment Security</h3>
                 <p className="text-xs text-slate-500 mt-1">Set or change your 4-digit withdrawal PIN.</p>
+                {profile?.transaction_pin_hash && (
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={pinCurrent}
+                    onChange={(e) => setPinCurrent(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Current PIN"
+                    className="mt-3 w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                )}
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <input
                     type="password"

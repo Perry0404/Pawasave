@@ -43,6 +43,10 @@
     {
       "path": "/api/cron/strails-reconcile",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/loan-maintenance",
+      "schedule": "0 */6 * * *"
     }
   ]
 }

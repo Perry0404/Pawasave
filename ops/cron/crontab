@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PawaSave crontab — exact mirror of the former frontend/vercel.json crons.
+# Install on the VPS host:   crontab /opt/pawasave/crontab
+#
+# IMPORTANT: Vercel Cron ran in UTC. CRON_TZ=UTC below keeps the daily jobs
+# (accrue-yield 00:00, auto-contribute 01:00, harvest-vault 02:00) firing at the
+# SAME wall-clock time they did on Vercel, regardless of the server's timezone.
+#
+# Prereqs on the box:
+#   /opt/pawasave/pawasave-cron.sh   (chmod +x)
+#   /opt/pawasave/cron.env           (BASE_URL, CRON_SECRET, HC_PING_BASE, HC_* uuids)
+# Create one healthchecks.io check per job and paste its UUID into cron.env.
+# ─────────────────────────────────────────────────────────────────────────────
+SHELL=/bin/sh
+CRON_TZ=UTC
+
+# ── every 10 min ─────────────────────────────────────────────────────────────
+*/10 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/scan-deposits     "$HC_SCAN_DEPOSITS"
+*/10 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/update-oracle      "$HC_UPDATE_ORACLE"
+*/10 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/strails-reconcile  "$HC_STRAILS_RECONCILE"
+
+# ── every 15 min ─────────────────────────────────────────────────────────────
+*/15 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/reconcile-withdrawals "$HC_RECONCILE_WITHDRAWALS"
+
+# ── every 30 min ─────────────────────────────────────────────────────────────
+*/30 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/liquidate       "$HC_LIQUIDATE"
+*/30 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/sweep-deposits  "$HC_SWEEP_DEPOSITS"
+
+# ── every 6 hours ────────────────────────────────────────────────────────────
+0 */6 * * *   . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/update-yield-apy  "$HC_UPDATE_YIELD_APY"
+0 */6 * * *   . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/loan-maintenance  "$HC_LOAN_MAINTENANCE"
+
+# ── daily (UTC) ──────────────────────────────────────────────────────────────
+0 0 * * *     . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/accrue-yield     "$HC_ACCRUE_YIELD"
+0 1 * * *     . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/auto-contribute  "$HC_AUTO_CONTRIBUTE"
+0 2 * * *     . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/harvest-vault    "$HC_HARVEST_VAULT"

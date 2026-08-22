@@ -1,0 +1,19 @@
+# Keep the build context small and secrets out of the image.
+node_modules
+.next
+npm-debug.log*
+.git
+.gitignore
+
+# Never ship env files into the image (secrets are injected at runtime).
+.env
+.env.*
+!.env.example
+
+# Local/editor cruft
+.DS_Store
+*.pem
+coverage
+.vscode
+.idea
+README*.md

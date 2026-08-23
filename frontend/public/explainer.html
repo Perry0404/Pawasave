@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PawaSave — Explainer</title>
+<style>
+  :root{
+    --green:#10b981; --green-d:#047857; --mint:#6ee7b7; --pale:#d1fae5;
+    --ink:#ecfdf5; --dim:#8fd3b6;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;background:#03150f;overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);-webkit-font-smoothing:antialiased}
+  #stage{position:fixed;inset:0;display:grid;place-items:center;
+    background:radial-gradient(120% 120% at 50% 0%,#075e42 0%,#04211a 55%,#03150f 100%)}
+  /* animated ambient blobs */
+  .blob{position:absolute;border-radius:50%;filter:blur(60px);opacity:.35;pointer-events:none}
+  .b1{width:44vw;height:44vw;background:#0d9488;top:-14vw;left:-8vw;animation:float 14s ease-in-out infinite}
+  .b2{width:38vw;height:38vw;background:#065f46;bottom:-12vw;right:-6vw;animation:float 18s ease-in-out infinite reverse}
+  @keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(3vw,3vw)}}
+
+  .scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;text-align:center;padding:6vh 6vw;opacity:0;transform:translateY(18px) scale(.98);
+    transition:opacity .7s ease,transform .7s ease;pointer-events:none}
+  .scene.active{opacity:1;transform:none}
+
+  h1{font-size:clamp(34px,7vw,104px);font-weight:800;letter-spacing:-.03em;line-height:1.02}
+  h2{font-size:clamp(26px,5.2vw,72px);font-weight:800;letter-spacing:-.02em;line-height:1.06}
+  .sub{font-size:clamp(15px,2.2vw,30px);color:var(--dim);font-weight:500;margin-top:22px;max-width:20ch;line-height:1.4}
+  .accent{color:var(--mint)}
+  .tag{display:inline-block;margin-top:26px;font-size:clamp(12px,1.5vw,17px);font-weight:700;
+    letter-spacing:.14em;text-transform:uppercase;color:#03150f;background:var(--mint);
+    padding:7px 15px;border-radius:999px}
+  .soon{position:absolute;top:6vh;right:6vw;font-size:clamp(11px,1.3vw,15px);font-weight:700;
+    letter-spacing:.12em;text-transform:uppercase;color:var(--mint);border:1.5px solid #14805c;
+    padding:6px 13px;border-radius:999px;background:rgba(16,185,129,.08)}
+
+  /* staggered reveal for children of an active scene */
+  .scene.active .up{animation:up .7s cubic-bezier(.2,.7,.2,1) both}
+  .scene.active .up:nth-child(2){animation-delay:.12s}
+  .scene.active .up:nth-child(3){animation-delay:.24s}
+  .scene.active .up:nth-child(4){animation-delay:.36s}
+  @keyframes up{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
+
+  /* logo monogram */
+  .logo{width:clamp(78px,12vw,150px);height:clamp(78px,12vw,150px);border-radius:26%;
+    background:linear-gradient(150deg,var(--green),var(--green-d));display:grid;place-items:center;
+    font-weight:800;color:#03150f;font-size:clamp(44px,7vw,86px);box-shadow:0 24px 70px rgba(16,185,129,.35);
+    margin-bottom:30px}
+  .wordmark{font-size:clamp(30px,6vw,80px);font-weight:800;letter-spacing:-.02em}
+  .dots{display:flex;gap:14px;margin-top:26px;flex-wrap:wrap;justify-content:center}
+  .dots span{font-size:clamp(13px,1.9vw,24px);font-weight:700;color:var(--mint)}
+  .dots i{color:#2f7a5c;font-style:normal}
+
+  /* problem list */
+  .plist{display:flex;flex-direction:column;gap:16px;margin-top:34px}
+  .prow{display:flex;align-items:center;gap:16px;font-size:clamp(17px,3vw,40px);font-weight:700}
+  .prow .x{width:1.15em;height:1.15em;border-radius:50%;background:rgba(255,120,120,.16);
+    color:#ff8a8a;display:grid;place-items:center;font-size:.7em;flex:0 0 auto}
+
+  /* balance card */
+  .card{background:rgba(255,255,255,.05);border:1px solid rgba(110,231,183,.22);border-radius:26px;
+    padding:clamp(22px,3.4vw,46px) clamp(28px,4.5vw,64px);backdrop-filter:blur(6px);
+    box-shadow:0 30px 80px rgba(0,0,0,.35)}
+  .card .lbl{font-size:clamp(12px,1.6vw,19px);color:var(--dim);font-weight:600;letter-spacing:.04em}
+  .bal{font-size:clamp(40px,8vw,110px);font-weight:800;letter-spacing:-.03em;line-height:1;margin-top:8px}
+  .yield{margin-top:14px;font-size:clamp(13px,1.9vw,25px);color:var(--mint);font-weight:700}
+  .yield .arrow{display:inline-block;animation:bob 1.4s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+
+  /* borrow flow */
+  .flow{display:flex;align-items:center;gap:clamp(14px,3vw,42px);margin-top:34px;flex-wrap:wrap;justify-content:center}
+  .chip{background:rgba(255,255,255,.05);border:1px solid rgba(110,231,183,.25);border-radius:20px;
+    padding:clamp(16px,2.4vw,30px) clamp(20px,3vw,40px);font-weight:800;font-size:clamp(16px,2.6vw,34px);min-width:8ch}
+  .chip small{display:block;font-size:.5em;color:var(--dim);font-weight:600;letter-spacing:.03em;margin-top:6px}
+  .to{font-size:clamp(24px,4vw,54px);color:var(--mint);animation:slidearr 1.3s ease-in-out infinite}
+  @keyframes slidearr{0%,100%{transform:translateX(0)}50%{transform:translateX(8px)}}
+
+  /* phone tap */
+  .paywrap{display:flex;align-items:center;gap:clamp(20px,5vw,70px);margin-top:30px}
+  .phone{width:clamp(96px,15vw,190px);height:clamp(190px,30vw,360px);border-radius:28px;
+    background:linear-gradient(160deg,#0b3b2c,#052018);border:2px solid #14805c;position:relative;
+    box-shadow:0 30px 70px rgba(0,0,0,.45);animation:leanin 2.6s ease-in-out infinite}
+  @keyframes leanin{0%,100%{transform:rotate(-6deg) translateX(0)}50%{transform:rotate(-6deg) translateX(18px)}}
+  .phone::before{content:"";position:absolute;top:14px;left:50%;transform:translateX(-50%);
+    width:34%;height:7px;border-radius:6px;background:#0f5c44}
+  .nfc{position:absolute;inset:0;display:grid;place-items:center;color:var(--mint);font-size:clamp(26px,4vw,52px)}
+  .pos{width:clamp(120px,18vw,230px);height:clamp(150px,23vw,290px);border-radius:20px;
+    background:#0a2c22;border:1px solid #14805c;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:10px;position:relative}
+  .pos .amt{font-weight:800;font-size:clamp(18px,3vw,40px)}
+  .pos .ok{opacity:0;color:var(--mint);font-weight:800;font-size:clamp(15px,2.4vw,30px)}
+  .scene.active .pos .ok{animation:approve .8s ease .9s both}
+  @keyframes approve{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:none}}
+  .ring{position:absolute;width:34px;height:34px;border-radius:50%;border:3px solid var(--mint);
+    left:-8px;top:50%;opacity:0}
+  .scene.active .ring{animation:ring 1.6s ease-out infinite}
+  @keyframes ring{0%{opacity:.9;transform:translateY(-50%) scale(.4)}100%{opacity:0;transform:translateY(-50%) scale(2.4)}}
+
+  .trust{display:flex;gap:clamp(14px,2.4vw,32px);margin-top:32px;flex-wrap:wrap;justify-content:center}
+  .pill2{background:rgba(255,255,255,.05);border:1px solid rgba(110,231,183,.25);border-radius:14px;
+    padding:12px 20px;font-weight:700;font-size:clamp(13px,1.9vw,24px)}
+  .url{margin-top:30px;font-size:clamp(16px,2.6vw,34px);font-weight:800;color:var(--mint)}
+
+  /* progress + controls */
+  #bar{position:fixed;left:0;bottom:0;height:5px;width:0;background:linear-gradient(90deg,var(--green),var(--mint));z-index:5}
+  .ctl{position:fixed;bottom:18px;right:20px;z-index:6;background:rgba(3,21,15,.6);border:1px solid #14805c;
+    color:var(--mint);font-weight:700;font-size:14px;padding:10px 16px;border-radius:999px;cursor:pointer;
+    backdrop-filter:blur(6px);display:none}
+  #overlay{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:rgba(3,21,15,.86);
+    backdrop-filter:blur(4px);cursor:pointer;text-align:center;padding:6vw}
+  #overlay .play{width:96px;height:96px;border-radius:50%;background:var(--green);display:grid;place-items:center;
+    margin:0 auto 22px;box-shadow:0 20px 60px rgba(16,185,129,.4)}
+  #overlay .play svg{width:40px;height:40px;fill:#03150f;margin-left:5px}
+  #overlay h3{font-size:clamp(20px,3vw,34px);font-weight:800}
+  #overlay p{color:var(--dim);margin-top:12px;font-size:clamp(13px,1.8vw,18px);max-width:34ch;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="blob b1"></div><div class="blob b2"></div>
+
+  <!-- 1 · intro -->
+  <section class="scene" data-dur="7">
+    <div class="logo up">B</div>
+    <div class="wordmark up">PawaSave</div>
+    <div class="dots up"><span>Save</span><i>·</i><span>Earn</span><i>·</i><span>Borrow</span><i>·</i><span>Spend</span></div>
+    <div class="sub up" style="max-width:26ch">The cNGN money app, built for Nigeria.</div>
+  </section>
+
+  <!-- 2 · problem -->
+  <section class="scene" data-dur="13">
+    <h2 class="up">The naira doesn&rsquo;t wait.</h2>
+    <div class="plist">
+      <div class="prow up"><span class="x">✕</span> Savings quietly lose value.</div>
+      <div class="prow up"><span class="x">✕</span> Credit costs 40&ndash;80%.</div>
+      <div class="prow up"><span class="x">✕</span> To get cash, you break your savings.</div>
+    </div>
+  </section>
+
+  <!-- 3 · meet -->
+  <section class="scene" data-dur="8">
+    <h2 class="up">One app changes that.</h2>
+    <h1 class="up accent" style="margin-top:10px">PawaSave</h1>
+  </section>
+
+  <!-- 4 · save + yield -->
+  <section class="scene" data-dur="16">
+    <div class="up" style="font-size:clamp(20px,3.4vw,44px);font-weight:800;margin-bottom:26px">Save in <span class="accent">cNGN</span>.</div>
+    <div class="card up">
+      <div class="lbl">Your balance</div>
+      <div class="bal" id="bal">&#8358;0</div>
+      <div class="yield"><span class="arrow">&#9650;</span> earning automatically</div>
+    </div>
+    <div class="sub up" style="max-width:30ch">Real yield, backed by Nigerian Treasury bills &mdash; working for you 24/7.</div>
+  </section>
+
+  <!-- 5 · borrow -->
+  <section class="scene" data-dur="15">
+    <h2 class="up">Need cash? Don&rsquo;t sell.</h2>
+    <div class="flow up">
+      <div class="chip">Your savings<small>held as collateral</small></div>
+      <div class="to">&rarr;</div>
+      <div class="chip accent">Borrow cNGN<small>instantly, in-app</small></div>
+    </div>
+    <div class="sub up" style="max-width:32ch">Borrow against your savings without breaking them &mdash; your money keeps earning while you spend.</div>
+  </section>
+
+  <!-- 6 · spend -->
+  <section class="scene" data-dur="15">
+    <div class="soon">Coming soon</div>
+    <h2 class="up">Then spend it &mdash; anywhere.</h2>
+    <div class="paywrap up">
+      <div class="phone"><div class="nfc">&#128241;</div></div>
+      <div class="pos"><div class="ring"></div><div class="amt">&#8358;25,000</div><div class="ok">Approved &#10003;</div></div>
+    </div>
+    <div class="sub up" style="max-width:30ch">Tap your phone. Spend straight from your PawaSave balance.</div>
+  </section>
+
+  <!-- 7 · trust -->
+  <section class="scene" data-dur="8">
+    <h2 class="up">Built to be trusted.</h2>
+    <div class="trust">
+      <div class="pill2 up">On Base</div>
+      <div class="pill2 up">Settled in cNGN</div>
+      <div class="pill2 up">Audited &amp; secured</div>
+    </div>
+  </section>
+
+  <!-- 8 · outro -->
+  <section class="scene" data-dur="9">
+    <div class="logo up">B</div>
+    <h2 class="up">Save. Earn. Borrow. Spend.</h2>
+    <div class="url up">pawasave.xyz</div>
+  </section>
+</div>
+
+<div id="bar"></div>
+<button class="ctl" id="replay">&#8635; Replay</button>
+
+<div id="overlay">
+  <div>
+    <div class="play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+    <h3>PawaSave &mdash; 90-second explainer</h3>
+    <p>Start your Loom recording, then click anywhere to play. It runs once through, then shows a Replay button.</p>
+  </div>
+</div>
+
+<script>
+  const scenes = [...document.querySelectorAll('.scene')];
+  const durs = scenes.map(s => (+s.dataset.dur) * 1000);
+  const total = durs.reduce((a,b)=>a+b,0);
+  const bar = document.getElementById('bar');
+  const replay = document.getElementById('replay');
+  const overlay = document.getElementById('overlay');
+  let timers = [], startT = 0, raf = 0;
+
+  function countUp(el, to, ms){
+    const t0 = performance.now();
+    (function step(now){
+      const p = Math.min(1, (now - t0) / ms);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = '₦' + Math.floor(to * eased).toLocaleString();
+      if (p < 1) requestAnimationFrame(step);
+    })(t0);
+  }
+
+  function clearAll(){ timers.forEach(clearTimeout); timers = []; cancelAnimationFrame(raf); }
+
+  function play(){
+    clearAll();
+    scenes.forEach(s=>s.classList.remove('active'));
+    replay.style.display = 'none';
+    let t = 0;
+    scenes.forEach((s, i) => {
+      timers.push(setTimeout(() => {
+        scenes.forEach(x=>x.classList.remove('active'));
+        s.classList.add('active');
+        const bal = s.querySelector('#bal');
+        if (bal) countUp(bal, 250000, Math.min(durs[i]-1500, 5000));
+      }, t));
+      t += durs[i];
+    });
+    timers.push(setTimeout(() => { replay.style.display = 'block'; }, total));
+    // progress bar
+    startT = performance.now();
+    (function tick(now){
+      const p = Math.min(1, (now - startT) / total);
+      bar.style.width = (p*100) + '%';
+      if (p < 1) raf = requestAnimationFrame(tick);
+    })(startT);
+  }
+
+  overlay.addEventListener('click', () => { overlay.style.display = 'none'; play(); });
+  replay.addEventListener('click', play);
+</script>
+</body>
+</html>

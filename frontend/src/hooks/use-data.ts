@@ -58,18 +58,38 @@ export function useAuth() {
     return data
   }
 
+  // Google OAuth — same for sign-up and sign-in. Redirects to Google, then back to
+  // /auth/callback which exchanges the code for a session. A first-time Google user
+  // gets a profile + wallet from the on_auth_user_created trigger but NO transaction
+  // PIN, so the app forces a one-time PIN setup on first entry (see AppShell). Users
+  // who signed up with email + PIN already have one and are never prompted again.
+  const signInWithGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=/`,
+        queryParams: { prompt: 'select_account' },
+      },
+    })
+    if (error) throw error
+  }
+
   const signOut = async () => {
     await supabase.auth.signOut()
   }
 
   const resetPassword = async (email: string) => {
+    // Land directly on /reset-password and exchange the PKCE code there, client-side,
+    // where the code_verifier reliably lives. Routing recovery through the server
+    // /auth/callback failed the exchange (verifier not available) and dumped users on
+    // the sign-in screen instead of the set-password form.
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+      redirectTo: `${window.location.origin}/reset-password`,
     })
     if (error) throw error
   }
 
-  return { user, loading, signUp, signIn, signOut, resetPassword }
+  return { user, loading, signUp, signIn, signInWithGoogle, signOut, resetPassword }
 }
 
 export function useProfile() {

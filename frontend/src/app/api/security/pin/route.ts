@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { hashPin, verifyPin } from '@/lib/pin-hash'
+import { pinLockGuard, recordPinResult } from '@/lib/pin-lockout'
 
 /**
  * POST /api/security/pin — set or change the 4-digit transaction PIN, securely.
@@ -46,8 +47,11 @@ export async function POST(request: NextRequest) {
     if (!/^\d{4}$/.test(currentPin)) {
       return NextResponse.json({ error: 'Enter your current PIN to change it' }, { status: 400 })
     }
+    const lock = await pinLockGuard(user.id)
+    if (lock.locked) return NextResponse.json({ error: lock.message }, { status: 429 })
     const { ok } = verifyPin(currentPin, profile.transaction_pin_hash)
-    if (!ok) return NextResponse.json({ error: 'Current PIN is incorrect' }, { status: 401 })
+    const attempt = await recordPinResult(user.id, ok)
+    if (!ok) return NextResponse.json({ error: attempt.message || 'Current PIN is incorrect' }, { status: attempt.justLocked ? 429 : 401 })
     if (currentPin === newPin) {
       return NextResponse.json({ error: 'New PIN must be different from the current one' }, { status: 400 })
     }

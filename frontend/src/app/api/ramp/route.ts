@@ -13,6 +13,8 @@ import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
 import { sendCngn, cngnToShares, withdrawFromLend, custodyCngnBalance, custodyAddress } from '@/lib/custody'
 import { createClient } from '@supabase/supabase-js'
 import { verifyPin } from '@/lib/pin-hash'
+import { pinLockGuard, recordPinResult } from '@/lib/pin-lockout'
+import { sendWithdrawalEmail } from '@/lib/notify-tx'
 import { custodyLendShares } from '@/lib/custody'
 
 // Off-ramp does a Flipeet API call + TWO sequential Base txs (redeem from the
@@ -109,7 +111,26 @@ function formatProviderError(provider: Provider, error: unknown) {
     return 'Withdrawals are temporarily unavailable. Please try again in a few minutes or contact support.'
   }
 
+  // Beneficiary validation from the payout provider — the user CAN fix these, so
+  // surface an actionable (still non-revealing) message instead of a generic outage.
+  if (/beneficiary|bank account|account number|account name|\bname\b|alphanumeric/i.test(message)) {
+    return 'We couldn’t verify those bank details. Check the account number, bank, and account name (letters only — no symbols), then try again.'
+  }
+
   return 'Payment provider is temporarily unavailable. Please try again shortly, or contact support if it persists.'
+}
+
+// Flipeet rejects beneficiary names containing non-alphanumeric characters (e.g. the
+// hyphen in "pascal-mary chinonso" → 400 "Name can only contain alphanumeric
+// characters"). Reduce to letters, digits and single spaces — that satisfies the
+// provider's rule without changing who is paid: the bank resolves the real account
+// name from the account number during the beneficiary lookup.
+function sanitizeBeneficiaryName(name: string): string {
+  return (name || '')
+    .normalize('NFKD').replace(/[̀-ͯ]/g, '') // strip accents
+    .replace(/[^A-Za-z0-9 ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 async function getNumberSetting(supabase: any, key: string, fallback: number): Promise<number> {
@@ -156,9 +177,14 @@ async function ensureWithdrawalPin(
     return NextResponse.json({ error: 'Set your transaction PIN in Settings first' }, { status: 400 })
   }
 
+  // Account-level brute-force lock (FIND-AUTH-*): refuse before verifying if locked.
+  const lock = await pinLockGuard(userId)
+  if (lock.locked) return NextResponse.json({ error: lock.message }, { status: 429 })
+
   const { ok, upgrade } = verifyPin(transactionPin, profile.transaction_pin_hash)
+  const attempt = await recordPinResult(userId, ok)
   if (!ok) {
-    return NextResponse.json({ error: 'Incorrect transaction PIN' }, { status: 401 })
+    return NextResponse.json({ error: attempt.message || 'Incorrect transaction PIN' }, { status: attempt.justLocked ? 429 : 401 })
   }
 
   // Opportunistically migrate a legacy unsalted SHA-256 PIN to salted scrypt
@@ -202,7 +228,7 @@ async function maybeDebitForWithdrawal(
     const shortfall = cngnMicro - spendable
     const pool = Number(wallet?.cngn_pool_micro || 0)
     if (pool < shortfall) {
-      await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+      await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
       return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 })
     }
     const { data: moved } = await supabase.rpc('withdraw_cngn_pool', {
@@ -210,7 +236,7 @@ async function maybeDebitForWithdrawal(
       p_amount_micro: shortfall,
     })
     if (!moved) {
-      await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+      await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
       return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 })
     }
   }
@@ -222,7 +248,7 @@ async function maybeDebitForWithdrawal(
   })
 
   if (!ok) {
-    await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+    await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
     return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 })
   }
 
@@ -261,19 +287,41 @@ async function recordPlatformFee(
  * return true once the address is confirmed on the row. If it can't be confirmed the
  * caller MUST NOT send — an unverifiable send is worse than a refunded retry.
  */
+// Service-role client for server-authoritative writes that MUST bypass RLS.
+// The `transactions` table has only SELECT + INSERT RLS policies (001_initial),
+// so the user-scoped client silently no-ops any UPDATE (0 rows, NO error) — which
+// is exactly what made off-ramp settlement markers and status updates vanish: the
+// marker read-back never matched, so every withdrawal aborted "nothing sent", and
+// before the marker guard a sent withdrawal's 'completed' update silently failed
+// and stranded the row on 'pending'. These writes are server-authoritative (the
+// caller was already authenticated + PIN-verified upstream), so use service role.
+let _adminDb: any = null
+function adminDb() {
+  if (_adminDb) return _adminDb
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return null
+  _adminDb = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    { auth: { persistSession: false } },
+  )
+  return _adminDb
+}
+
 async function commitSettlementMarker(
   supabase: any,
   reference: string,
   depositAddress: string,
 ): Promise<boolean> {
+  // Bypass RLS — otherwise the UPDATE no-ops and the marker never persists.
+  const db = adminDb() ?? supabase
   const marker = `Sent via Flipeet — on-chain: settling → ${depositAddress}`
   for (let attempt = 0; attempt < 3; attempt++) {
-    const { error } = await supabase
+    const { error } = await db
       .from('transactions')
       .update({ description: marker })
       .eq('reference', reference)
     if (!error) {
-      const { data } = await supabase
+      const { data } = await db
         .from('transactions')
         .select('description')
         .eq('reference', reference)
@@ -557,7 +605,7 @@ async function runXend(
       // Best-effort debit back; if this also fails the merchant wallet already has the funds
     }
     await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: usdcMicro })
-    await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+    await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
     throw new Error(xendErr.message || 'Xend withdrawal failed. Please try again.')
   }
 }
@@ -571,6 +619,7 @@ async function runFlipeet(
   bankCode?: string,
   accountNumber?: string,
   holderName?: string,
+  bankName?: string,
   /** 'NGN' (default) or 'USD' — only applies to on-ramp */
   depositCurrency: 'NGN' | 'USD' = 'NGN',
 ): Promise<ProviderResult> {
@@ -586,6 +635,28 @@ async function runFlipeet(
   )
   const origin = request.nextUrl.origin || 'https://pawasave.xyz'
   const pawaFeeKobo = Math.round(pawaFeeNaira * 100)
+
+  // GROSS-UP (off-ramp): the user receives exactly `amount`; our 1.5% fee is added ON
+  // TOP, not netted out of the payout. So we DEBIT amount+fee but only SEND `amount`
+  // to Flipeet — the fee cNGN stays in custody as real, backed revenue (not phantom).
+  // amount_kobo on the row = the TOTAL debited, so every refund path (here + the
+  // reconcilers, which all refund from amount_kobo) returns the full debit automatically.
+  // Off-ramp fee model (verified via live Flipeet quotes): the bank receives
+  // source × rate (rate ≈ 0.99 — a ~1% spread incl. Flipeet's developer_fee). So to
+  // deliver the FULL `amount` to the recipient we must SEND amount/rate; that uplift
+  // is Flipeet's fee, paid by the user ON TOP. Our 1.5% is added on top of that, and
+  // only OUR fee is retained in custody.
+  let offSendNaira = amount
+  let offFlipeetFeeNaira = 0
+  if (type === 'off') {
+    const rateInfo = await getFlipeetRate('off').catch(() => null)
+    const r = Number(rateInfo?.rate)
+    const rate = r > 0 && r <= 1 ? r : 1
+    offSendNaira = Math.round(amount / rate)
+    offFlipeetFeeNaira = Math.max(0, offSendNaira - amount)
+  }
+  const offrampTotalNaira = offSendNaira + pawaFeeNaira // debited: send (incl. Flipeet fee) + our 1.5%
+  const offrampDebitMicro = Math.floor(offrampTotalNaira * 1_000_000)
   // Embed a secret token in the callback URL so the flipeet-webhook handler can
   // reject forged requests (FIND-API-01). Only Flipeet ever receives this URL.
   const webhookToken = process.env.FLIPEET_WEBHOOK_TOKEN
@@ -599,13 +670,16 @@ async function runFlipeet(
       user_id: userId,
       type: 'withdrawal',
       direction: 'debit',
-      amount_kobo: Math.round(amount * 100),
+      amount_kobo: Math.round(offrampTotalNaira * 100), // TOTAL debited (net + Flipeet fee + our 1.5%)
       platform_fee_kobo: pawaFeeKobo,
-      description: 'Sent via Flipeet',
+      description: `Sent via Flipeet — ₦${amount.toLocaleString()} to bank (₦${pawaFeeNaira.toLocaleString()} fee${offFlipeetFeeNaira ? ` + ₦${offFlipeetFeeNaira.toLocaleString()} network` : ''})`,
       reference,
       status: 'pending',
+      // Persist the destination so the app's detail sheet + the email receipt can
+      // show where the money went (bank, account name, account no).
+      metadata: { bank_name: bankName || null, account_name: holderName || null, account_number: accountNumber || null, net_naira: amount, fee_naira: pawaFeeNaira, flipeet_fee_naira: offFlipeetFeeNaira },
     })
-    const debitError = await maybeDebitForWithdrawal(supabase, userId, amount, reference)
+    const debitError = await maybeDebitForWithdrawal(supabase, userId, offrampTotalNaira, reference)
     if (debitError) throw new Error('INSUFFICIENT_BALANCE')
   }
 
@@ -626,19 +700,21 @@ async function runFlipeet(
         country: depositCurrency === 'USD' ? 'US' : (process.env.FLIPEET_COUNTRY_CODE || 'NG'),
       })
       : await initializeFlipeetOffRamp({
-        amount,
+        // Send the grossed-up source so the bank receives the FULL `amount` after
+        // Flipeet's spread — offSendNaira = amount/rate.
+        amount: offSendNaira,
         reference,
         callbackUrl: `${origin}/api/flipeet-webhook${webhookToken}`,
         bankCode: bankCode || '',
         accountNumber: accountNumber || '',
-        holderName: holderName || process.env.RAMP_BENEFICIARY_NAME || 'PawaSave User',
+        holderName: sanitizeBeneficiaryName(holderName || process.env.RAMP_BENEFICIARY_NAME || 'PawaSave User') || 'PawaSave User',
       })
   } catch (apiErr: unknown) {
     if (type === 'off') {
-      // Refund the user — balance was debited before this API call (cNGN 1:1)
-      const cngnMicro = Math.floor(amount * 1_000_000)
-      await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: cngnMicro })
-      await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+      // Refund the FULL debit (net + fee), not just the net — the user was debited
+      // amount+fee before this API call.
+      await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
+      await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
     }
     throw apiErr
   }
@@ -659,7 +735,7 @@ async function runFlipeet(
   } else {
     // Off-ramp: Flipeet gives a dynamic deposit address per transaction.
     // We must send cNGN to that address — custody wallet signs the on-chain transfer.
-    await supabase
+    await (adminDb() ?? supabase)
       .from('transactions')
       .update({ paychant_tx_id: result.reference || null })
       .eq('reference', reference)
@@ -668,9 +744,9 @@ async function runFlipeet(
 
     if (depositAddress) {
       try {
-        // Convert NGN amount → cNGN micro (1 NGN = 1 cNGN, 6 decimals)
-        // First pull from PawasaveLend if needed, then send to Flipeet
-        const cngnMicro = BigInt(Math.floor(amount * 1_000_000))
+        // Send the grossed-up source cNGN (so the bank receives the full `amount`).
+        // First pull from PawasaveLend if needed, then send to Flipeet.
+        const cngnMicro = BigInt(Math.floor(offSendNaira * 1_000_000))
 
         // Pay from custody's RAW cNGN when it already covers the payout, and only
         // tap PawasaveLend for the shortfall — redeeming at most the psNGN shares
@@ -709,8 +785,8 @@ async function runFlipeet(
           console.error('Flipeet off-ramp: custody cNGN shortfall', {
             reference, needed: cngnMicro.toString(), available: available.toString(),
           })
-          await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: Number(cngnMicro) })
-          await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+          await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
+          await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
           const e: any = new Error(`Not enough settled cNGN to cover this withdrawal (have ${(Number(available) / 1e6).toFixed(2)}, need ${(Number(cngnMicro) / 1e6).toFixed(2)}) — your balance was refunded.`)
           e.onChainFail = true
           // This path ALREADY refunded. Without this flag the catch below treats the
@@ -742,21 +818,26 @@ async function runFlipeet(
         // to leave settled withdrawals stuck 'pending' forever even after the bank
         // was credited. The webhook's 'failed' path still refunds if Flipeet later
         // reports a genuine failure.
-        await supabase
+        await (adminDb() ?? supabase)
           .from('transactions')
           .update({ status: 'completed', description: `Sent via Flipeet — on-chain: ${onChainTxHash}` })
           .eq('reference', reference)
 
         console.info('Flipeet off-ramp: sent cNGN on-chain', { reference, depositAddress, onChainTxHash })
+
+        // Email receipt — never let a mail hiccup fail a completed withdrawal.
+        sendWithdrawalEmail(userId, {
+          amountNgn: amount, bankName, accountName: holderName, accountNumber, reference,
+        }).catch(() => {})
       } catch (sendErr: unknown) {
         // If the on-chain send fails, refund user and mark failed — UNLESS the inner
         // guard already refunded (see e.alreadyRefunded above), otherwise one debit
         // gets refunded twice and inflates the balance.
         console.error('Flipeet off-ramp on-chain transfer failed:', sendErr)
         if (!(sendErr as any)?.alreadyRefunded) {
-          await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: Math.floor(amount * 1_000_000) })
+          await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
         }
-        await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+        await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
         const reason = sendErr instanceof Error ? ((sendErr as any).shortMessage || sendErr.message) : String(sendErr)
         const e: any = new Error(`Withdrawal couldn't be settled on-chain (${reason}). Your balance was refunded.`)
         e.onChainFail = true
@@ -767,8 +848,8 @@ async function runFlipeet(
       // already debited before this call — refund, mark failed, and surface an error
       // instead of leaving the transaction pending forever with funds gone.
       console.error('Flipeet off-ramp: no deposit address in response', result)
-      await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: Math.floor(amount * 1_000_000) })
-      await supabase.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+      await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
+      await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
       throw new Error('Off-ramp failed — no settlement address returned. Your balance was refunded.')
     }
   }
@@ -779,7 +860,7 @@ async function runFlipeet(
     userId,
     reference,
     type === 'on' ? 'ramp_onramp' : 'ramp_offramp',
-    Math.round(amount * 100),
+    type === 'off' ? Math.round(offrampTotalNaira * 100) : Math.round(amount * 100),
     pawaFeeKobo,
     feePercent,
   )
@@ -793,14 +874,75 @@ async function runFlipeet(
     accountNumber: result.deposit?.account_number,
     accountName: result.deposit?.account_name,
     depositAddress: result.deposit?.address,
-    amount: Math.round(amount),
+    amount: Math.round(amount), // net the recipient receives
     currency: result.destination?.currency || result.deposit?.asset,
     network: result.destination?.network || process.env.FLIPEET_NETWORK || 'base',
     pawaFee: pawaFeeNaira,
-    providerFee: providerFeeNaira,
-    totalFee: pawaFeeNaira + providerFeeNaira,
+    providerFee: type === 'off' ? offFlipeetFeeNaira : providerFeeNaira,
+    totalFee: pawaFeeNaira + (type === 'off' ? offFlipeetFeeNaira : providerFeeNaira),
     feePercent,
   }
+}
+
+// Lite-tier (BVN-only, no biometric KYC) WITHDRAWAL cap. Unverified users can deposit
+// any amount, but can only off-ramp up to this per withdrawal — bigger cash-out needs
+// full (Sense) KYC. "Full" is exactly kyc_status='verified' (see migration 058), so we
+// key off kyc_status and never read the new kyc_tier column — safe to deploy in any
+// order relative to the migration.
+const LITE_KYC_CAP_NGN  = Number(process.env.LITE_KYC_CAP_NGN)  || 20000      // no BVN yet — per withdrawal
+const BVN_DAILY_CAP_NGN = Number(process.env.BVN_DAILY_CAP_NGN) || 1_000_000  // BVN-verified (tier 1) — per rolling 24h
+
+async function enforceWithdrawalKycCap(
+  supabase: any,
+  userId: string,
+  amountNaira: number,
+): Promise<NextResponse | null> {
+  const { data: profile } = await supabase
+    .from('profiles').select('kyc_status, strails_va_account_number').eq('id', userId).single()
+  if (profile?.kyc_status === 'verified') return null // full biometric KYC — no cap
+
+  // No BVN yet → the old low per-withdrawal cap; adding a BVN (Naira account) lifts it.
+  if (!profile?.strails_va_account_number) {
+    if (amountNaira > LITE_KYC_CAP_NGN) {
+      return NextResponse.json(
+        {
+          error: `Add your BVN to get a Naira account and withdraw more than ₦${LITE_KYC_CAP_NGN.toLocaleString()}.`,
+          code: 'KYC_REQUIRED',
+          cap: LITE_KYC_CAP_NGN,
+        },
+        { status: 403 },
+      )
+    }
+    return null
+  }
+
+  // BVN-verified (tier 1): up to ₦1,000,000 per rolling 24 hours. Sum this user's own
+  // recent withdrawals (completed + still-pending, so parallel requests can't bypass it).
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const { data: rows } = await supabase
+    .from('transactions')
+    .select('amount_kobo')
+    .eq('user_id', userId)
+    .eq('type', 'withdrawal')
+    .in('status', ['completed', 'pending'])
+    .gte('created_at', since)
+  const usedNaira = (rows || []).reduce((s: number, r: any) => s + (Number(r.amount_kobo) || 0) / 100, 0)
+
+  if (usedNaira + amountNaira > BVN_DAILY_CAP_NGN) {
+    const remaining = Math.max(0, Math.floor(BVN_DAILY_CAP_NGN - usedNaira))
+    return NextResponse.json(
+      {
+        error: remaining > 0
+          ? `Daily withdrawal limit is ₦${BVN_DAILY_CAP_NGN.toLocaleString()}. You have ₦${remaining.toLocaleString()} left today.`
+          : `You've reached your ₦${BVN_DAILY_CAP_NGN.toLocaleString()} daily withdrawal limit. Try again tomorrow.`,
+        code: 'DAILY_LIMIT',
+        cap: BVN_DAILY_CAP_NGN,
+        remaining,
+      },
+      { status: 403 },
+    )
+  }
+  return null
 }
 
 export async function POST(request: NextRequest) {
@@ -812,6 +954,7 @@ export async function POST(request: NextRequest) {
     const type = body.type as RampType
     const amount = Number(body.amount)
     const bankCode = body.bankCode as string | undefined
+    const bankName = body.bankName as string | undefined
     const accountNumber = body.accountNumber as string | undefined
     const transactionPin = body.transactionPin as string | undefined
     const holderName = body.holderName as string | undefined
@@ -833,6 +976,10 @@ export async function POST(request: NextRequest) {
     if (type === 'off') {
       const pinError = await ensureWithdrawalPin(supabase, user.id, transactionPin || '')
       if (pinError) return pinError
+      // Tiered KYC: deposits are uncapped; only withdrawals are capped for un-verified
+      // (lite/none) users at ₦20k. Full biometric KYC lifts it.
+      const capError = await enforceWithdrawalKycCap(supabase, user.id, amount)
+      if (capError) return capError
     }
 
     const feePercent = await getNumberSetting(supabase, 'ramp_fee_percent', DEFAULT_FEE_PERCENT)
@@ -883,7 +1030,7 @@ export async function POST(request: NextRequest) {
 
     const run = async (provider: Provider) => {
       if (provider === 'flint') return runFlint(request, supabase, user.id, type, amount)
-      if (provider === 'flipeet') return runFlipeet(request, supabase, user.id, type, amount, bankCode, accountNumber, holderName, depositCurrency)
+      if (provider === 'flipeet') return runFlipeet(request, supabase, user.id, type, amount, bankCode, accountNumber, holderName, bankName, depositCurrency)
       return runXend(supabase, user.id, type, amount, bankCode, accountNumber, holderName)
     }
 

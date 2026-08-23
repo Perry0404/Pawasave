@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { formatNaira, microUsdcToKobo, getRate, timeAgo, cleanDescription } from '@/lib/format'
-import { initiateDeposit, initiateWithdrawal, getBanks, type RampResult, type Bank } from '@/lib/flint'
+import { initiateDeposit, initiateWithdrawal, getBanks, resolveAccount, type RampResult, type Bank } from '@/lib/flint'
 import { talkback } from '@/lib/voice'
-import { ArrowUpRight, ArrowDownLeft, Vault, TrendingUp, Wallet, Plus, Minus, CreditCard, Loader2, ArrowLeft, Copy, Check, ChevronDown, Building2 } from 'lucide-react'
+import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard, Loader2, ArrowLeft, Copy, Check, ChevronDown, Building2 } from 'lucide-react'
 import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -25,6 +25,8 @@ interface Props {
 
 export default function HomeView({ wallet, transactions, user, refresh, profile, onStartKyc, onNavigateVault }: Props) {
   const [view, setView] = useState<View>('main')
+  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null)
+  const [showStatement, setShowStatement] = useState(false)
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [amount, setAmount] = useState('')
@@ -46,6 +48,9 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   const [banksLoading, setBanksLoading] = useState(false)
   const [banksError, setBanksError] = useState(false)
   const [transactionPin, setTransactionPin] = useState('')
+  const [resolvingName, setResolvingName] = useState(false)
+  const [nameResolved, setNameResolved] = useState(false)
+  const [resolveError, setResolveError] = useState('')
 
   useEffect(() => {
     if (view === 'withdraw' && banks.length === 0) {
@@ -56,6 +61,52 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
         .catch(() => { setBanksLoading(false); setBanksError(true) })
     }
   }, [view, banks.length])
+
+  // Name enquiry: once a bank + 10-digit account are entered, resolve the account
+  // holder name automatically (like a normal Nigerian transfer). Debounced so we
+  // don't hit the resolver on every keystroke. Falls back to manual entry if the
+  // lookup isn't configured or the account can't be resolved.
+  useEffect(() => {
+    if (view !== 'withdraw') return
+    if (!bankCode || accountNumber.length !== 10) { setNameResolved(false); setResolveError(''); return }
+    let cancelled = false
+    setResolvingName(true)
+    setNameResolved(false)
+    setResolveError('')
+    const t = setTimeout(async () => {
+      const name = await resolveAccount(bankCode, accountNumber)
+      if (cancelled) return
+      setResolvingName(false)
+      if (name) { setAccountHolderName(name); setNameResolved(true) }
+      else setResolveError('Couldn’t verify this account — enter the name manually.')
+    }, 500)
+    return () => { cancelled = true; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, bankCode, accountNumber])
+
+  // Onboarding completes by PULL, not by trusting the `user.onboarded` webhook —
+  // which is not a guarantee (the deposit webhook 401'd on signature verification
+  // three times live). While the naira-account screen shows "Creating your account…",
+  // poll Strails directly so the NUBAN lands even if the webhook never fires.
+  useEffect(() => {
+    const p = profile as any
+    const pending = view === 'deposit-naira'
+      && p?.strails_onboard_status === 'processing'
+      && !p?.strails_va_account_number
+    if (!pending) return
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const res = await fetch('/api/strails/onboard-status')
+        const data = await res.json().catch(() => ({}))
+        if (!cancelled && data?.ready) await refresh()
+      } catch { /* transient — keep polling */ }
+    }
+    tick()
+    const id = setInterval(tick, 5000)
+    return () => { cancelled = true; clearInterval(id) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, (profile as any)?.strails_onboard_status, (profile as any)?.strails_va_account_number])
 
   useEffect(() => {
     fetch('/api/ramp/rate')
@@ -131,14 +182,26 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     }
   }
 
+  // KYC (Sense biometric) is only offered when we're subscribed. Until then every user
+  // operates at tier 1 (unverified) — usable, capped at ₦20k on withdrawals — and we
+  // never push the verify flow (it 503s while Sense is off).
+  const kycAvailable = process.env.NEXT_PUBLIC_KYC_ENABLED === 'true'
+
   const handleWithdraw = async () => {
-    if (profile?.kyc_status !== 'verified') {
-      flash('KYC is required before withdrawal')
-      onStartKyc()
-      return
-    }
+    const verified = profile?.kyc_status === 'verified'
+    const hasBvn = Boolean((profile as any)?.strails_va_account_number)
     const naira = parseFloat(amount)
     if (!naira || naira < 100) { flash('Minimum amount is ₦100'); return }
+    // Tier limits: full-KYC uncapped; BVN (Naira account) up to ₦1,000,000/day (the
+    // server enforces the daily total); no BVN yet capped at ₦20,000 per withdrawal.
+    if (!verified && !hasBvn && naira > 20000) {
+      flash('Add your BVN (get a Naira account) to withdraw more than ₦20,000.')
+      return
+    }
+    if (!verified && hasBvn && naira > 1000000) {
+      flash('Your daily withdrawal limit is ₦1,000,000.')
+      return
+    }
     if (!bankCode || !accountNumber || accountNumber.length < 10) {
       flash('Enter valid bank details'); return
     }
@@ -153,7 +216,8 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     }
     setBusy(true)
     try {
-      await initiateWithdrawal(naira, bankCode, accountNumber, transactionPin, accountHolderName)
+      const selectedBankName = banks.find(b => b.code === bankCode)?.name
+      await initiateWithdrawal(naira, bankCode, accountNumber, transactionPin, accountHolderName, selectedBankName)
       flash('Sent! The recipient will receive NGN in their bank shortly.')
       talkback('withdrawal_done', profile?.display_name || user?.email || 'Chief', `₦${parseFloat(amount).toLocaleString('en-NG')}`)
       resetForm()
@@ -203,7 +267,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     const checking = rampStatus === null
     const nairaDown = rampStatus ? !rampStatus.naira.available : false
     return (
-      <div className="px-4 pt-5">
+      <div className="px-4 pt-5 pb-28">
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
@@ -258,7 +322,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     const verified = profile?.kyc_status === 'verified'
 
     return (
-      <div className="px-4 pt-5">
+      <div className="px-4 pt-5 pb-28">
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
@@ -307,25 +371,21 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
             <Loader2 className="w-6 h-6 animate-spin text-emerald-600 mx-auto mb-3" />
             <p className="text-sm font-medium text-slate-700">Creating your account…</p>
             <p className="text-xs text-slate-400 mt-1">This usually takes about 2 minutes.</p>
-            <button onClick={() => refresh()} className="mt-4 text-sm text-emerald-600 font-medium">
-              Check again
-            </button>
-          </div>
-        ) : !verified ? (
-          <div className="mt-4">
-            <p className="text-sm text-slate-400 mb-4">Verify your identity first to get your own Naira account.</p>
             <button
-              onClick={onStartKyc}
-              className="w-full bg-emerald-600 text-white font-semibold py-3.5 rounded-xl"
+              onClick={async () => {
+                try { await fetch('/api/strails/onboard-status') } catch { /* ignore */ }
+                await refresh()
+              }}
+              className="mt-4 text-sm text-emerald-600 font-medium"
             >
-              Verify identity
+              Check again
             </button>
           </div>
         ) : (
           <>
             <p className="text-sm text-slate-400 mb-4">
               Get your own dedicated Naira account. Enter your BVN — we use it only to verify your
-              identity with your bank and never store it.
+              identity with your bank and never store it. This unlocks tier 1 (up to ₦20,000).
             </p>
             <label className="text-xs text-slate-500 block mb-1.5">BVN</label>
             <input
@@ -335,7 +395,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
               value={bvn}
               onChange={(e) => setBvn(e.target.value.replace(/\D/g, ''))}
               placeholder="11-digit BVN"
-              className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-lg font-semibold tracking-wider focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-lg font-semibold tracking-wider focus:outline-none focus:ring-2 focus:ring-emerald-500"
               autoFocus
             />
             {feedback && <div className="mt-3 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>}
@@ -356,7 +416,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   // --- Receive: crypto (cNGN) address ---
   if (view === 'deposit-crypto') {
     return (
-      <div className="px-4 pt-5">
+      <div className="px-4 pt-5 pb-28">
         <button onClick={() => setView('deposit-choose')} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
@@ -400,7 +460,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   if (view === 'deposit') {
     const val = parseFloat(amount) || 0
     return (
-      <div className="px-4 pt-5">
+      <div className="px-4 pt-5 pb-28">
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
@@ -421,7 +481,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
               value={amount}
               onChange={e => setAmount(e.target.value)}
               placeholder="e.g. 5000"
-              className="w-full pl-8 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full pl-8 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
               autoFocus
             />
           </div>
@@ -449,7 +509,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   // --- Deposit bank info (post-API) ---
   if (view === 'deposit-info' && depositInfo) {
     return (
-      <div className="px-4 pt-5">
+      <div className="px-4 pt-5 pb-28">
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
@@ -555,7 +615,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   // --- Withdraw form ---
   if (view === 'withdraw') {
     return (
-      <div className="px-4 pt-5">
+      <div className="px-4 pt-5 pb-28">
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
@@ -563,16 +623,29 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
         <p className="text-sm text-slate-400 mb-4">Send naira from your cNGN balance to any Nigerian bank account.</p>
 
         {profile?.kyc_status !== 'verified' && (
-          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-            <p className="text-xs text-amber-800 font-medium">KYC Required for Withdrawal</p>
-            <p className="text-xs text-amber-700 mt-1">Complete KYC before sending money.</p>
-            <button
-              onClick={onStartKyc}
-              className="mt-2 text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg transition"
-            >
-              Complete KYC
-            </button>
-          </div>
+          (profile as any)?.strails_va_account_number ? (
+            <div className="mb-4 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+              <p className="text-xs text-emerald-800 font-medium">Tier 1 · ₦1,000,000 daily limit</p>
+              <p className="text-xs text-emerald-700 mt-1">
+                You can withdraw up to ₦1,000,000 per day.{kycAvailable ? ' Full verification removes the limit.' : ''}
+              </p>
+              {kycAvailable && (
+                <button
+                  onClick={onStartKyc}
+                  className="mt-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition"
+                >
+                  Verify identity
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+              <p className="text-xs text-amber-800 font-medium">₦20,000 limit</p>
+              <p className="text-xs text-amber-700 mt-1">
+                Add your BVN to get a Naira account and raise your limit to ₦1,000,000 per day.
+              </p>
+            </div>
+          )
         )}
 
         <div className="mb-5 bg-slate-100 rounded-xl px-3 py-2.5">
@@ -588,7 +661,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
               value={amount}
               onChange={e => setAmount(e.target.value)}
               placeholder="e.g. 5000"
-              className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
               autoFocus
             />
             {amount && parseFloat(amount) >= 100 && (
@@ -610,7 +683,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
                     value={bankSearch}
                     onChange={e => { setBankSearch(e.target.value); setBankCode('') }}
                     placeholder="Search bank name..."
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
                 {bankSearch.length > 0 && (
@@ -639,7 +712,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
                     <select
                       value={bankCode}
                       onChange={e => { setBankCode(e.target.value); setBankSearch(banks.find(b => b.code === e.target.value)?.name || '') }}
-                      className="w-full pl-10 pr-8 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full pl-10 pr-8 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
                       <option value="">— or select from list —</option>
                       {banks.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
@@ -660,19 +733,26 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
               value={accountNumber}
               onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
               placeholder="0123456789"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
 
           <div>
             <label className="text-xs text-slate-500 block mb-1.5">Account Holder Name</label>
-            <input
-              type="text"
-              value={accountHolderName}
-              onChange={e => setAccountHolderName(e.target.value)}
-              placeholder="Full name on bank account"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
+            <div className="relative">
+              <input
+                type="text"
+                value={accountHolderName}
+                onChange={e => { setAccountHolderName(e.target.value); setNameResolved(false); setResolveError('') }}
+                placeholder={resolvingName ? 'Checking account…' : 'Full name on bank account'}
+                readOnly={nameResolved}
+                autoComplete="name"
+                className={`w-full px-4 py-3 pr-10 bg-slate-50 border rounded-xl text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${nameResolved ? 'border-emerald-300' : 'border-slate-200'}`}
+              />
+              {resolvingName && <Loader2 className="w-4 h-4 animate-spin text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />}
+              {nameResolved && !resolvingName && <Check className="w-4 h-4 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2" />}
+            </div>
+            {resolveError && <p className="text-xs text-amber-600 mt-1.5">{resolveError}</p>}
           </div>
 
           <div>
@@ -684,10 +764,25 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
               value={transactionPin}
               onChange={e => setTransactionPin(e.target.value.replace(/\D/g, ''))}
               placeholder="****"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm tracking-[0.35em] focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-sm tracking-[0.35em] focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
         </div>
+
+        {parseFloat(amount) > 0 && (() => {
+          const net = parseFloat(amount)
+          const networkFee = Math.max(0, Math.round(net / 0.99) - net) // Flipeet ~1% spread
+          const ourFee = Math.round(net * 0.015)                       // PawaSave 1.5%
+          const total = net + networkFee + ourFee
+          return (
+            <div className="mt-4 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 text-sm">
+              <div className="flex justify-between text-slate-600"><span>Recipient gets</span><span className="font-semibold text-slate-900">₦{net.toLocaleString('en-NG')}</span></div>
+              <div className="flex justify-between text-slate-600 mt-1"><span>Network fee (~1%)</span><span>₦{networkFee.toLocaleString('en-NG')}</span></div>
+              <div className="flex justify-between text-slate-600 mt-1"><span>PawaSave fee (1.5%)</span><span>₦{ourFee.toLocaleString('en-NG')}</span></div>
+              <div className="flex justify-between mt-1.5 pt-1.5 border-t border-slate-200 font-semibold text-slate-900"><span>Total from wallet</span><span>₦{total.toLocaleString('en-NG')}</span></div>
+            </div>
+          )
+        })()}
 
         {feedback && <div className="mt-3 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>}
 
@@ -704,120 +799,248 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   }
 
   // --- Main view ---
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  const firstName = (profile?.display_name || user?.email || 'there').split(/[ @]/)[0]
+  const initials = (profile?.display_name || user?.email || 'PS')
+    .split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase()
+  const earnedKobo = microUsdcToKobo(wallet.cngn_yield_earned_micro || 0)
+
+  // Group recent activity by day for the feed.
+  const startToday = new Date(); startToday.setHours(0, 0, 0, 0)
+  const startYest = new Date(startToday); startYest.setDate(startYest.getDate() - 1)
+  const dayLabel = (ts: string) => {
+    const t = new Date(ts).getTime()
+    if (t >= startToday.getTime()) return 'Today'
+    if (t >= startYest.getTime()) return 'Yesterday'
+    return 'Earlier'
+  }
+  const groups: { label: string; items: Transaction[] }[] = []
+  recentTxs.forEach((tx) => {
+    const label = dayLabel(tx.created_at)
+    const g = groups.find((x) => x.label === label)
+    if (g) g.items.push(tx); else groups.push({ label, items: [tx] })
+  })
+
   return (
-    <div className="px-4 pt-5">
-      {/* Balance Card */}
-      <div className="bg-gradient-to-br from-emerald-600 to-emerald-800 rounded-2xl p-5 text-white">
-        <p className="text-emerald-200 text-xs font-medium">Total Balance</p>
-        <p className="text-[2rem] font-bold mt-0.5 tracking-tight">{formatNaira(totalKobo)}</p>
-        <div className="flex gap-6 mt-4 text-sm">
-          <div>
-            <p className="text-emerald-300 text-[11px]">Available</p>
-            <p className="font-semibold">{formatNaira(wallet.naira_balance_kobo)}</p>
-          </div>
-          <div>
-            <p className="text-emerald-300 text-[11px]">cNGN Savings</p>
-            <p className="font-semibold">{formatNaira(savingsKobo)}</p>
-          </div>
-          {(wallet.cngn_pool_micro || 0) > 0 && (
-            <div>
-              <p className="text-emerald-300 text-[11px]">Yield Pool · Up to 40% APY</p>
-              <p className="font-semibold">{formatNaira(cngnKobo)}</p>
+    <div className="b">
+      <div className="greet">
+        <div>
+          <div className="hi">{greeting}</div>
+          <div className="nm">{firstName}</div>
+        </div>
+        <div className="av">{initials}</div>
+      </div>
+
+      {/* Account card */}
+      <div className="acct rise">
+        <div className="acct-top">
+          <span className="acct-lab">Total balance</span>
+          <span className="acct-chip">cNGN</span>
+        </div>
+        <div className="acct-bal num">{formatNaira(totalKobo)}</div>
+        {earnedKobo > 0 && <div className="acct-earn">↑ {formatNaira(earnedKobo)} earned in savings</div>}
+        <div className="acct-sub">
+          <div><div className="l">Available</div><div className="v num">{formatNaira(wallet.naira_balance_kobo)}</div></div>
+          <div><div className="l">Savings</div><div className="v num">{formatNaira(savingsKobo + cngnKobo)}</div></div>
+        </div>
+        <div className="acct-actions">
+          <button className="ab" onClick={() => setView('withdraw')}>
+            <ArrowUpRight className="w-4 h-4" /> Send
+          </button>
+          <button className="ab solid" onClick={() => setView('deposit-choose')}>
+            <ArrowDownLeft className="w-4 h-4" /> Receive
+          </button>
+        </div>
+      </div>
+
+      {feedback && <div className="flash ok">{feedback}</div>}
+
+      {/* Activity feed */}
+      <div className="sect">
+        <span className="h">Activity</span>
+        <button
+          className="m"
+          onClick={() => setShowStatement(true)}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 0, fontFamily: 'inherit', cursor: 'pointer', color: 'inherit' }}
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+          Statement
+        </button>
+      </div>
+      {recentTxs.length === 0 ? (
+        <div className="empty">
+          <div className="eh">No activity yet</div>
+          <div className="es">Add money with Receive to get started</div>
+        </div>
+      ) : (
+        <div className="feedcard rise">
+          {groups.map((g) => (
+            <div key={g.label}>
+              <div className="daylab">{g.label}</div>
+              {g.items.map((tx) => {
+                const credit = tx.direction === 'credit'
+                return (
+                  <button
+                    key={tx.id}
+                    onClick={() => setSelectedTx(tx)}
+                    className={`tx${credit ? ' inn' : ''}`}
+                    style={{ width: '100%', textAlign: 'left', background: 'none', border: 0, fontFamily: 'inherit', cursor: 'pointer' }}
+                  >
+                    <span className="ic">{credit ? <ArrowDownLeft /> : <ArrowUpRight />}</span>
+                    <div className="mid">
+                      <div className="nm">{cleanDescription(tx.description) || (credit ? 'Received' : 'Sent')}</div>
+                      <div className="sub">{credit ? 'Credit' : 'Debit'}</div>
+                    </div>
+                    <div className="rt">
+                      <div className={`amt num${credit ? ' pos' : ''}`}>{credit ? '+' : '−'}{formatNaira(tx.amount_kobo)}</div>
+                      <div className={`st${tx.status === 'pending' ? ' pend' : ''}`}>
+                        {tx.status === 'pending' ? 'Processing' : timeAgo(tx.created_at)}
+                      </div>
+                    </div>
+                  </button>
+                )
+              })}
             </div>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 mt-3 text-emerald-300 text-[11px]">
-          <TrendingUp className="w-3 h-3" />
-          <span>Savings held in cNGN · 1 cNGN = ₦1</span>
-        </div>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="grid grid-cols-3 gap-3 mt-5">
-        <button
-          onClick={() => setView('deposit-choose')}
-          className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-slate-200 bg-white active:bg-slate-50 transition"
-        >
-          <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
-            <ArrowDownLeft className="w-5 h-5" />
-          </div>
-          <span className="text-xs font-medium text-slate-700">Receive</span>
-        </button>
-
-        <button
-          onClick={() => setView('withdraw')}
-          className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-slate-200 bg-white active:bg-slate-50 transition"
-        >
-          <div className="w-10 h-10 rounded-full bg-orange-100 text-orange-500 flex items-center justify-center">
-            <ArrowUpRight className="w-5 h-5" />
-          </div>
-          <span className="text-xs font-medium text-slate-700">Send</span>
-        </button>
-
-        <button
-          onClick={() => onNavigateVault?.()}
-          className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-slate-200 bg-white active:bg-slate-50 transition"
-        >
-          <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
-            <Vault className="w-5 h-5" />
-          </div>
-          <span className="text-xs font-medium text-slate-700">Save</span>
-        </button>
-      </div>
-
-      {/* Feedback */}
-      {feedback && (
-        <div className="mt-3 px-4 py-2.5 rounded-xl text-sm font-medium bg-emerald-50 text-emerald-700">
-          {feedback}
+          ))}
         </div>
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 mt-5">
-        <div className="bg-white border border-slate-100 rounded-xl p-4">
-          <p className="text-[11px] text-slate-400">Total Saved</p>
-          <p className="text-lg font-bold text-slate-900 mt-0.5">{formatNaira(wallet.total_saved_kobo)}</p>
+      {selectedTx && <TxDetail tx={selectedTx} onClose={() => setSelectedTx(null)} />}
+      {showStatement && <StatementSheet email={user?.email} onClose={() => setShowStatement(false)} flash={flash} />}
+    </div>
+  )
+}
+
+/** Statement sheet — pick a period, then print/save-as-PDF or email a branded statement. */
+function StatementSheet({ email, onClose, flash }: { email?: string; onClose: () => void; flash: (m: string) => void }) {
+  const [period, setPeriod] = useState<'30d' | '90d' | '6m' | 'all'>('90d')
+  const [busy, setBusy] = useState<'view' | 'email' | null>(null)
+
+  const periods: { id: typeof period; label: string }[] = [
+    { id: '30d', label: '30 days' },
+    { id: '90d', label: '90 days' },
+    { id: '6m', label: '6 months' },
+    { id: 'all', label: 'All time' },
+  ]
+
+  const run = async (delivery: 'view' | 'email') => {
+    if (busy) return
+    setBusy(delivery)
+    try {
+      const res = await fetch('/api/statement', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ period, delivery }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { flash(data?.error || 'Could not generate statement'); return }
+
+      if (delivery === 'email') {
+        flash(`Statement sent to ${data.email || 'your email'}`)
+        onClose()
+      } else {
+        const w = window.open('', '_blank')
+        if (!w) { flash('Allow pop-ups to open the statement'); return }
+        w.document.open(); w.document.write(data.html); w.document.close()
+        w.focus()
+        setTimeout(() => { try { w.print() } catch { /* user can print manually */ } }, 700)
+        onClose()
+      }
+    } catch {
+      flash('Could not generate statement')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 80, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={(e) => e.stopPropagation()} className="rise" style={{ width: '100%', maxWidth: 512, background: 'var(--surface)', borderRadius: '22px 22px 0 0', padding: '18px 18px calc(24px + var(--safe-bottom))' }}>
+        <div style={{ width: 40, height: 4, borderRadius: 2, background: 'var(--line)', margin: '0 auto 16px' }} />
+        <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--ink)' }}>Account statement</div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
+          A branded statement with your logo{email ? `, emailed to ${email}` : ''} or ready to print / save as PDF.
         </div>
-        <div className="bg-white border border-slate-100 rounded-xl p-4">
-          <p className="text-[11px] text-slate-400">Total Withdrawn</p>
-          <p className="text-lg font-bold text-slate-900 mt-0.5">{formatNaira(wallet.total_withdrawn_kobo)}</p>
+
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '18px 0 8px', fontWeight: 600 }}>Period</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
+          {periods.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setPeriod(p.id)}
+              style={{
+                padding: '10px 6px', borderRadius: 12, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                border: period === p.id ? '1.5px solid var(--green)' : '1px solid var(--line-2)',
+                background: period === p.id ? 'var(--green-soft)' : 'var(--surface)',
+                color: period === p.id ? 'var(--green)' : 'var(--ink)',
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+          <button
+            onClick={() => run('view')}
+            disabled={!!busy}
+            style={{ flex: 1, padding: '13px', borderRadius: 13, fontWeight: 650, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit', border: '1.5px solid var(--green)', background: 'var(--surface)', color: 'var(--green)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, opacity: busy ? 0.7 : 1 }}
+          >
+            {busy === 'view' ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Print / PDF
+          </button>
+          <button
+            onClick={() => run('email')}
+            disabled={!!busy}
+            className="cta"
+            style={{ flex: 1, margin: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, opacity: busy ? 0.7 : 1 }}
+          >
+            {busy === 'email' ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Email to me
+          </button>
         </div>
       </div>
+    </div>
+  )
+}
 
-      {/* Recent Transactions */}
-      <div className="mt-6 mb-4">
-        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Recent Activity</h3>
-        {recentTxs.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center">
-            <Wallet className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-            <p className="text-sm text-slate-400">No transactions yet</p>
-            <p className="text-xs text-slate-300 mt-1">Make a deposit to get started</p>
+/** Transaction detail sheet — full amount, status, time, reference. */
+function TxDetail({ tx, onClose }: { tx: Transaction; onClose: () => void }) {
+  const credit = tx.direction === 'credit'
+  const title = (tx.type || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  const dt = new Date(tx.created_at)
+  const ref = (tx as any).reference as string | undefined
+  const meta = (tx as any).metadata as Record<string, any> | null | undefined
+  const Row = ({ k, v }: { k: string; v: React.ReactNode }) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '11px 0', borderTop: '1px solid var(--line-2)' }}>
+      <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{k}</span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', textAlign: 'right', wordBreak: 'break-word' }}>{v}</span>
+    </div>
+  )
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 80, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={(e) => e.stopPropagation()} className="rise" style={{ width: '100%', maxWidth: 512, background: 'var(--surface)', borderRadius: '22px 22px 0 0', padding: '18px 18px calc(24px + var(--safe-bottom))', maxHeight: '85dvh', overflowY: 'auto' }}>
+        <div style={{ width: 40, height: 4, borderRadius: 2, background: 'var(--line)', margin: '0 auto 16px' }} />
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ width: 48, height: 48, borderRadius: 14, margin: '0 auto 10px', display: 'grid', placeItems: 'center', background: 'var(--green-soft)', color: 'var(--green)' }}>
+            {credit ? <ArrowDownLeft /> : <ArrowUpRight />}
           </div>
-        ) : (
-          <div className="bg-white rounded-2xl border border-slate-100 divide-y divide-slate-50">
-            {recentTxs.map((tx) => (
-              <div key={tx.id} className="flex items-center gap-3 px-4 py-3">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                  tx.direction === 'credit' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'
-                }`}>
-                  {tx.direction === 'credit' ? <Plus className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-slate-800 truncate">{cleanDescription(tx.description)}</p>
-                  <p className="text-[11px] text-slate-400">
-                    {timeAgo(tx.created_at)}
-                    {tx.status === 'pending' && <span className="ml-1 text-amber-500 font-medium">pending</span>}
-                  </p>
-                </div>
-                <span className={`text-sm font-semibold tabular-nums ${
-                  tx.direction === 'credit' ? 'text-emerald-600' : 'text-slate-700'
-                }`}>
-                  {tx.direction === 'credit' ? '+' : '-'}{formatNaira(tx.amount_kobo)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+          <div className="num" style={{ fontSize: 30, fontWeight: 700, color: credit ? 'var(--pos)' : 'var(--ink)' }}>{credit ? '+' : '−'}{formatNaira(tx.amount_kobo)}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>{cleanDescription(tx.description) || title}</div>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <Row k="Type" v={title || (credit ? 'Credit' : 'Debit')} />
+          <Row k="Status" v={<span style={{ color: tx.status === 'pending' ? 'var(--amber)' : tx.status === 'completed' ? 'var(--green)' : 'var(--ink)', textTransform: 'capitalize' }}>{tx.status === 'pending' ? 'Processing' : tx.status}</span>} />
+          <Row k="Direction" v={credit ? 'Money in' : 'Money out'} />
+          {meta?.bank_name && <Row k="To bank" v={meta.bank_name} />}
+          {meta?.account_name && <Row k="Account name" v={meta.account_name} />}
+          {meta?.account_number && <Row k="Account no" v={<span className="num">{meta.account_number}</span>} />}
+          {meta?.sender_name && <Row k="From" v={meta.sender_name} />}
+          {meta?.sender_account && <Row k="Sender account" v={<span className="num">{meta.sender_account}</span>} />}
+          <Row k="Date" v={dt.toLocaleString('en-NG', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })} />
+          {ref && <Row k="Reference" v={<span style={{ fontSize: 11 }}>{ref}</span>} />}
+          <Row k="Transaction ID" v={<span style={{ fontSize: 11 }}>{tx.id.slice(0, 18)}…</span>} />
+        </div>
+        <button className="cta" onClick={onClose}>Done</button>
       </div>
     </div>
   )

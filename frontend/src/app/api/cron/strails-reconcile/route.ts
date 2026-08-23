@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { STRAILS_ENABLED, listTransactions, getUserDetails, addExternalWallet, withdrawAsset } from '@/lib/strails'
 import { custodyAddress, custodyCngnBalance, cngnBalanceOf, supplyToLend } from '@/lib/custody'
+import { acquireSupplyLock, releaseSupplyLock } from '@/lib/supply-lock'
+import { sendDepositEmail } from '@/lib/notify-tx'
 
 /**
  * GET /api/cron/strails-reconcile
@@ -42,7 +44,7 @@ export async function GET(request: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY,
     { auth: { persistSession: false } },
   )
-  const result = { credited: 0, creditedNgn: 0, swept: 0, sweptCngn: 0, supplied: '0', errors: [] as string[] }
+  const result = { credited: 0, creditedNgn: 0, onboarded: 0, swept: 0, sweptCngn: 0, supplied: '0', errors: [] as string[] }
 
   // ── 1. credit completed deposits the webhook didn't ────────────────────────
   let txs: any[] = []
@@ -84,16 +86,32 @@ export async function GET(request: NextRequest) {
     const gross = num(t.amount)
     const ngn = num(t.fundingAmount) || gross
     if (ngn <= 0) continue
-    const micro = Math.floor(ngn * 1_000_000)
-    const feeKobo = Math.round(Math.max(0, gross - ngn) * 100)
+    const strailsFeeNgn = Math.max(0, gross - ngn) // Strails' own fee (theirs)
+    // PawaSave 1.5% deposit fee — deducted from the funded amount (push can't gross up).
+    // Kept in custody after the sweep = our revenue. Strails' fee stays theirs.
+    const depositFeePercent = Number(process.env.PAWA_DEPOSIT_FEE_PERCENT) || 1.5
+    const ourFeeNgn = Math.round(ngn * depositFeePercent / 100)
+    const netNgn = Math.max(0, ngn - ourFeeNgn)
+    const micro = Math.floor(netNgn * 1_000_000)
 
     await admin.from('transactions').insert({
       user_id: profile.id, type: 'deposit', direction: 'credit',
       amount_kobo: Math.round(ngn * 100), amount_usdc_micro: micro,
-      platform_fee_kobo: feeKobo,
-      description: 'Received via Strails', reference, status: 'completed',
+      platform_fee_kobo: Math.round(ourFeeNgn * 100),
+      description: `Received via Strails${ourFeeNgn > 0 ? ` (₦${ourFeeNgn.toLocaleString('en-NG')} fee)` : ''}`,
+      reference, status: 'completed',
+      metadata: { channel: 'Strails', fee_naira: ourFeeNgn, strails_fee_naira: strailsFeeNgn },
     })
     await admin.rpc('credit_wallet', { p_user_id: profile.id, p_naira_kobo: 0, p_usdc_micro: micro })
+    if (ourFeeNgn > 0) {
+      try {
+        await admin.rpc('record_platform_fee', {
+          p_user_id: profile.id, p_reference: reference, p_fee_type: 'ramp_onramp',
+          p_gross_kobo: Math.round(ngn * 100), p_fee_kobo: Math.round(ourFeeNgn * 100), p_fee_percent: depositFeePercent,
+        })
+      } catch { /* fee-booking failure must not fail the credit */ }
+    }
+    sendDepositEmail(profile.id, { amountNgn: netNgn, channel: 'Strails', reference }).catch(() => {})
     result.credited++
     result.creditedNgn += ngn
   }
@@ -103,12 +121,38 @@ export async function GET(request: NextRequest) {
     const dest = await custodyAddress()
     const { data: users } = await admin
       .from('profiles')
-      .select('id, strails_user_id')
+      .select('id, strails_user_id, strails_va_account_number')
       .not('strails_user_id', 'is', null)
 
     for (const u of users ?? []) {
       try {
         const details = await getUserDetails(u.strails_user_id as string)
+
+        // Back-fill the permanent NUBAN for anyone the `user.onboarded` webhook never
+        // delivered (it 401s on signature verification, like the deposit one did) —
+        // otherwise they're stranded on "Creating your account…" indefinitely.
+        if (!u.strails_va_account_number && details.account.accountNumber) {
+          // Direct service-role write (NOT the set_strails_account RPC — it isn't in
+          // PostgREST's schema cache, so every RPC-based onboarding write silently
+          // no-op'd and users were stranded on "Creating your account…").
+          const { error: upErr } = await admin
+            .from('profiles')
+            .update({
+              strails_va_account_number: details.account.accountNumber,
+              strails_va_account_name: details.account.accountName || null,
+              strails_va_bank_name: details.account.bankName || null,
+              strails_onboard_status: 'completed',
+              strails_onboarded_at: new Date().toISOString(),
+            })
+            .eq('id', u.id)
+          if (upErr) {
+            result.errors.push(`onboard ${u.id} (acct ${details.account.accountNumber}): ${upErr.message}`)
+          } else {
+            result.onboarded++
+            console.info('[strails-reconcile] onboarded (webhook missed)', { user: u.id, acct: details.account.accountNumber })
+          }
+        }
+
         const wallet = details.evmWallet
         if (!wallet) continue
         // Read the wallet's REAL cNGN balance on Base. getuserdetails returns no
@@ -132,12 +176,22 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Idle custody cNGN → PawasaveLend, so swept deposits actually earn.
-    const idle = await custodyCngnBalance()
-    if (idle >= 1_000_000n) {
-      const { txHash, shares } = await supplyToLend(idle)
-      result.supplied = idle.toString()
-      console.info('[strails-reconcile] supplied to pool', { txHash, shares: shares.toString() })
+    // Idle custody cNGN → PawasaveLend, so swept deposits actually earn. Guard with
+    // the shared custody-supply lock (migration 054) so this can't race sweep-deposits
+    // and both fire supply(idle) — the loser reverts "exceeds balance".
+    if (await acquireSupplyLock()) {
+      try {
+        const idle = await custodyCngnBalance()
+        if (idle >= 1_000_000n) {
+          const { txHash, shares } = await supplyToLend(idle)
+          result.supplied = idle.toString()
+          console.info('[strails-reconcile] supplied to pool', { txHash, shares: shares.toString() })
+        }
+      } finally {
+        await releaseSupplyLock()
+      }
+    } else {
+      console.info('[strails-reconcile] skipped supply — custody-supply lock held')
     }
   } catch (e) {
     result.errors.push(`sweep phase: ${e instanceof Error ? e.message : e}`)

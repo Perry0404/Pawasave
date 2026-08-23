@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { refreshEquityPrices } from '@/lib/equity-prices'
+import { sendPushToUser } from '@/lib/push-send'
 
 /**
  * GET /api/cron/loan-maintenance
@@ -58,6 +59,31 @@ export async function GET(request: NextRequest) {
     out.liquidate = data
   } catch (e) {
     out.liquidateError = e instanceof Error ? e.message : String(e)
+  }
+
+  // "Loan due in ≤3 days" reminder — once per loan (due_reminder_sent flag, mig 051).
+  try {
+    const soon = new Date(Date.now() + 3 * 864e5).toISOString()
+    const now = new Date().toISOString()
+    const { data: dueLoans } = await admin
+      .from('loans')
+      .select('id, user_id, principal_micro, accrued_interest_micro, due_date')
+      .eq('status', 'active').eq('due_reminder_sent', false)
+      .gte('due_date', now).lte('due_date', soon)
+    let sent = 0
+    for (const l of dueLoans || []) {
+      const owed = (Number(l.principal_micro) + Number(l.accrued_interest_micro)) / 1e6
+      await sendPushToUser(l.user_id, {
+        title: 'Loan due soon',
+        body: `Your ₦${owed.toLocaleString('en-NG', { maximumFractionDigits: 2 })} loan is due ${new Date(l.due_date).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}. Repay to keep your collateral.`,
+        url: '/', tag: 'loan-due',
+      }).catch(() => {})
+      await admin.from('loans').update({ due_reminder_sent: true }).eq('id', l.id)
+      sent++
+    }
+    out.dueReminders = sent
+  } catch (e) {
+    out.reminderError = e instanceof Error ? e.message : String(e)
   }
 
   console.info('[loan-maintenance]', out)

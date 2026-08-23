@@ -1,19 +1,22 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { TrendingUp, Loader2, ArrowLeft, Sparkles, ShieldCheck, Lock } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import type { Wallet } from '@/lib/types'
 import { useStockQuotes, MarketCards, StockQuotePanel, ChangeBadge, Sparkline } from './stock-chart'
 
 /**
  * InvestView — buy tokenized stocks (xStocks) and pre-IPO tokens with cNGN.
  * The buy flow is real (POST /api/invest/equity); it surfaces "coming soon"
- * until the broker (Coinbase Tokenize) is enabled server-side. Catalogue is
- * curated here for now; it can move to an API once the broker is live.
+ * until the broker (Coinbase Tokenize) is enabled server-side.
  */
-type Cat = 'tokenized_stock' | 'pre_ipo'
+type Cat = 'tokenized_stock' | 'pre_ipo' | 'naira'
 
-type Asset = { symbol: string; name: string; tv?: string }
+type Asset = {
+  symbol: string; name: string; tv?: string
+  // Naira/GetEquity assets carry these instead of a TradingView chart:
+  blurb?: string; kind?: 'term' | 'fund' | 'equity'; token?: string | null; naira?: boolean
+}
 const STOCKS: Asset[] = [
   { symbol: 'AAPL', name: 'Apple', tv: 'NASDAQ:AAPL' },
   { symbol: 'NVDA', name: 'NVIDIA', tv: 'NASDAQ:NVDA' },
@@ -31,16 +34,19 @@ const PREIPO: Asset[] = [
   { symbol: 'ANTHROPIC', name: 'Anthropic' },
   { symbol: 'DATABRICKS', name: 'Databricks' },
 ]
-// Symbols we have live quotes for (module-level so the hook's key stays stable).
 const STOCK_SYMBOLS = STOCKS.map(s => s.symbol)
 
-interface Holding { symbol: string; asset_type: Cat; provider: string; invested_cngn_micro: number; shares: number }
+interface Holding { symbol: string; asset_type: string; provider: string; invested_cngn_micro: number; shares: number }
 interface Props { wallet: Wallet | null; profile: { kyc_status?: string } | null; refresh: () => void; onStartKyc: () => void }
 
+const IconLock = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+
 export default function InvestView({ wallet, profile, refresh, onStartKyc }: Props) {
-  const [cat, setCat] = useState<Cat>('tokenized_stock')
+  const [cat, setCat] = useState<Cat>('naira')
   const [holdings, setHoldings] = useState<Holding[]>([])
   const [brokerLive, setBrokerLive] = useState(false)
+  const [nairaAssets, setNairaAssets] = useState<Asset[]>([])
+  const [nairaLive, setNairaLive] = useState(false)
   const [selected, setSelected] = useState<Asset | null>(null)
   const [amount, setAmount] = useState('')
   const [busy, setBusy] = useState(false)
@@ -53,29 +59,55 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
       .then(d => { if (d) { setHoldings(d.holdings || []); setBrokerLive(!!d.broker?.live) } })
       .catch(() => undefined)
 
-  useEffect(() => { loadHoldings() }, [])
+  const loadNaira = () =>
+    fetch('/api/invest/getequity')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (!d) return
+        setNairaAssets((d.assets || []).map((a: any) => ({
+          symbol: a.symbol, name: a.name, blurb: a.blurb, kind: a.kind, token: a.token, naira: true,
+        })))
+        setNairaLive(!!d.live)
+      })
+      .catch(() => undefined)
 
-  const list = cat === 'tokenized_stock' ? STOCKS : PREIPO
+  useEffect(() => { loadHoldings(); loadNaira() }, [])
+
+  const list: Asset[] = cat === 'tokenized_stock' ? STOCKS : cat === 'pre_ipo' ? PREIPO : nairaAssets
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 4000) }
+  const isErr = (m: string) => /minimum|verify|could not|wrong|went/i.test(m)
 
   async function buy() {
     const naira = parseFloat(amount)
     if (!naira || naira < 1000) { flash('Minimum investment is ₦1,000'); return }
-    if (profile?.kyc_status !== 'verified') { flash('Verify your identity (KYC) to invest.'); onStartKyc(); return }
+    if (profile?.kyc_status !== 'verified') {
+      const kycOn = process.env.NEXT_PUBLIC_KYC_ENABLED === 'true'
+      flash(kycOn ? 'Verify your identity (KYC) to invest.' : 'Investing needs identity verification — coming soon.')
+      if (kycOn) onStartKyc()
+      return
+    }
     setBusy(true)
     try {
-      const res = await fetch('/api/invest/equity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          assetType: cat,
-          symbol: selected!.symbol,
-          amountCngnMicro: Math.floor(naira * 1_000_000).toString(),
-        }),
-      })
+      const micro = Math.floor(naira * 1_000_000).toString()
+      const res = selected!.naira
+        ? await fetch('/api/invest/getequity', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol: selected!.symbol, token: selected!.token, amountCngnMicro: micro }),
+          })
+        : await fetch('/api/invest/equity', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ assetType: cat, symbol: selected!.symbol, amountCngnMicro: micro }),
+          })
       const data = await res.json().catch(() => ({}))
       if (res.status === 503) { flash(`${selected!.name} is launching soon — we'll notify you when it's buyable.`); return }
-      if (res.status === 403) { flash('Verify your identity (KYC) to invest.'); onStartKyc(); return }
+      if (res.status === 403) {
+        const kycOn = process.env.NEXT_PUBLIC_KYC_ENABLED === 'true'
+        flash(kycOn ? 'Verify your identity (KYC) to invest.' : 'Investing needs identity verification — coming soon.')
+        if (kycOn) onStartKyc()
+        return
+      }
       if (!res.ok) { flash(data.error || 'Could not complete purchase'); return }
       flash(`Bought ${selected!.symbol}!`)
       setAmount(''); setSelected(null); refresh(); loadHoldings()
@@ -86,155 +118,107 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
     }
   }
 
-  // ── Buy sheet ──────────────────────────────────────────────────────────────
+  // ── Buy sheet ──
   if (selected) {
+    const live = selected.naira ? nairaLive : brokerLive
+    const nairaNote = selected.kind === 'term'
+      ? `${selected.blurb || 'Fixed income'} — earns yield to maturity; sell any time at market price.`
+      : selected.kind === 'fund'
+      ? `${selected.blurb || 'Income fund'} — earns yield; sell any time at market price.`
+      : `${selected.blurb || 'Regulated Nigerian investment'} — sell any time at market price.`
     return (
-      <div className="px-4 pt-5">
-        <button onClick={() => { setSelected(null); setAmount('') }} className="flex items-center gap-1 text-sm text-white/80 hover:text-white mb-4">
-          <ArrowLeft className="w-4 h-4" /> Back
-        </button>
-        <h2 className="text-lg font-bold text-white mb-1">Buy {selected.name}</h2>
-        <p className="text-sm text-emerald-50/80 mb-4">
-          {cat === 'pre_ipo' ? 'Pre-IPO exposure' : 'Tokenized stock'} · paid from your cNGN balance
-        </p>
+      <div className="b">
+        <button className="back" onClick={() => { setSelected(null); setAmount('') }}>← Back</button>
+        <div className="h2">Buy {selected.name}</div>
+        <p className="p">{selected.naira ? 'Regulated investment (Naira)' : cat === 'pre_ipo' ? 'Pre-IPO exposure' : 'Tokenized stock'} · paid from your cNGN balance</p>
 
-        {/* Live price + sparkline for public tickers; pre-IPO has no public market. */}
-        {selected.tv ? (
-          <div className="mb-5">
-            <StockQuotePanel quote={quotes[selected.symbol]} />
+        {selected.naira ? (
+          <div className="note" style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <span style={{ color: 'var(--muted)' }}><IconLock /></span>
+            <span>{nairaNote}</span>
           </div>
+        ) : selected.tv ? (
+          <div style={{ marginBottom: 16 }}><StockQuotePanel quote={quotes[selected.symbol]} /></div>
         ) : (
-          <div className="mb-5 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-500">
-            <Lock className="w-4 h-4 flex-shrink-0" />
+          <div className="note" style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <span style={{ color: 'var(--muted)' }}><IconLock /></span>
             <span>{selected.name} is a private company — no public market price. Valued at each funding round.</span>
           </div>
         )}
 
-        <label className="text-xs text-white/80">Amount (cNGN)</label>
-        <div className="relative mt-1 mb-2">
-          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-lg font-medium">₦</span>
-          <input
-            type="number" inputMode="numeric" value={amount}
-            onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
-            placeholder="0"
-            className="w-full pl-10 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            autoFocus
-          />
-        </div>
-        <p className="text-[11px] text-white/70 mb-4">
-          Minimum ₦1,000 · Available ₦{((wallet?.usdc_balance_micro || 0) / 1_000_000).toLocaleString()}
-        </p>
+        <label className="lab" style={{ marginTop: 14 }}>Amount (cNGN)</label>
+        <input className="field" type="number" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))} placeholder="0" autoFocus />
+        <p className="p" style={{ margin: '6px 3px 0' }}>Minimum ₦1,000 · Available ₦{((wallet?.usdc_balance_micro || 0) / 1_000_000).toLocaleString()}</p>
 
-        {!brokerLive && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4">
-            <p className="text-xs text-amber-700">Trading is launching soon. You can place interest now — we’ll notify you when {selected.symbol} goes live.</p>
-          </div>
-        )}
-        {msg && <p className="text-sm font-medium text-white bg-emerald-700/40 rounded-lg px-3 py-2 mb-3">{msg}</p>}
+        {!live && <div className="note">Trading is launching soon. Register interest now — we’ll notify you when {selected.symbol} goes live.</div>}
+        {msg && <div className={`flash ${isErr(msg) ? 'err' : 'ok'}`}>{msg}</div>}
 
-        <button onClick={buy} disabled={busy || !amount}
-          className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98]">
-          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
-          {brokerLive ? `Buy ${selected.symbol}` : `Notify me about ${selected.symbol}`}
-        </button>
+        <button className="cta" onClick={buy} disabled={busy || !amount}>{busy ? 'Processing…' : live ? `Buy ${selected.symbol}` : `Notify me about ${selected.symbol}`}</button>
       </div>
     )
   }
 
-  // ── Market list ──────────────────────────────────────────────────────────────
+  // ── Market list ──
   return (
-    <div className="px-4 pt-5 pb-6">
-      <div className="bg-gradient-to-br from-emerald-600 to-emerald-800 rounded-2xl p-5 text-white mb-4">
-        <div className="flex items-center gap-2 mb-1">
-          <TrendingUp className="w-5 h-5 text-emerald-200" />
-          <h2 className="text-lg font-bold">Global Markets</h2>
-        </div>
-        <p className="text-sm text-emerald-50/90">Own US stocks and pre-IPO companies with your cNGN.</p>
+    <div className="b">
+      <div className="pool rise">
+        <div className="l">{cat === 'naira' ? 'Naira markets' : 'Global markets'}</div>
+        <div className="v" style={{ fontSize: 20 }}>{cat === 'naira' ? 'T-bills, funds & IPOs' : 'Own US stocks & pre-IPO'}</div>
+        <span className="apy">Buy with your cNGN · {cat === 'naira' ? 'regulated & on-chain' : 'backed 1:1'}</span>
       </div>
 
-      {!brokerLive && (
-        <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 mb-4">
-          <Sparkles className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-emerald-700">Tokenized stocks &amp; pre-IPO are launching soon. Browse and register interest now.</p>
-        </div>
-      )}
+      {cat !== 'naira' && !brokerLive && <div className="note">Tokenized stocks &amp; pre-IPO are launching soon. Browse and register interest now.</div>}
+      {cat === 'naira' && !nairaLive && <div className="note">Regulated Naira investments (T-bills, funds, REITs) are launching soon. Browse and register interest now.</div>}
 
-      {/* Category toggle */}
-      <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-4">
-        {([['tokenized_stock', 'Stocks'], ['pre_ipo', 'Pre-IPO']] as const).map(([id, label]) => (
-          <button key={id} onClick={() => setCat(id)}
-            className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${cat === id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>
-            {label}
-          </button>
+      <div className="terms" style={{ gridTemplateColumns: '1fr 1fr 1fr', marginTop: 14 }}>
+        {([['naira', 'Naira assets'], ['tokenized_stock', 'Stocks'], ['pre_ipo', 'Pre-IPO']] as const).map(([id, label]) => (
+          <button key={id} className={`term${cat === id ? ' on' : ''}`} onClick={() => setCat(id)}>{label}</button>
         ))}
       </div>
 
-      {/* Live quote cards (price + % change + sparkline) for the public tickers. */}
-      {cat === 'tokenized_stock' && (
-        <div className="mb-4">
-          <MarketCards stocks={STOCKS} quotes={quotes} />
-        </div>
-      )}
+      {cat === 'tokenized_stock' && <div style={{ marginTop: 14 }}><MarketCards stocks={STOCKS} quotes={quotes} /></div>}
 
-      {msg && <p className="text-sm font-medium text-white bg-emerald-700/40 rounded-lg px-3 py-2 mb-3">{msg}</p>}
+      {msg && <div className={`flash ${isErr(msg) ? 'err' : 'ok'}`}>{msg}</div>}
 
-      {/* Holdings */}
       {holdings.length > 0 && (
-        <div className="mb-5">
-          <p className="text-xs font-semibold text-white/90 mb-2">Your portfolio</p>
-          <div className="space-y-2">
+        <>
+          <div className="sect"><span className="h">Your portfolio</span></div>
+          <div className="rows">
             {holdings.map(h => (
-              <div key={`${h.symbol}-${h.provider}`} className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-4 py-3">
-                <div>
-                  <p className="text-sm font-bold text-slate-900">{h.symbol}</p>
-                  <p className="text-[11px] text-slate-400">{h.asset_type === 'pre_ipo' ? 'Pre-IPO' : 'Stock'} · {Number(h.shares).toFixed(4)} shares</p>
-                </div>
-                <p className="text-sm font-semibold text-slate-700">₦{(Number(h.invested_cngn_micro) / 1e6).toLocaleString()}</p>
+              <div key={`${h.symbol}-${h.provider}`} className="coll">
+                <span className="dot" style={{ background: 'var(--surface-2)', color: 'var(--muted)', fontWeight: 700, fontSize: 11 }}>{h.symbol.slice(0, 2)}</span>
+                <div className="mid"><div className="nm">{h.symbol}</div><div className="sub">{h.asset_type === 'pre_ipo' ? 'Pre-IPO' : h.asset_type === 'rwa' ? 'Naira asset' : 'Stock'} · {Number(h.shares).toFixed(4)} {h.asset_type === 'rwa' ? 'units' : 'shares'}</div></div>
+                <span className="v num">₦{(Number(h.invested_cngn_micro) / 1e6).toLocaleString()}</span>
               </div>
             ))}
           </div>
-        </div>
+        </>
       )}
 
-      {/* Catalogue */}
-      <div className="space-y-2">
+      <div className="sect"><span className="h">{cat === 'tokenized_stock' ? 'Stocks' : cat === 'pre_ipo' ? 'Pre-IPO companies' : 'Regulated Naira assets'}</span></div>
+      <div className="rows">
         {list.map(a => {
           const q = a.tv ? quotes[a.symbol] : undefined
           const up = (q?.changePct ?? 0) >= 0
           return (
-            <button key={a.symbol} onClick={() => { setSelected(a); setAmount(''); setMsg('') }}
-              className="w-full flex items-center gap-3 bg-white border border-slate-200 hover:border-emerald-400 rounded-xl px-3.5 py-3 transition text-left">
-              <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-700 shrink-0">
-                {a.symbol.slice(0, 2)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold text-slate-900 truncate">{a.name}</p>
-                <p className="text-[11px] text-slate-400">{a.symbol}</p>
-              </div>
-              {q && (
-                <div className="w-12 h-7 shrink-0">
-                  <Sparkline data={q.spark} up={up} height={28} />
-                </div>
-              )}
+            <button key={a.symbol} className="coll" style={{ width: '100%', background: 'none', border: 0, borderTop: '1px solid var(--line)', cursor: 'pointer', textAlign: 'left' }} onClick={() => { setSelected(a); setAmount(''); setMsg('') }}>
+              <span className="dot" style={{ background: 'var(--surface-2)', color: 'var(--muted)', fontWeight: 700, fontSize: 11 }}>{a.symbol.slice(0, 2)}</span>
+              <div className="mid"><div className="nm">{a.name}</div><div className="sub">{a.blurb || a.symbol}</div></div>
+              {q && <div style={{ width: 48, height: 28, flex: 'none' }}><Sparkline data={q.spark} up={up} height={28} /></div>}
               {q ? (
-                <div className="text-right shrink-0 min-w-[64px]">
-                  <p className="text-sm font-semibold text-slate-800">
-                    {q.price != null ? `${q.currency === 'USD' ? '$' : ''}${q.price.toFixed(2)}` : '—'}
-                  </p>
+                <div style={{ textAlign: 'right', flex: 'none', minWidth: 62 }}>
+                  <div className="v num">{q.price != null ? `${q.currency === 'USD' ? '$' : ''}${q.price.toFixed(2)}` : '—'}</div>
                   <ChangeBadge q={q} />
                 </div>
               ) : (
-                <span className="text-xs font-semibold text-emerald-600 shrink-0">Buy →</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--green)', flex: 'none' }}>Buy →</span>
               )}
             </button>
           )
         })}
       </div>
 
-      <div className="flex items-center gap-2 mt-5 text-[11px] text-white/70">
-        <ShieldCheck className="w-3.5 h-3.5" />
-        <span>Tokenized equities are backed 1:1 and require identity verification (KYC).</span>
-      </div>
+      <p className="p" style={{ margin: '14px 3px 0' }}>Tokenized equities are backed 1:1 and require identity verification (KYC).</p>
     </div>
   )
 }

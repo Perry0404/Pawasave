@@ -41,9 +41,9 @@ export async function POST(request: NextRequest) {
     .eq('id', user.id)
     .single()
 
-  if (profile?.kyc_status !== 'verified') {
-    return NextResponse.json({ error: 'Complete identity verification first' }, { status: 403 })
-  }
+  // Tiered KYC: a valid BVN alone gets a "lite" naira account (capped at ₦20k in the
+  // ramp route). Full biometric (Sense) KYC is NOT required here — it's only needed to
+  // lift the cap. BVN is still mandatory (Strails + CBN require it for any NUBAN).
   if (profile?.strails_va_account_number) {
     return NextResponse.json({ ok: true, alreadyOnboarded: true })
   }

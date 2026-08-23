@@ -3,7 +3,9 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyPin } from '@/lib/pin-hash'
+import { pinLockGuard, recordPinResult } from '@/lib/pin-lockout'
 import { refreshEquityPrices, heldSymbols } from '@/lib/equity-prices'
+import { refreshRwaPrices } from '@/lib/getequity'
 
 /**
  * /api/loans — custodial, in-app asset-backed lending.
@@ -48,6 +50,9 @@ async function refreshUserEquityPrices(userId: string): Promise<void> {
     )
     const symbols = await heldSymbols(admin, userId)
     if (symbols.length) await refreshEquityPrices(admin, symbols)
+    // Naira assets (GetEquity rwa) are priced from the Market, not Yahoo — no-op until
+    // GETEQUITY_ENABLED, so this is inert until GetEquity is live.
+    await refreshRwaPrices(admin, userId)
   } catch {
     /* best-effort */
   }
@@ -61,8 +66,11 @@ async function ensurePin(supabase: any, userId: string, pin: string | undefined)
   if (!profile?.transaction_pin_hash) {
     return NextResponse.json({ error: 'Set your transaction PIN in Settings first' }, { status: 400 })
   }
+  const lock = await pinLockGuard(userId)
+  if (lock.locked) return NextResponse.json({ error: lock.message }, { status: 429 })
   const { ok } = verifyPin(pin as string, profile.transaction_pin_hash)
-  if (!ok) return NextResponse.json({ error: 'Incorrect transaction PIN' }, { status: 401 })
+  const attempt = await recordPinResult(userId, ok)
+  if (!ok) return NextResponse.json({ error: attempt.message || 'Incorrect transaction PIN' }, { status: attempt.justLocked ? 429 : 401 })
   return null
 }
 

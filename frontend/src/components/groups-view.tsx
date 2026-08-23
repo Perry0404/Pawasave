@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { formatNaira, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
-import { Users, Plus, ChevronRight, Loader2, AlertCircle, ArrowLeft, Send, Vault, Wallet, Copy, Check, Share2, Crown, Bell, ShieldCheck } from 'lucide-react'
+import { Loader2, Copy, Check } from 'lucide-react'
 import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -13,6 +13,8 @@ interface Props {
   user: User | null
   wallet: WalletType | null
 }
+
+const initialsOf = (n?: string) => (n || 'M').split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase()
 
 export default function GroupsView({ user, wallet }: Props) {
   const [groups, setGroups] = useState<(EsusuGroup & { member_count: number })[]>([])
@@ -26,20 +28,15 @@ export default function GroupsView({ user, wallet }: Props) {
   const [paymentMethod, setPaymentMethod] = useState<'usdc' | 'naira' | 'crypto'>('usdc')
   const [copied, setCopied] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
+  const [inviteCode, setInviteCode] = useState<string | null>(null)
   const [payoutMsg, setPayoutMsg] = useState('')
+  const [swept, setSwept] = useState(false)
 
   // Emergency vote
   const [showEmergency, setShowEmergency] = useState(false)
   const [emergencyRequest, setEmergencyRequest] = useState<null | {
-    id: string
-    requester_id: string
-    reason: string
-    amount_kobo: number
-    status: string
-    created_at: string
-    approve_count: number
-    reject_count: number
-    user_voted: boolean
+    id: string; requester_id: string; reason: string; amount_kobo: number; status: string
+    created_at: string; approve_count: number; reject_count: number; user_voted: boolean
   }>(null)
   const [emergencyReason, setEmergencyReason] = useState('')
   const [emergencyAmount, setEmergencyAmount] = useState('')
@@ -50,32 +47,24 @@ export default function GroupsView({ user, wallet }: Props) {
   const [formAmount, setFormAmount] = useState('')
   const [formMax, setFormMax] = useState('5')
   const [formFreq, setFormFreq] = useState<EsusuGroup['cycle_period']>('monthly')
-  const [formIncentive, setFormIncentive] = useState(0) // creator incentive %
+  const [formIncentive, setFormIncentive] = useState(0)
 
   const fetchGroups = useCallback(async () => {
     if (!user) return
     setLoading(true)
-    const { data } = await supabase
-      .from('esusu_members')
-      .select('group_id')
-      .eq('user_id', user.id)
+    const { data } = await supabase.from('esusu_members').select('group_id').eq('user_id', user.id)
     const ids = data?.map((d) => d.group_id) || []
     if (ids.length === 0) { setGroups([]); setLoading(false); return }
-    const { data: g } = await supabase
-      .from('esusu_groups')
-      .select('*')
-      .in('id', ids)
-      .order('created_at', { ascending: false })
-    // count members per group
-    const enriched = await Promise.all(
-      (g || []).map(async (group) => {
-        const { count } = await supabase
-          .from('esusu_members')
-          .select('*', { count: 'exact', head: true })
-          .eq('group_id', group.id)
-        return { ...group, member_count: count || 0 }
-      })
-    )
+    // One query for the groups + one for ALL their members, then count client-side —
+    // instead of a separate count round-trip per group (N+1), which made the Ajo tab
+    // slow for anyone in more than a couple of circles.
+    const [{ data: g }, { data: memberRows }] = await Promise.all([
+      supabase.from('esusu_groups').select('*').in('id', ids).order('created_at', { ascending: false }),
+      supabase.from('esusu_members').select('group_id').in('group_id', ids),
+    ])
+    const counts: Record<string, number> = {}
+    for (const r of memberRows || []) counts[r.group_id] = (counts[r.group_id] || 0) + 1
+    const enriched = (g || []).map((group) => ({ ...group, member_count: counts[group.id] || 0 }))
     setGroups(enriched)
     setLoading(false)
   }, [user])
@@ -87,30 +76,32 @@ export default function GroupsView({ user, wallet }: Props) {
     const amountKobo = Math.round(parseFloat(formAmount) * 100)
     if (amountKobo < 10000) { setFeedback('Min ₦100 contribution'); return }
     setBusy(true)
-    const { data: group, error } = await supabase
-      .from('esusu_groups')
-      .insert({
-        name: formName,
-        owner_id: user.id,
-        contribution_amount_kobo: amountKobo,
-        cycle_period: formFreq,
-        max_members: parseInt(formMax),
-        current_cycle: 0,
-        creator_incentive_percent: formIncentive,
-      })
-      .select()
-      .single()
+    const { data: group, error } = await supabase.from('esusu_groups').insert({
+      name: formName, owner_id: user.id, contribution_amount_kobo: amountKobo,
+      cycle_period: formFreq, max_members: parseInt(formMax), current_cycle: 0, creator_incentive_percent: formIncentive,
+    }).select().single()
     if (error) { setFeedback(error.message); setBusy(false); return }
-    // add creator as first member
-    await supabase.from('esusu_members').insert({
-      group_id: group.id,
-      user_id: user.id,
-      payout_position: 1,
-    })
+    await supabase.from('esusu_members').insert({ group_id: group.id, user_id: user.id, payout_position: 1 })
     setBusy(false)
     setShowCreate(false)
     setFormName(''); setFormAmount(''); setFormMax('5'); setFormIncentive(0)
     fetchGroups()
+  }
+
+  // Owner mints a code for a member who has NO smartphone. They dial *111*CODE#, add
+  // their BVN over USSD, and are auto-onboarded + joined to this circle.
+  const addOfflineMember = async () => {
+    if (!selected) return
+    setBusy(true)
+    try {
+      const { data, error } = await supabase.rpc('create_ajo_invite', { p_group_id: selected.id, p_label: null })
+      if (error || !(data as any)?.code) throw new Error(error?.message || 'Could not create code')
+      setInviteCode((data as any).code)
+    } catch (e: any) {
+      setFeedback(e?.message || 'Could not create invite code')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const handleShare = async () => {
@@ -118,13 +109,9 @@ export default function GroupsView({ user, wallet }: Props) {
     const url = `${window.location.origin}/join/${selected.id}`
     if (typeof navigator.share === 'function') {
       try {
-        await navigator.share({
-          title: `Join my Ajo circle: ${selected.name}`,
-          text: `Contribute ${formatNaira(selected.contribution_amount_kobo)} ${selected.cycle_period} in our savings circle on PawaSave.`,
-          url,
-        })
+        await navigator.share({ title: `Join my Ajo circle: ${selected.name}`, text: `Contribute ${formatNaira(selected.contribution_amount_kobo)} ${selected.cycle_period} in our savings circle on PawaSave.`, url })
         return
-      } catch { /* user dismissed share sheet */ }
+      } catch { /* dismissed */ }
     }
     await navigator.clipboard.writeText(url)
     setLinkCopied(true)
@@ -133,19 +120,9 @@ export default function GroupsView({ user, wallet }: Props) {
 
   const loadEmergencyData = useCallback(async () => {
     if (!selected || !user) return
-    const { data: req } = await supabase
-      .from('emergency_requests')
-      .select('*')
-      .eq('group_id', selected.id)
-      .eq('status', 'voting')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
+    const { data: req } = await supabase.from('emergency_requests').select('*').eq('group_id', selected.id).eq('status', 'voting').order('created_at', { ascending: false }).limit(1).maybeSingle()
     if (!req) { setEmergencyRequest(null); return }
-    const { data: votes } = await supabase
-      .from('emergency_votes')
-      .select('approve, voter_id')
-      .eq('request_id', req.id)
+    const { data: votes } = await supabase.from('emergency_votes').select('approve, voter_id').eq('request_id', req.id)
     const approveCount = votes?.filter((v) => v.approve).length || 0
     const rejectCount = votes?.filter((v) => !v.approve).length || 0
     const userVoted = votes?.some((v) => v.voter_id === user.id) || false
@@ -157,71 +134,36 @@ export default function GroupsView({ user, wallet }: Props) {
     const amountKobo = Math.round(parseFloat(emergencyAmount) * 100)
     if (amountKobo <= 0) return
     setEmergencyBusy(true)
-    const { data } = await supabase.rpc('request_emergency_payout', {
-      p_group_id: selected.id,
-      p_reason: emergencyReason,
-      p_amount_kobo: amountKobo,
-    })
+    const { data } = await supabase.rpc('request_emergency_payout', { p_group_id: selected.id, p_reason: emergencyReason, p_amount_kobo: amountKobo })
     setEmergencyBusy(false)
-    if (data?.ok) {
-      setEmergencyReason('')
-      setEmergencyAmount('')
-      await loadEmergencyData()
-    } else {
-      setFeedback(data?.error || 'Failed to submit request')
-      setTimeout(() => setFeedback(''), 3000)
-    }
+    if (data?.ok) { setEmergencyReason(''); setEmergencyAmount(''); await loadEmergencyData() }
+    else { setFeedback(data?.error || 'Failed to submit request'); setTimeout(() => setFeedback(''), 3000) }
   }
 
   const castVote = async (approve: boolean) => {
     if (!user || !emergencyRequest) return
     setEmergencyBusy(true)
-    const { data } = await supabase.rpc('cast_emergency_vote', {
-      p_request_id: emergencyRequest.id,
-      p_approve: approve,
-    })
+    const { data } = await supabase.rpc('cast_emergency_vote', { p_request_id: emergencyRequest.id, p_approve: approve })
     setEmergencyBusy(false)
     if (data?.ok) {
-      if (data.disbursed) {
-        setFeedback(`Emergency payout of ${formatNaira(data.amount_kobo)} approved and disbursed!`)
-        setShowEmergency(false)
-        if (selected) openGroup(selected)
-      } else if (data.rejected) {
-        setFeedback('Emergency request was rejected by the group.')
-        setEmergencyRequest(null)
-      } else {
-        await loadEmergencyData()
-      }
-    } else {
-      setFeedback(data?.error || 'Vote failed')
-    }
+      if (data.disbursed) { setFeedback(`Emergency payout of ${formatNaira(data.amount_kobo)} approved and disbursed!`); setShowEmergency(false); if (selected) openGroup(selected) }
+      else if (data.rejected) { setFeedback('Emergency request was rejected by the group.'); setEmergencyRequest(null) }
+      else { await loadEmergencyData() }
+    } else { setFeedback(data?.error || 'Vote failed') }
     setTimeout(() => setFeedback(''), 4000)
   }
 
   const openGroup = async (group: EsusuGroup) => {
     setSelected(group)
-    const { data: m } = await supabase
-      .from('esusu_members')
-      .select('*')
-      .eq('group_id', group.id)
-      .order('payout_position')
-    // get names
+    setSwept(false)
+    const { data: m } = await supabase.from('esusu_members').select('*').eq('group_id', group.id).order('payout_position')
     const profileIds = m?.map((x) => x.user_id) || []
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('id, display_name')
-      .in('id', profileIds)
+    const { data: profiles } = await supabase.from('profiles').select('id, display_name').in('id', profileIds)
     const nameMap = new Map(profiles?.map((p) => [p.id, p.display_name]) || [])
-    setMembers(
-      (m || []).map((x) => ({ ...x, profile_name: nameMap.get(x.user_id) || 'Member' }))
-    )
-    const { data: c } = await supabase
-      .from('esusu_contributions')
-      .select('*')
-      .eq('group_id', group.id)
-      .order('created_at', { ascending: false })
-      .limit(30)
+    setMembers((m || []).map((x) => ({ ...x, profile_name: nameMap.get(x.user_id) || 'Member' })))
+    const { data: c } = await supabase.from('esusu_contributions').select('*').eq('group_id', group.id).order('created_at', { ascending: false }).limit(30)
     setContributions(c || [])
+    setTimeout(() => setSwept(true), 60)
   }
 
   const contribute = async () => {
@@ -231,582 +173,276 @@ export default function GroupsView({ user, wallet }: Props) {
     setBusy(true)
 
     if (paymentMethod === 'crypto') {
-      // Crypto wallet deposit from user's personal deposit address
-      if (!wallet?.deposit_address) {
-        setFeedback('No deposit address found. Please contact support.')
-        setBusy(false)
-        setTimeout(() => setFeedback(''), 3000)
-        return
-      }
-      const cngnMicro = Math.round(selected.contribution_amount_kobo / 100 * 1_000_000) // 1 cNGN = 1 NGN
+      if (!wallet?.deposit_address) { setFeedback('No deposit address found. Please contact support.'); setBusy(false); setTimeout(() => setFeedback(''), 3000); return }
+      const cngnMicro = Math.round(selected.contribution_amount_kobo / 100 * 1_000_000)
       const { error } = await supabase.rpc('esusu_contribute_crypto', {
-        p_user_id: user.id,
-        p_group_id: selected.id,
-        p_member_id: member.id,
-        p_amount_cngn_micro: cngnMicro,
-        p_cycle: selected.current_cycle,
-        p_wallet_address: wallet.deposit_address,
+        p_user_id: user.id, p_group_id: selected.id, p_member_id: member.id, p_amount_cngn_micro: cngnMicro, p_cycle: selected.current_cycle, p_wallet_address: wallet.deposit_address,
       })
       if (error) { setFeedback(error.message) } else {
         setFeedback('Crypto contribution recorded!')
         openGroup(selected)
-        // Fire-and-forget: deploy pot to PawasaveLend (27% APY)
-        fetch('/api/esusu/yield', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'deposit',
-            group_id: selected.id,
-            contribution_kobo: selected.contribution_amount_kobo,
-          }),
-        }).catch(() => {})
+        fetch('/api/esusu/yield', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deposit', group_id: selected.id, contribution_kobo: selected.contribution_amount_kobo }) }).catch(() => {})
       }
-      setBusy(false)
-      setTimeout(() => setFeedback(''), 3000)
-      return
+      setBusy(false); setTimeout(() => setFeedback(''), 3000); return
     }
 
     if (paymentMethod === 'usdc') {
-      // Pay from savings: withdraw from the cNGN vault to naira, then contribute.
       const rate = getRate()
       const usdcMicro = koboToMicroUsdc(selected.contribution_amount_kobo, rate)
-
       const freeUsdc = wallet?.usdc_balance_micro || 0
       const cngnPool = wallet?.cngn_pool_micro || 0
-
-      // Client-side pre-check is UX only — the atomic RPC is the real guard.
-      if (usdcMicro > freeUsdc + cngnPool) {
-        setFeedback('Insufficient cNGN balance')
-        setBusy(false)
-        setTimeout(() => setFeedback(''), 3000)
-        return
-      }
-
-      // FIND-FIN-04: one atomic RPC frees pool funds (if needed) and debits in a
-      // single locked transaction — no read-then-write race.
-      const { data: vaultOk, error: vaultErr } = await supabase.rpc('withdraw_vault_atomic', {
-        p_user_id: user.id,
-        p_naira_kobo: selected.contribution_amount_kobo,
-        p_usdc_micro: usdcMicro,
-      })
-      if (vaultErr || !vaultOk) {
-        setFeedback(vaultErr?.message || 'Insufficient cNGN balance')
-        setBusy(false)
-        setTimeout(() => setFeedback(''), 3000)
-        return
-      }
+      if (usdcMicro > freeUsdc + cngnPool) { setFeedback('Insufficient cNGN balance'); setBusy(false); setTimeout(() => setFeedback(''), 3000); return }
+      const { data: vaultOk, error: vaultErr } = await supabase.rpc('withdraw_vault_atomic', { p_user_id: user.id, p_naira_kobo: selected.contribution_amount_kobo, p_usdc_micro: usdcMicro })
+      if (vaultErr || !vaultOk) { setFeedback(vaultErr?.message || 'Insufficient cNGN balance'); setBusy(false); setTimeout(() => setFeedback(''), 3000); return }
     }
 
-    const { error } = await supabase.rpc('esusu_contribute', {
-      p_user_id: user.id,
-      p_group_id: selected.id,
-      p_member_id: member.id,
-      p_amount_kobo: selected.contribution_amount_kobo,
-      p_cycle: selected.current_cycle,
-    })
+    const { error } = await supabase.rpc('esusu_contribute', { p_user_id: user.id, p_group_id: selected.id, p_member_id: member.id, p_amount_kobo: selected.contribution_amount_kobo, p_cycle: selected.current_cycle })
     if (error) { setFeedback(error.message) } else {
       setFeedback('Contribution sent!')
       openGroup(selected)
-      // Fire-and-forget: deploy pot to PawasaveLend (27% APY)
-      fetch('/api/esusu/yield', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'deposit',
-          group_id: selected.id,
-          contribution_kobo: selected.contribution_amount_kobo,
-        }),
-      }).catch(() => {})
-      // Check if cycle is now complete and trigger payout
+      fetch('/api/esusu/yield', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deposit', group_id: selected.id, contribution_kobo: selected.contribution_amount_kobo }) }).catch(() => {})
       const { data: payoutResult } = await supabase.rpc('process_esusu_payout', { p_group_id: selected.id })
       if (payoutResult?.ok) {
-        setPayoutMsg(payoutResult.completed
-          ? '🎉 Circle complete! All members have been paid.'
-          : `🎉 Cycle ${payoutResult.cycle} complete! Payout sent to the next member.`
-        )
+        setPayoutMsg(payoutResult.completed ? '🎉 Circle complete! All members have been paid.' : `🎉 Cycle ${payoutResult.cycle} complete! Payout sent to the next member.`)
         setTimeout(() => setPayoutMsg(''), 6000)
-        openGroup(selected) // refresh updated cycle
-        // Pay out any accumulated yield as a bonus on top of the base pot
-        fetch('/api/esusu/yield', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'payout',
-            group_id: selected.id,
-            recipient_user_id: payoutResult.paid_to,
-          }),
-        }).catch(() => {})
+        openGroup(selected)
+        fetch('/api/esusu/yield', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'payout', group_id: selected.id, recipient_user_id: payoutResult.paid_to }) }).catch(() => {})
       }
     }
-    setBusy(false)
-    setTimeout(() => setFeedback(''), 3000)
+    setBusy(false); setTimeout(() => setFeedback(''), 3000)
   }
 
-  // Detail view
+  // ══ DETAIL ══
   if (selected) {
+    const N = Math.max(members.length, selected.max_members || members.length || 1)
+    const cycle = selected.current_cycle
+    const paidIds = new Set(contributions.filter((c) => c.cycle_number === cycle).map((c) => (c as any).member_id))
+    const recipientPos = cycle + 1
+    const paidCount = paidIds.size
+    const potKobo = selected.pot_balance_kobo || selected.contribution_amount_kobo * (selected.max_members || N)
+    const recipient = members.find((m) => m.payout_position === recipientPos)
+    const isMember = members.some((m) => m.user_id === user?.id)
+
+    // circle geometry
+    const R = 100, cx = 132, cy = 132
+    const C = 2 * Math.PI * 43
+    const dashOffset = swept ? C * (1 - paidCount / N) : C
+
     return (
-      <div className="px-4 pt-5">
-        <div className="flex items-center justify-between mb-4">
-          <button
-            onClick={() => setSelected(null)}
-            className="flex items-center gap-1 text-sm text-slate-500"
-          >
-            <ArrowLeft className="w-4 h-4" /> Back
-          </button>
-          <button
-            onClick={handleShare}
-            className="flex items-center gap-1.5 text-sm font-semibold text-purple-600 bg-purple-50 px-3 py-1.5 rounded-lg hover:bg-purple-100 transition"
-          >
-            {linkCopied ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
-            {linkCopied ? 'Link copied!' : 'Invite'}
-          </button>
-        </div>
-        <div className="bg-gradient-to-br from-purple-600 to-violet-700 rounded-2xl p-5 text-white mb-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-sm text-purple-200 font-medium">{selected.name}</p>
-              {selected.owner_id === user?.id && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-300 mt-0.5">
-                  <Crown className="w-3 h-3" /> Creator
-                </span>
-              )}
-            </div>
-            <div className="flex flex-col items-end gap-1">
-              <span className="text-[10px] font-bold bg-emerald-400/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-400/30">
-                27% APY
-              </span>
-              {selected.creator_incentive_percent > 0 && (
-                <span className="text-[10px] font-bold bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-400/30">
-                  {selected.creator_incentive_percent}% creator fee
-                </span>
-              )}
-            </div>
+      <div className="b">
+        <div className="ajohead">
+          <div>
+            <div className="t">{selected.name}</div>
+            <div className="s">{members.length} members · {formatNaira(selected.contribution_amount_kobo)} each · {selected.cycle_period}</div>
           </div>
-          <p className="text-2xl font-bold mt-2">{formatNaira(selected.contribution_amount_kobo)}</p>
-          <p className="text-xs text-purple-300 mt-1">{selected.cycle_period} &middot; Cycle {selected.current_cycle} &middot; Pot earning yield</p>
+          <button className="cyclechip" onClick={handleShare} style={{ border: 0, cursor: 'pointer' }}>{linkCopied ? 'Link copied!' : 'Invite'}</button>
         </div>
 
-        {/* Creator admin panel */}
         {selected.owner_id === user?.id && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Crown className="w-4 h-4 text-amber-600" />
-              <p className="text-sm font-bold text-amber-800">Creator Dashboard</p>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="bg-white rounded-lg p-2.5 border border-amber-100">
-                <p className="text-amber-600 font-medium">Pot Balance</p>
-                <p className="font-bold text-slate-800 mt-0.5">{formatNaira(selected.pot_balance_kobo)}</p>
+          <div style={{ margin: '0 0 14px' }}>
+            {inviteCode ? (
+              <div style={{ background: 'var(--card, #12140f)', border: '1px solid var(--line, #20261f)', borderRadius: 12, padding: '12px 14px' }}>
+                <div style={{ fontSize: 11, color: 'var(--sub, #8a9a90)' }}>Member code (no smartphone)</div>
+                <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '.04em', margin: '2px 0 6px' }}>{inviteCode}</div>
+                <div style={{ fontSize: 11, color: 'var(--sub, #8a9a90)', lineHeight: 1.4 }}>
+                  Give this code to the member. They dial <b style={{ color: 'var(--ink, #fff)' }}>*111*{inviteCode}#</b>, enter their BVN, and are onboarded &amp; added to this circle.
+                </div>
+                <button className="cyclechip" style={{ border: 0, cursor: 'pointer', marginTop: 8 }}
+                  onClick={() => { navigator.clipboard?.writeText(inviteCode); setInviteCode(inviteCode) }}>Copy code</button>
+                <button className="cyclechip" style={{ border: 0, cursor: 'pointer', marginTop: 8, marginLeft: 8 }}
+                  onClick={() => setInviteCode(null)}>Done</button>
               </div>
-              <div className="bg-white rounded-lg p-2.5 border border-amber-100">
-                <p className="text-amber-600 font-medium">Members</p>
-                <p className="font-bold text-slate-800 mt-0.5">{members.length}/{selected.max_members}</p>
-              </div>
-              <div className="bg-white rounded-lg p-2.5 border border-amber-100">
-                <p className="text-amber-600 font-medium">Current Cycle</p>
-                <p className="font-bold text-slate-800 mt-0.5">{selected.current_cycle} of {selected.max_members}</p>
-              </div>
-              <div className="bg-white rounded-lg p-2.5 border border-amber-100">
-                <p className="text-amber-600 font-medium">Your incentive</p>
-                <p className="font-bold text-amber-600 mt-0.5">{selected.creator_incentive_percent}% per payout</p>
-              </div>
-            </div>
-            <div className="flex gap-2 mt-3">
-              <button
-                onClick={handleShare}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-semibold rounded-lg transition"
-              >
-                <Bell className="w-3.5 h-3.5" /> Invite Members
+            ) : (
+              <button className="cyclechip" onClick={addOfflineMember} disabled={busy} style={{ border: 0, cursor: 'pointer' }}>
+                {busy ? 'Creating…' : '+ Add member without smartphone'}
               </button>
-              <button
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-semibold rounded-lg transition"
-                onClick={async () => { if (!showEmergency) await loadEmergencyData(); setShowEmergency(true) }}
-              >
-                <ShieldCheck className="w-3.5 h-3.5" /> Emergency Vote
-              </button>
-            </div>
+            )}
           </div>
         )}
 
-        {/* Emergency Fund */}
-        <div className="mb-4">
-          <button
-            onClick={async () => {
-              if (!showEmergency) await loadEmergencyData()
-              setShowEmergency((v) => !v)
-            }}
-            className="w-full flex items-center justify-between px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl"
-          >
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-amber-600" />
-              <span className="text-sm font-semibold text-amber-800">Emergency Fund</span>
-              <span className="text-xs font-medium text-amber-600">{formatNaira(selected.emergency_pot_kobo || 0)}</span>
+        <div className="circle">
+          <svg viewBox="0 0 100 100"><circle className="track" cx="50" cy="50" r="43" /><circle className="prog" cx="50" cy="50" r="43" style={{ strokeDasharray: C, strokeDashoffset: dashOffset, transition: 'stroke-dashoffset 1.1s cubic-bezier(.2,.7,.2,1)' }} /></svg>
+          {Array.from({ length: N }).map((_, i) => {
+            const m = members[i]
+            const ang = (-90 + i * (360 / N)) * Math.PI / 180
+            const x = cx + R * Math.cos(ang), y = cy + R * Math.sin(ang)
+            const paid = m ? paidIds.has(m.id) : false
+            const now = m ? m.payout_position === recipientPos : false
+            return (
+              <div key={i} className={`node${paid ? ' paid' : ''}${now ? ' now' : ''}`} style={{ left: x, top: y }}>
+                {m ? initialsOf(m.user_id === user?.id ? 'You' : m.profile_name) : ''}
+              </div>
+            )
+          })}
+          <div className="pot">
+            <div>
+              <div className="l">This cycle&apos;s pot</div>
+              <div className="v num">{formatNaira(potKobo)}</div>
+              <div className="who">{recipient ? `${recipient.user_id === user?.id ? 'You receive' : (recipient.profile_name + ' receives')}` : `Cycle ${cycle} of ${selected.max_members}`}</div>
             </div>
-            <ChevronRight className={`w-4 h-4 text-amber-400 transition-transform ${showEmergency ? 'rotate-90' : ''}`} />
-          </button>
-
-          {showEmergency && (
-            <div className="mt-2 bg-white border border-amber-200 rounded-xl p-4 space-y-3">
-              {emergencyRequest ? (
-                <>
-                  <div>
-                    <p className="text-xs font-bold text-slate-700 mb-1">Active Emergency Request</p>
-                    <p className="text-sm text-slate-600 mb-1">{emergencyRequest.reason}</p>
-                    <p className="text-base font-bold text-amber-600">{formatNaira(emergencyRequest.amount_kobo)}</p>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">{emergencyRequest.approve_count} approve</span>
-                    <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-semibold">{emergencyRequest.reject_count} reject</span>
-                    <span className="text-slate-400">of {members.length} members</span>
-                  </div>
-                  {!emergencyRequest.user_voted ? (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => castVote(true)}
-                        disabled={emergencyBusy}
-                        className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-60 flex items-center justify-center"
-                      >
-                        {emergencyBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Approve'}
-                      </button>
-                      <button
-                        onClick={() => castVote(false)}
-                        disabled={emergencyBusy}
-                        className="flex-1 py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-lg transition disabled:opacity-60 flex items-center justify-center"
-                      >
-                        {emergencyBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reject'}
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-400 text-center">You have voted. Waiting for other members...</p>
-                  )}
-                </>
-              ) : (
-                <>
-                  <p className="text-xs text-slate-500">
-                    Request an advance from the group emergency pot (<span className="font-semibold">{formatNaira(selected.emergency_pot_kobo || 0)}</span> available). Requires a simple majority vote from all members.
-                  </p>
-                  <div>
-                    <label className="text-xs text-slate-500 block mb-1">Reason</label>
-                    <input
-                      value={emergencyReason}
-                      onChange={(e) => setEmergencyReason(e.target.value)}
-                      placeholder="Medical emergency, school fees..."
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500 block mb-1">Amount (₦)</label>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      value={emergencyAmount}
-                      onChange={(e) => setEmergencyAmount(e.target.value)}
-                      placeholder={`Max ${formatNaira(selected.emergency_pot_kobo || 0)}`}
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-                    />
-                  </div>
-                  <button
-                    onClick={submitEmergencyRequest}
-                    disabled={emergencyBusy || !emergencyReason || !emergencyAmount}
-                    className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold rounded-lg transition disabled:opacity-60 flex items-center justify-center gap-2"
-                  >
-                    {emergencyBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                    Request Emergency Payout
-                  </button>
-                </>
-              )}
-            </div>
-          )}
+          </div>
         </div>
+
+        {selected.owner_id === user?.id && selected.creator_incentive_percent > 0 && (
+          <div className="turnbar"><span className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 20h20L12 4z" /></svg></span><div className="mid"><div className="nm">You&apos;re the circle manager</div><div className="sub">Earning {selected.creator_incentive_percent}% of every payout</div></div></div>
+        )}
+
+        {/* Payment method */}
+        <div className="sect"><span className="h">Pay with</span></div>
+        <div className="terms">
+          <button className={`term${paymentMethod === 'usdc' ? ' on' : ''}`} onClick={() => setPaymentMethod('usdc')}>Savings</button>
+          <button className={`term${paymentMethod === 'naira' ? ' on' : ''}`} onClick={() => setPaymentMethod('naira')}>Naira</button>
+          <button className={`term${paymentMethod === 'crypto' ? ' on' : ''}`} onClick={() => setPaymentMethod('crypto')}>Crypto</button>
+        </div>
+
+        {paymentMethod === 'crypto' && (
+          <div className="info" style={{ marginTop: 12 }}>
+            <div className="l">Your deposit address (Base L2)</div>
+            {wallet?.deposit_address ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                <code className="code" style={{ flex: 1 }}>{wallet.deposit_address}</code>
+                <button onClick={() => { navigator.clipboard.writeText(wallet.deposit_address!); setCopied(true); setTimeout(() => setCopied(false), 2000) }} style={{ background: 'none', border: 0, color: 'var(--green)', cursor: 'pointer' }}>{copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}</button>
+              </div>
+            ) : <p className="p" style={{ margin: '4px 0 0' }}>Address generating… refresh in a moment.</p>}
+            <p className="p" style={{ margin: '6px 0 0' }}>Send exactly {formatNaira(selected.contribution_amount_kobo)} of cNGN to your address above.</p>
+          </div>
+        )}
+
+        {isMember && (
+          <button className="cta" onClick={contribute} disabled={busy}>{busy ? 'Sending…' : `Contribute ${formatNaira(selected.contribution_amount_kobo)}`}</button>
+        )}
+
+        {feedback && <div className={`flash ${/sent|recorded/.test(feedback) ? 'ok' : 'err'}`}>{feedback}</div>}
+        {payoutMsg && <div className="flash ok">{payoutMsg}</div>}
+
+        {/* Emergency fund */}
+        <div className="sect"><span className="h">Emergency fund</span><button className="m" onClick={async () => { if (!showEmergency) await loadEmergencyData(); setShowEmergency((v) => !v) }}>{formatNaira(selected.emergency_pot_kobo || 0)}</button></div>
+        {showEmergency && (
+          <div className="rows" style={{ padding: 15 }}>
+            {emergencyRequest ? (
+              <>
+                <div className="nm" style={{ color: 'var(--ink)', fontWeight: 600 }}>{emergencyRequest.reason}</div>
+                <div className="v num" style={{ color: 'var(--amber)', margin: '4px 0 8px' }}>{formatNaira(emergencyRequest.amount_kobo)}</div>
+                <p className="p" style={{ margin: 0 }}>{emergencyRequest.approve_count} approve · {emergencyRequest.reject_count} reject · of {members.length} members</p>
+                {!emergencyRequest.user_voted ? (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button className="cta" style={{ marginTop: 0 }} onClick={() => castVote(true)} disabled={emergencyBusy}>Approve</button>
+                    <button className="cta ghost" style={{ marginTop: 0 }} onClick={() => castVote(false)} disabled={emergencyBusy}>Reject</button>
+                  </div>
+                ) : <p className="p" style={{ margin: '8px 0 0' }}>You have voted. Waiting for other members…</p>}
+              </>
+            ) : (
+              <>
+                <p className="p" style={{ margin: '0 0 10px' }}>Request an advance from the pot ({formatNaira(selected.emergency_pot_kobo || 0)} available). Requires a majority vote.</p>
+                <label className="lab">Reason</label>
+                <input className="field" value={emergencyReason} onChange={(e) => setEmergencyReason(e.target.value)} placeholder="Medical emergency, school fees…" />
+                <label className="lab" style={{ marginTop: 10 }}>Amount (₦)</label>
+                <input className="field" type="number" inputMode="numeric" value={emergencyAmount} onChange={(e) => setEmergencyAmount(e.target.value)} placeholder="0" />
+                <button className="cta" onClick={submitEmergencyRequest} disabled={emergencyBusy || !emergencyReason || !emergencyAmount}>Request emergency payout</button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Members */}
-        <h3 className="text-sm font-semibold text-slate-800 mb-2">Members ({members.length}/{selected.max_members})</h3>
-        <div className="space-y-2 mb-4">
-          {members.map((m) => (
-            <div key={m.id} className="flex justify-between items-center bg-white px-4 py-3 rounded-xl border border-slate-200">
-              <div>
-                <p className="text-sm font-medium text-slate-800">{m.profile_name}</p>
-                <p className="text-xs text-slate-400">Position #{m.payout_position}</p>
+        <div className="sect"><span className="h">Members ({members.length}/{selected.max_members})</span></div>
+        <div className="rows" style={{ padding: '2px 12px' }}>
+          {members.map((m) => {
+            const paid = paidIds.has(m.id)
+            return (
+              <div key={m.id} className="memrow" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 4px', borderTop: '1px solid var(--line)' }}>
+                <span className="dot" style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--green-soft)', color: 'var(--green)', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12, flex: 'none' }}>{initialsOf(m.user_id === user?.id ? 'You' : m.profile_name)}</span>
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{m.user_id === user?.id ? 'You' : m.profile_name}<span style={{ color: 'var(--faint)', fontWeight: 500 }}> · #{m.payout_position}</span></span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: paid ? 'var(--green)' : 'var(--faint)' }}>{paid ? 'Paid' : 'Due'}</span>
               </div>
-              {m.user_id === user?.id && (
-                <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">You</span>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
 
-        {/* Payment method selector */}
-        <div className="mb-3">
-          <p className="text-xs font-medium text-slate-500 mb-2">Payment Method</p>
-          <div className="flex bg-slate-100 rounded-xl p-1">
-            <button
-              onClick={() => setPaymentMethod('usdc')}
-              className={`flex-1 py-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 transition ${
-                paymentMethod === 'usdc' ? 'bg-white text-cyan-700 shadow-sm' : 'text-slate-500'
-              }`}
-            >
-              <Vault className="w-3 h-3" /> cNGN Savings
-            </button>
-            <button
-              onClick={() => setPaymentMethod('naira')}
-              className={`flex-1 py-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 transition ${
-                paymentMethod === 'naira' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
-              }`}
-            >
-              ₦ Naira
-            </button>
-            <button
-              onClick={() => setPaymentMethod('crypto')}
-              className={`flex-1 py-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 transition ${
-                paymentMethod === 'crypto' ? 'bg-white text-purple-700 shadow-sm' : 'text-slate-500'
-              }`}
-            >
-              <Wallet className="w-3 h-3" /> Crypto
-            </button>
-          </div>
-        </div>
-
-        {/* Crypto deposit details */}
-        {paymentMethod === 'crypto' && (
-          <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 mb-3 space-y-3">
-            <div>
-              <p className="text-[11px] text-purple-600 font-medium mb-1">Your Deposit Address (Base L2)</p>
-              {wallet?.deposit_address ? (
-                <div className="flex items-center gap-2 bg-white rounded-lg px-3 py-2 border border-purple-200">
-                  <code className="text-xs text-purple-900 flex-1 break-all">{wallet.deposit_address}</code>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(wallet.deposit_address!)
-                      setCopied(true)
-                      setTimeout(() => setCopied(false), 2000)
-                    }}
-                    className="text-purple-600 hover:text-purple-800 p-1 flex-shrink-0"
-                  >
-                    {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
-              ) : (
-                <p className="text-xs text-purple-600">Address generating... refresh in a moment.</p>
-              )}
-            </div>
-            <p className="text-[10px] text-purple-500">
-              Send exactly {formatNaira(selected.contribution_amount_kobo)} worth of cNGN to your personal address above. Funds are non-custodial — only you control this address.
-            </p>
-          </div>
-        )}
-
-        <button
-          onClick={contribute}
-          disabled={busy}
-          className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3.5 rounded-xl transition flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-60 mb-4"
-        >
-          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-          Contribute {formatNaira(selected.contribution_amount_kobo)}
-          {paymentMethod === 'usdc' && <span className="text-purple-200 text-xs ml-1">(from savings)</span>}
-          {paymentMethod === 'crypto' && <span className="text-purple-200 text-xs ml-1">(cNGN)</span>}
-        </button>
-
-        {feedback && (
-          <div className={`mb-2 px-4 py-2.5 rounded-xl text-sm font-medium ${
-            feedback.includes('sent') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
-          }`}>{feedback}</div>
-        )}
-
-        {payoutMsg && (
-          <div className="mb-4 px-4 py-3 rounded-xl text-sm font-medium bg-violet-50 text-violet-700 border border-violet-200">
-            {payoutMsg}
-          </div>
-        )}
-
-        {/* Recent Contributions */}
-        <h3 className="text-sm font-semibold text-slate-800 mb-2">Recent Contributions</h3>
+        {/* Recent contributions */}
+        <div className="sect"><span className="h">Recent contributions</span></div>
         {contributions.length === 0 ? (
-          <p className="text-sm text-slate-400 py-4 text-center">No contributions yet</p>
+          <div className="empty"><div className="es">No contributions yet</div></div>
         ) : (
-          <div className="space-y-2">
+          <div className="feedcard">
             {contributions.map((c) => (
-              <div key={c.id} className="bg-white px-4 py-3 rounded-xl border border-slate-200 flex justify-between items-center">
-                <div>
-                  <p className="text-sm font-medium text-slate-700">Cycle {c.cycle_number}</p>
-                  <p className="text-xs text-slate-400">{timeAgo(c.paid_at)}</p>
-                </div>
-                <p className="text-sm font-semibold text-emerald-600">{formatNaira(c.amount_kobo)}</p>
+              <div key={c.id} className="tx">
+                <span className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg></span>
+                <div className="mid"><div className="nm">Cycle {c.cycle_number}</div><div className="sub">{timeAgo(c.paid_at)}</div></div>
+                <div className="rt"><div className="amt pos num">{formatNaira(c.amount_kobo)}</div></div>
               </div>
             ))}
           </div>
         )}
+
+        <button className="cta ghost" style={{ marginTop: 16, color: 'var(--muted)' }} onClick={() => setSelected(null)}>← Back to circles</button>
       </div>
     )
   }
 
-  // Create group form
+  // ══ CREATE ══
   if (showCreate) {
     return (
-      <div className="px-4 pt-5">
-        <button onClick={() => setShowCreate(false)} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
-          <ArrowLeft className="w-4 h-4" /> Back
-        </button>
-        <h2 className="text-lg font-bold text-slate-900 mb-4">Create Esusu Circle</h2>
-        <div className="space-y-4">
-          <div>
-            <label className="text-xs text-slate-500 block mb-1">Circle Name</label>
-            <input
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
-              placeholder="Market Women Circle"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-slate-500 block mb-1">Contribution Amount (₦)</label>
-            <input
-              type="number"
-              inputMode="numeric"
-              value={formAmount}
-              onChange={(e) => setFormAmount(e.target.value)}
-              placeholder="10000"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-slate-500 block mb-1">Max Members</label>
-            <input
-              type="number"
-              inputMode="numeric"
-              value={formMax}
-              onChange={(e) => setFormMax(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-slate-500 block mb-1">Frequency</label>
-            <div className="flex bg-slate-100 rounded-xl p-1">
-              <button
-                onClick={() => setFormFreq('daily')}
-                className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition ${formFreq === 'daily' ? 'bg-white shadow-sm text-purple-700' : 'text-slate-500'}`}
-              >Daily</button>
-              <button
-                onClick={() => setFormFreq('weekly')}
-                className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition ${formFreq === 'weekly' ? 'bg-white shadow-sm text-purple-700' : 'text-slate-500'}`}
-              >Weekly</button>
-              <button
-                onClick={() => setFormFreq('monthly')}
-                className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition ${formFreq === 'monthly' ? 'bg-white shadow-sm text-purple-700' : 'text-slate-500'}`}
-              >Monthly</button>
-            </div>
-          </div>
+      <div className="b">
+        <button className="back" onClick={() => setShowCreate(false)}>← Back</button>
+        <div className="h2">Create an Ajo circle</div>
+        <p className="p">Save together — each cycle one member receives the pooled pot.</p>
 
-          {/* Creator incentive */}
-          <div>
-            <label className="text-xs text-slate-500 block mb-1">
-              Creator Incentive <span className="text-purple-500 font-semibold">(optional, 0–5%)</span>
-            </label>
-            <p className="text-[11px] text-slate-400 mb-2">
-              Automatically deducted from each cycle payout and credited to your wallet as the circle manager.
-            </p>
-            <div className="flex gap-2">
-              {[0, 1, 2, 3, 5].map(v => (
-                <button
-                  key={v}
-                  onClick={() => setFormIncentive(v)}
-                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${
-                    formIncentive === v
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  {v === 0 ? 'None' : `${v}%`}
-                </button>
-              ))}
-            </div>
-            {formIncentive > 0 && (
-              <p className="text-[11px] text-purple-600 mt-1.5 font-medium">
-                You earn {formIncentive}% of every payout as circle manager
-              </p>
-            )}
-          </div>
+        <label className="lab">Circle name</label>
+        <input className="field" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="Market Women Circle" />
 
-          {/* Flipeet virtual account info */}
-          <div className="bg-purple-50 border border-purple-200 rounded-xl p-3.5">
-            <p className="text-xs font-bold text-purple-800 mb-1.5">Virtual Account powered by Flipeet Pay</p>
-            <ul className="text-xs text-purple-700 space-y-1">
-              <li>• Each member gets a dedicated virtual bank account</li>
-              <li>• KYC verification: $3.50 per account (one-time)</li>
-              <li>• Monthly maintenance: $3.50 per account</li>
-              <li>• 7–14 day grace period · Auto-suspension on low balance</li>
-            </ul>
-          </div>
+        <label className="lab" style={{ marginTop: 14 }}>Contribution amount (₦)</label>
+        <input className="field" type="number" inputMode="numeric" value={formAmount} onChange={(e) => setFormAmount(e.target.value)} placeholder="10000" />
 
-          {feedback && (
-            <div className="px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>
-          )}
-          <button
-            onClick={createGroup}
-            disabled={busy || !formName || !formAmount}
-            className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3.5 rounded-xl transition flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-60"
-          >
-            {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-            Create Circle
-          </button>
+        <label className="lab" style={{ marginTop: 14 }}>Max members</label>
+        <input className="field" type="number" inputMode="numeric" value={formMax} onChange={(e) => setFormMax(e.target.value)} />
+
+        <label className="lab" style={{ marginTop: 14 }}>Frequency</label>
+        <div className="terms">
+          {(['daily', 'weekly', 'monthly'] as const).map((f) => <button key={f} className={`term${formFreq === f ? ' on' : ''}`} onClick={() => setFormFreq(f)} style={{ textTransform: 'capitalize' }}>{f}</button>)}
         </div>
+
+        <label className="lab" style={{ marginTop: 14 }}>Creator incentive (optional, 0–5%)</label>
+        <div className="terms" style={{ gridTemplateColumns: 'repeat(5,1fr)' }}>
+          {[0, 1, 2, 3, 5].map((v) => <button key={v} className={`term${formIncentive === v ? ' on' : ''}`} onClick={() => setFormIncentive(v)}>{v === 0 ? 'None' : `${v}%`}</button>)}
+        </div>
+        {formIncentive > 0 && <p className="p" style={{ margin: '6px 3px 0', color: 'var(--green)' }}>You earn {formIncentive}% of every payout as circle manager.</p>}
+
+        {feedback && <div className="flash err">{feedback}</div>}
+        <button className="cta" onClick={createGroup} disabled={busy || !formName || !formAmount}>{busy ? 'Creating…' : 'Create circle'}</button>
       </div>
     )
   }
 
-  // Main list view
+  // ══ LIST ══
   return (
-    <div className="px-4 pt-5">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-bold text-slate-900">Esusu Circles</h2>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-1 text-sm font-semibold text-purple-600 bg-purple-50 px-3 py-1.5 rounded-lg hover:bg-purple-100 transition"
-        >
-          <Plus className="w-4 h-4" /> New
-        </button>
+    <div className="b">
+      <div className="ajohead">
+        <div><div className="t">Ajo circles</div><div className="s">Save together, get paid in turns · pot earns 27% a year</div></div>
+        <button className="cyclechip" onClick={() => setShowCreate(true)} style={{ border: 0, cursor: 'pointer' }}>+ New</button>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
+        <div style={{ display: 'grid', placeItems: 'center', padding: '48px 0' }}><Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--muted)' }} /></div>
       ) : groups.length === 0 ? (
-        <div className="text-center py-16">
-          <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-          <p className="text-sm text-slate-500 mb-1">No circles yet</p>
-          <p className="text-xs text-slate-400">Create one to start saving together</p>
+        <div className="empty" style={{ marginTop: 14 }}>
+          <div className="eh">No circles yet</div>
+          <div className="es">Create one to start saving together</div>
+          <button className="cta" style={{ maxWidth: 220, margin: '14px auto 0' }} onClick={() => setShowCreate(true)}>Create a circle</button>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="rows" style={{ marginTop: 8 }}>
           {groups.map((g) => (
-            <button
-              key={g.id}
-              onClick={() => openGroup(g)}
-              className="w-full bg-white border border-slate-200 rounded-2xl p-4 text-left flex items-center gap-3 hover:border-purple-300 transition active:scale-[0.98]"
-            >
-              <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
-                <Users className="w-5 h-5 text-purple-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-slate-800 truncate">{g.name}</p>
-                <p className="text-xs text-slate-400">
-                  {formatNaira(g.contribution_amount_kobo)} / {g.cycle_period} &middot; {g.member_count}/{g.max_members} members
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">27% APY</span>
-                {g.owner_id === user?.id && <Crown className="w-3.5 h-3.5 text-amber-400" />}
-                <ChevronRight className="w-4 h-4 text-slate-400" />
-              </div>
+            <button key={g.id} className="opt" onClick={() => openGroup(g)}>
+              <span className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg></span>
+              <div className="mid"><div className="nm">{g.name}</div><div className="sub">{formatNaira(g.contribution_amount_kobo)} / {g.cycle_period} · {g.member_count}/{g.max_members} members</div></div>
+              <span className="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></span>
             </button>
           ))}
         </div>
       )}
 
-      <div className="flex items-start gap-2.5 mt-6 bg-purple-50 rounded-xl px-4 py-3">
-        <AlertCircle className="w-4 h-4 text-purple-400 mt-0.5 flex-shrink-0" />
-        <p className="text-xs text-purple-600 leading-relaxed">
-          Esusu is a traditional group savings system. Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot. <span className="font-semibold text-emerald-600">The pot earns 27% APY</span> via PawasaveLend while members save.
-        </p>
-      </div>
+      <p className="p" style={{ margin: '16px 3px 0' }}>Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot. The pot earns 27% a year via PawasaveLend while members save.</p>
     </div>
   )
 }

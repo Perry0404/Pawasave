@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isAuthorisedAdmin } from '@/lib/admin-session'
 import { custodyAddress, custodyCngnBalance, supplyToLend } from '@/lib/custody'
+import { acquireSupplyLock, releaseSupplyLock } from '@/lib/supply-lock'
 
 /**
  * POST /api/admin/supply-idle
@@ -37,6 +38,11 @@ export async function POST(request: NextRequest) {
     })
   }
 
+  // Serialise against the idle-supply crons (migration 054) so a manual supply can't
+  // race a cron and double-fire supply(idle).
+  if (!(await acquireSupplyLock())) {
+    return NextResponse.json({ error: 'A supply is already in progress — try again shortly.' }, { status: 409 })
+  }
   try {
     const { txHash, shares } = await supplyToLend(toSupply)
     return NextResponse.json({
@@ -53,5 +59,7 @@ export async function POST(request: NextRequest) {
       { error: e?.message || 'supply failed', custodyAddress: addr, freeCngn },
       { status: 500 },
     )
+  } finally {
+    await releaseSupplyLock()
   }
 }

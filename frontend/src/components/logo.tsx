@@ -1,33 +1,33 @@
 'use client'
 
-export default function Logo({ size = 32, className = '' }: { size?: number; className?: string }) {
+export default function Logo({ size = 32, className = '', rounded = true }: { size?: number; className?: string; rounded?: boolean }) {
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 120 120"
+      viewBox="0 0 512 512"
       fill="none"
       className={className}
     >
       <defs>
-        <linearGradient id="pawa-g" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#10B981" />
-          <stop offset="1" stopColor="#06B6D4" />
+        <linearGradient id="pawa-b" x1="150" y1="120" x2="360" y2="392" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#2DD4C4" />
+          <stop offset="1" stopColor="#12B981" />
         </linearGradient>
       </defs>
-      {/* P stem */}
-      <path d="M18 12 H34 V108 H18 Z" fill="url(#pawa-g)" />
-      {/* P bowl */}
-      <path
-        d="M34 12 H60 C82 12 96 26 96 44 C96 62 82 76 60 76 H34 V60 H58 C70 60 78 54 78 44 C78 34 70 28 58 28 H34 Z"
-        fill="url(#pawa-g)"
-      />
-      {/* S curve bottom */}
-      <path
-        d="M42 68 H62 C84 68 102 80 102 96 C102 108 90 116 72 116 H34 V100 H70 C80 100 86 96 86 90 C86 82 78 76 66 76 H34"
-        fill="url(#pawa-g)"
-        opacity="0.85"
-      />
+      {/* navy badge */}
+      <rect width="512" height="512" rx={rounded ? 116 : 0} fill="#0A0E1A" />
+      {/* B mark */}
+      <g fill="url(#pawa-b)">
+        <rect x="132" y="120" width="78" height="272" rx="12" />
+        <rect x="150" y="120" width="176" height="132" rx="66" />
+        <rect x="150" y="246" width="198" height="146" rx="73" />
+      </g>
+      {/* counters */}
+      <g fill="#0A0E1A">
+        <rect x="208" y="150" width="82" height="72" rx="36" />
+        <rect x="208" y="278" width="100" height="88" rx="44" />
+      </g>
     </svg>
   )
 }

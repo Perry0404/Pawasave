@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { verifyStrailsWebhook, getUserDetails } from '@/lib/strails'
+import { sendPushToUser } from '@/lib/push-send'
+import { sendDepositEmail } from '@/lib/notify-tx'
 
 /**
  * POST /api/strails-webhook
@@ -103,13 +105,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    await admin.rpc('set_strails_account', {
-      p_user_id: userId,
-      p_strails_uid: refUserId || null,
-      p_acct_number: acctNumber || null,
-      p_acct_name: acctName || null,
-      p_bank_name: bankName || null,
-    })
+    // Direct write, not the set_strails_account RPC — that function isn't in
+    // PostgREST's schema cache, so RPC-based onboarding writes silently no-op'd.
+    const update: Record<string, unknown> = {
+      strails_onboard_status: 'completed',
+      strails_onboarded_at: new Date().toISOString(),
+    }
+    if (refUserId) update.strails_user_id = refUserId
+    if (acctNumber) update.strails_va_account_number = acctNumber
+    if (acctName) update.strails_va_account_name = acctName
+    if (bankName) update.strails_va_bank_name = bankName
+    await admin.from('profiles').update(update).eq('id', userId)
     return NextResponse.json({ ok: true, onboarded: true })
   }
 
@@ -127,19 +133,47 @@ export async function POST(request: NextRequest) {
 
     const amountNgn = readNumber(data?.amount, data?.source?.amount, body?.amount)
     if (amountNgn <= 0) return NextResponse.json({ ok: true, note: 'no amount' })
-    const cngnMicro = Math.floor(amountNgn * 1_000_000) // 1 NGN = 1 cNGN
+    // PawaSave deposit fee (1.5%): a push-deposit can't be grossed up, so our fee is
+    // DEDUCTED from what's credited (Strails already took its own fee upstream — that's
+    // theirs; this is ours). The fee cNGN stays in custody after the sweep = real revenue.
+    const depositFeePercent = Number(process.env.PAWA_DEPOSIT_FEE_PERCENT) || 1.5
+    const ourFeeNgn = Math.round(amountNgn * depositFeePercent / 100)
+    const netNgn = Math.max(0, amountNgn - ourFeeNgn)
+    const cngnMicro = Math.floor(netNgn * 1_000_000) // credited (net of our fee), 1 NGN = 1 cNGN
+
+    // Who sent it, if Strails passes it — surfaced in the app detail sheet + email.
+    const senderName = readString(
+      data?.senderName, data?.sourceAccountName, data?.payerName, data?.originatorName,
+      data?.source?.accountName, data?.narration,
+    )
+    const senderAccount = readString(
+      data?.senderAccountNumber, data?.sourceAccountNumber, data?.source?.accountNumber, data?.payerAccountNumber,
+    )
+    const reference = depositId || `strails_${Date.now()}`
 
     await admin.from('transactions').insert({
       user_id: userId,
       type: 'deposit',
       direction: 'credit',
-      amount_kobo: Math.round(amountNgn * 100),
-      amount_usdc_micro: cngnMicro,
-      description: 'Received via Strails',
-      reference: depositId || `strails_${Date.now()}`,
+      amount_kobo: Math.round(amountNgn * 100), // gross received into the NUBAN
+      platform_fee_kobo: Math.round(ourFeeNgn * 100),
+      amount_usdc_micro: cngnMicro,             // net credited to the wallet
+      description: `Received via Strails${ourFeeNgn > 0 ? ` (₦${ourFeeNgn.toLocaleString('en-NG')} fee)` : ''}`,
+      reference,
       status: 'completed',
+      metadata: { channel: 'Strails', sender_name: senderName || null, sender_account: senderAccount || null, gross_naira: amountNgn, fee_naira: ourFeeNgn },
     })
     await admin.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: cngnMicro })
+    if (ourFeeNgn > 0) {
+      try {
+        await admin.rpc('record_platform_fee', {
+          p_user_id: userId, p_reference: reference, p_fee_type: 'ramp_onramp',
+          p_gross_kobo: Math.round(amountNgn * 100), p_fee_kobo: Math.round(ourFeeNgn * 100), p_fee_percent: depositFeePercent,
+        })
+      } catch { /* fee-booking failure must not fail the credit */ }
+    }
+    sendPushToUser(userId, { title: 'Deposit received', body: `₦${netNgn.toLocaleString('en-NG')} has landed in your PawaSave balance.`, url: '/', tag: 'deposit' }).catch(() => {})
+    sendDepositEmail(userId, { amountNgn: netNgn, senderName, senderAccount, channel: 'Strails', reference }).catch(() => {})
     return NextResponse.json({ ok: true, credited: cngnMicro })
   }
 

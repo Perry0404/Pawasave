@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { withBaseRead } from '@/lib/rpc-provider'
 import { custodyCngnTransferTo } from '@/lib/custody'
+import { sendWithdrawalEmail } from '@/lib/notify-tx'
 
 /**
  * GET /api/cron/reconcile-withdrawals
@@ -37,6 +38,22 @@ type Tx = {
   user_id: string
   amount_kobo: number
   description: string | null
+  reference?: string | null
+  metadata?: Record<string, any> | null
+}
+
+/** Email the withdrawal receipt for a row the reconciler just completed. The normal
+ *  path (runFlipeet) emails synchronously; this covers straggler completions here so
+ *  every completed withdrawal notifies exactly once (resolve() claims the row first). */
+function emailWithdrawalCompleted(row: Tx): void {
+  const m = (row.metadata || {}) as Record<string, any>
+  sendWithdrawalEmail(row.user_id, {
+    amountNgn: Number(row.amount_kobo) / 100,
+    bankName: m.bank_name,
+    accountName: m.account_name,
+    accountNumber: m.account_number,
+    reference: row.reference,
+  }).catch(() => {})
 }
 
 function refundMicro(amountKobo: number): number {
@@ -98,7 +115,7 @@ export async function GET(request: NextRequest) {
   const cutoff = new Date(Date.now() - minMinutes * 60_000).toISOString()
   const { data: marked } = await supabase
     .from('transactions')
-    .select('id, user_id, amount_kobo, description, created_at')
+    .select('id, user_id, amount_kobo, description, created_at, reference, metadata')
     .eq('type', 'withdrawal')
     .eq('status', 'pending')
     .like('description', '%on-chain:%')
@@ -117,7 +134,7 @@ export async function GET(request: NextRequest) {
         const hash = hashMatch[1]
         const receipt = await withBaseRead((p) => p.getTransactionReceipt(hash))
         if (receipt && receipt.status === 1) {
-          if (await resolve(supabase, row, 'completed', ' [reconciled: on-chain mined ✓]')) summary.completed++
+          if (await resolve(supabase, row, 'completed', ' [reconciled: on-chain mined ✓]')) { summary.completed++; emailWithdrawalCompleted(row) }
         } else if (receipt && receipt.status === 0) {
           // Reverted — cNGN stayed in custody. Safe to refund.
           if (await resolve(supabase, row, 'failed', ' [reconciled: on-chain reverted, refunded]',
@@ -136,7 +153,7 @@ export async function GET(request: NextRequest) {
         const found = await custodyCngnTransferTo(addrMatch[1], ageMinutes)
         if (found) {
           // Stamp the REAL send hash so the row is auditable and a later run hash-matches it.
-          if (await resolve(supabase, row, 'completed', ` [reconciled: custody transfer ${found.hash} ✓]`)) summary.completed++
+          if (await resolve(supabase, row, 'completed', ` [reconciled: custody transfer ${found.hash} ✓]`)) { summary.completed++; emailWithdrawalCompleted(row) }
         } else if (past) {
           if (await resolve(supabase, row, 'failed', ' [reconciled: no custody transfer, refunded]',
             async () => { await supabase.rpc('credit_wallet', { p_user_id: row.user_id, p_naira_kobo: 0, p_usdc_micro: refundMicro(row.amount_kobo) }) })) summary.refunded++

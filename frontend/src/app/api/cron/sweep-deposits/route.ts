@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { sweepDeposits } from '@/lib/deposit-sweep'
 import { supplyToLend, custodyCngnBalance } from '@/lib/custody'
+import { acquireSupplyLock, releaseSupplyLock } from '@/lib/supply-lock'
 
 /**
  * Reconcile stale ramp transactions (off-ramp debits that never delivered →
@@ -60,20 +61,29 @@ export async function GET(request: NextRequest) {
     // still pays ~0 until it has borrowers. Keeps CUSTODY_POOL_BUFFER_MICRO back
     // as a raw float for instant off-ramps (default 0 = supply everything).
     let pool: Record<string, unknown> = {}
-    try {
-      const buffer   = BigInt(process.env.CUSTODY_POOL_BUFFER_MICRO || '0')
-      const bal      = await custodyCngnBalance()
-      const toSupply = bal > buffer ? bal - buffer : 0n
-      if (toSupply >= 1_000_000n) {
-        const { txHash, shares } = await supplyToLend(toSupply)
-        pool = { supplied: toSupply.toString(), txHash, shares: shares.toString() }
-        console.info('[sweep-deposits] supplied idle custody to pool', pool)
-      } else {
-        pool = { supplied: '0', reason: 'within buffer or below 1 cNGN' }
+    // Serialise custody→pool supplies (migration 054) so a concurrent cron can't
+    // read the same idle balance and double-fire supply(idle) — one would revert.
+    const gotLock = await acquireSupplyLock()
+    if (!gotLock) {
+      pool = { supplied: '0', reason: 'another run holds the custody-supply lock' }
+    } else {
+      try {
+        const buffer   = BigInt(process.env.CUSTODY_POOL_BUFFER_MICRO || '0')
+        const bal      = await custodyCngnBalance()
+        const toSupply = bal > buffer ? bal - buffer : 0n
+        if (toSupply >= 1_000_000n) {
+          const { txHash, shares } = await supplyToLend(toSupply)
+          pool = { supplied: toSupply.toString(), txHash, shares: shares.toString() }
+          console.info('[sweep-deposits] supplied idle custody to pool', pool)
+        } else {
+          pool = { supplied: '0', reason: 'within buffer or below 1 cNGN' }
+        }
+      } catch (poolErr: unknown) {
+        pool = { error: poolErr instanceof Error ? poolErr.message : String(poolErr) }
+        console.warn('[sweep-deposits] pool supply failed:', pool.error)
+      } finally {
+        await releaseSupplyLock()
       }
-    } catch (poolErr: unknown) {
-      pool = { error: poolErr instanceof Error ? poolErr.message : String(poolErr) }
-      console.warn('[sweep-deposits] pool supply failed:', pool.error)
     }
     return NextResponse.json({ ok: true, ...res, pool, reconcile })
   } catch (err: unknown) {

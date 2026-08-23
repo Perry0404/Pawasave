@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { supplyToLend } from '@/lib/custody'
+import { acquireSupplyLock, releaseSupplyLock } from '@/lib/supply-lock'
 
 /**
  * GET /api/cron/auto-contribute
@@ -35,24 +36,35 @@ async function drainLendSupplyQueue(supabase: SupabaseClient): Promise<Record<st
   const rows = (data ?? []) as PendingSupply[]
   let supplied = 0
   let failed = 0
+  if (rows.length === 0) return { scanned: 0, supplied, failed }
 
-  for (const row of rows) {
-    try {
-      const { txHash, shares } = await supplyToLend(BigInt(row.cngn_micro))
-      await supabase.rpc('mark_lend_supply_done', { p_id: row.id, p_tx: txHash })
-      await supabase.from('flexible_pool_positions').upsert({
-        user_id: row.user_id,
-        cngn_deposited_micro: row.cngn_micro,
-        last_supply_tx: txHash,
-      }, { onConflict: 'user_id', ignoreDuplicates: false })
-      supplied++
-      console.info(`[auto-contribute] retried lend supply #${row.id} — tx: ${txHash}, shares: ${shares}`)
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
-      await supabase.rpc('mark_lend_supply_failed', { p_id: row.id, p_error: msg.slice(0, 500) })
-      failed++
-      console.warn(`[auto-contribute] lend supply retry #${row.id} failed:`, msg)
+  // Serialise against the idle-supply crons (migration 054) so custody→pool supplies
+  // never overlap and contend for the same balance. If another run holds the lock,
+  // leave the queue for the next pass.
+  if (!(await acquireSupplyLock())) {
+    return { scanned: rows.length, supplied, failed, skipped: 'custody-supply lock held' }
+  }
+  try {
+    for (const row of rows) {
+      try {
+        const { txHash, shares } = await supplyToLend(BigInt(row.cngn_micro))
+        await supabase.rpc('mark_lend_supply_done', { p_id: row.id, p_tx: txHash })
+        await supabase.from('flexible_pool_positions').upsert({
+          user_id: row.user_id,
+          cngn_deposited_micro: row.cngn_micro,
+          last_supply_tx: txHash,
+        }, { onConflict: 'user_id', ignoreDuplicates: false })
+        supplied++
+        console.info(`[auto-contribute] retried lend supply #${row.id} — tx: ${txHash}, shares: ${shares}`)
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        await supabase.rpc('mark_lend_supply_failed', { p_id: row.id, p_error: msg.slice(0, 500) })
+        failed++
+        console.warn(`[auto-contribute] lend supply retry #${row.id} failed:`, msg)
+      }
     }
+  } finally {
+    await releaseSupplyLock()
   }
 
   return { scanned: rows.length, supplied, failed }

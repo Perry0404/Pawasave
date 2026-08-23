@@ -167,6 +167,29 @@ export async function initializeFlipeetOnRamp(params: {
   })
 }
 
+/**
+ * Name enquiry — resolve the account holder name for a bank + account number,
+ * BEFORE initiating a payout (like a normal Nigerian transfer). Uses the same
+ * bank codes and x-api-key as the off-ramp. Throws FlipeetApiError on a bad
+ * account/bank (typically 4xx) or provider outage.
+ */
+export async function lookupFlipeetAccount(params: {
+  bankCode: string
+  accountNumber: string
+  country?: string
+}): Promise<{ bank_code?: string; account_number?: string; account_name?: string }> {
+  return request<{ bank_code?: string; account_number?: string; account_name?: string }>(
+    '/institutions/lookup',
+    {
+      country: params.country || DEFAULT_COUNTRY,
+      beneficiary: {
+        account_number: params.accountNumber,
+        bank_code: params.bankCode,
+      },
+    },
+  )
+}
+
 export async function initializeFlipeetOffRamp(params: {
   amount: number
   reference: string

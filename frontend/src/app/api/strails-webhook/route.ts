@@ -28,15 +28,36 @@ function readNumber(...v: unknown[]) {
   return 0
 }
 
+/**
+ * Strails' webhook signature scheme is undocumented and currently fails verification,
+ * so a signed deposit event would be dropped (401) and never credit until the 3-min
+ * poll catches it. Instead of trusting the unverifiable payload, use the webhook as an
+ * UNTRUSTED TRIGGER: fire the reconciler, which independently re-checks Strails' own API
+ * (idempotent, keyed on Strails' reference) and credits any completed deposit. Nothing is
+ * trusted from the request body — the credit only happens after our own authoritative API
+ * check — so an unverified (or even forged) POST can at worst cause a harmless reconcile.
+ * This makes deposits land in seconds without needing to crack the signature.
+ */
+function triggerReconcile(request: NextRequest): void {
+  const secret = process.env.CRON_SECRET
+  if (!secret) return
+  const origin = request.nextUrl.origin
+  fetch(`${origin}/api/cron/strails-reconcile`, {
+    headers: { Authorization: `Bearer ${secret}` },
+    cache: 'no-store',
+  }).catch(() => {}) // fire-and-forget; the reconciler is idempotent so overlap with the cron is safe
+}
+
 export async function POST(request: NextRequest) {
   const raw = await request.text()
   const signature = request.headers.get('x-strails-signature')
   const ts = request.headers.get('x-strails-timestamp')
   const verdict = verifyStrailsWebhook(raw, signature, ts)
   if (!verdict.ok) {
-    // Log enough to identify the scheme without leaking the payload or any secret:
-    // the signature is a digest, and lengths/encodings are what we need to compare.
-    console.error('[strails-webhook] signature verification failed', {
+    // Signature scheme is undocumented and currently unverifiable. Don't drop the event:
+    // trigger the reconciler (re-verifies via Strails' API, idempotent) so deposits still
+    // land in seconds. Still log the digest shape so the scheme can be pinned later.
+    console.warn('[strails-webhook] signature unverified — triggering reconcile instead', {
       sigLen: signature?.length ?? 0,
       sigPrefix: signature?.slice(0, 12) ?? null,
       looksHex: signature ? /^[0-9a-f]+$/i.test(signature.replace(/^sha256=/i, '')) : null,
@@ -46,7 +67,8 @@ export async function POST(request: NextRequest) {
         [...request.headers.entries()].filter(([k]) => k.toLowerCase().startsWith('x-')),
       ),
     })
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+    triggerReconcile(request)
+    return NextResponse.json({ ok: true, reconcile_triggered: true })
   }
   console.info('[strails-webhook] signature verified via', verdict.matched)
   if (ts) {

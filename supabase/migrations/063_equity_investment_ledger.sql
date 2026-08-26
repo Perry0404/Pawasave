@@ -11,8 +11,25 @@
 -- backfills every already-filled order that is missing its ledger row (currently order #14,
 -- the first real buy). Fully idempotent — safe to run more than once.
 --
--- Run AFTER 057. (If 057 was skipped entirely, run 056 first so the 'investment' type and
--- admin_tx_volume's total_investments_kobo column exist.)
+-- Run AFTER 057. (If 057 was skipped entirely, run 056 first so admin_tx_volume's
+-- total_investments_kobo column exists.)
+
+-- 0) Widen transactions.type — neither 056 (which added 'investment') nor 062 (which added
+--    'equity_buy'/'equity_sell') fully reached prod, so the live constraint rejects the
+--    'investment' type this ledger insert uses. Re-assert the full UNION of every type the
+--    app writes, including 'investment'. Verified against live data: all existing rows use
+--    deposit / withdrawal / save_to_vault / vault_withdraw / goal_contribute / goal_claim,
+--    all present below, so the re-add validates cleanly.
+ALTER TABLE public.transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
+ALTER TABLE public.transactions ADD CONSTRAINT transactions_type_check CHECK (type IN (
+  'deposit', 'withdrawal', 'save_to_vault', 'vault_withdraw',
+  'esusu_contribute', 'esusu_payout', 'emergency_payout',
+  'split_auto_save', 'split_auto_esusu',
+  'goal_contribute', 'goal_claim',
+  'creator_incentive', 'cngn_pool_in',
+  'loan_disbursement', 'loan_repayment', 'loan_liquidation',
+  'equity_buy', 'equity_sell', 'investment'
+));
 
 -- 1) settle_equity_order — on fill: update the order, upsert the holding, AND book an
 --    'investment' transactions row (so buys show in the ledger and in admin volume).

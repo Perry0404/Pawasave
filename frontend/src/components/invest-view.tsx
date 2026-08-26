@@ -45,9 +45,12 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
   const [cat, setCat] = useState<Cat>('naira')
   const [holdings, setHoldings] = useState<Holding[]>([])
   const [brokerLive, setBrokerLive] = useState(false)
+  const [rate, setRate] = useState(1600)
   const [nairaAssets, setNairaAssets] = useState<Asset[]>([])
   const [nairaLive, setNairaLive] = useState(false)
   const [selected, setSelected] = useState<Asset | null>(null)
+  const [selectedHolding, setSelectedHolding] = useState<Holding | null>(null)
+  const [sellBusy, setSellBusy] = useState(false)
   const [amount, setAmount] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
@@ -56,7 +59,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
   const loadHoldings = () =>
     fetch('/api/invest/equity')
       .then(r => (r.ok ? r.json() : null))
-      .then(d => { if (d) { setHoldings(d.holdings || []); setBrokerLive(!!d.broker?.live) } })
+      .then(d => { if (d) { setHoldings(d.holdings || []); setBrokerLive(!!d.broker?.live); setRate(Number(d.rate) || 1600) } })
       .catch(() => undefined)
 
   const loadNaira = () =>
@@ -116,6 +119,73 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
     } finally {
       setBusy(false)
     }
+  }
+
+  // Current cNGN value of a holding from its live USD quote (null when no market price).
+  const holdingValue = (h: Holding): number | null => {
+    const q = quotes[h.symbol]
+    if (!q?.price || !rate) return null
+    return Number(h.shares) * q.price * rate
+  }
+
+  async function sell(h: Holding) {
+    setSellBusy(true)
+    try {
+      const res = await fetch('/api/invest/equity/sell', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: h.symbol, shares: h.shares }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.status === 503) { flash('Selling is launching soon.'); return }
+      if (!res.ok) { flash(data.error || 'Could not sell'); return }
+      const net = Number(data.cngnCredited || 0) / 1e6
+      flash(`Sold ${h.symbol} — ₦${net.toLocaleString(undefined, { maximumFractionDigits: 2 })} credited`)
+      setSelectedHolding(null); refresh(); loadHoldings()
+    } catch {
+      flash('Something went wrong — try again')
+    } finally {
+      setSellBusy(false)
+    }
+  }
+
+  // ── Sell sheet ──
+  if (selectedHolding) {
+    const h = selectedHolding
+    const cost = Number(h.invested_cngn_micro) / 1e6
+    const val = holdingValue(h)
+    const gain = val != null ? val - cost : null
+    const gpct = gain != null && cost > 0 ? (gain / cost) * 100 : null
+    const sellable = h.asset_type === 'tokenized_stock'
+    const net = val != null ? Math.max(0, val - 500) : null
+    return (
+      <div className="b">
+        <button className="back" onClick={() => setSelectedHolding(null)}>← Back</button>
+        <div className="h2">{h.symbol}</div>
+        <p className="p">{h.asset_type === 'pre_ipo' ? 'Pre-IPO holding' : h.asset_type === 'rwa' ? 'Naira asset' : 'Tokenized stock'} · {Number(h.shares).toFixed(4)} {h.asset_type === 'rwa' ? 'units' : 'shares'}</p>
+
+        <div className="pool rise" style={{ marginTop: 12 }}>
+          <div className="l">Current value</div>
+          <div className="v" style={{ fontSize: 24 }}>{val != null ? `₦${val.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : `₦${cost.toLocaleString()} invested`}</div>
+          {gain != null && (
+            <span className="apy" style={{ color: gain >= 0 ? 'var(--green)' : '#e5484d' }}>
+              {gain >= 0 ? '▲' : '▼'} ₦{Math.abs(gain).toLocaleString(undefined, { maximumFractionDigits: 2 })} ({gpct != null ? `${gpct >= 0 ? '+' : ''}${gpct.toFixed(1)}%` : '—'}) · cost ₦{cost.toLocaleString()}
+            </span>
+          )}
+        </div>
+
+        {sellable ? (
+          <>
+            <div className="note" style={{ marginTop: 14 }}>
+              Selling all {Number(h.shares).toFixed(4)} shares. A flat <b>₦500</b> fee applies{net != null ? ` — you'll receive about ₦${net.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : ''}.
+            </div>
+            {msg && <div className={`flash ${isErr(msg) ? 'err' : 'ok'}`}>{msg}</div>}
+            <button className="cta" onClick={() => sell(h)} disabled={sellBusy}>{sellBusy ? 'Selling…' : `Sell ${h.symbol}`}</button>
+          </>
+        ) : (
+          <div className="note" style={{ marginTop: 14 }}>Selling this asset from the app is coming soon.</div>
+        )}
+      </div>
+    )
   }
 
   // ── Buy sheet ──
@@ -184,13 +254,22 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
         <>
           <div className="sect"><span className="h">Your portfolio</span></div>
           <div className="rows">
-            {holdings.map(h => (
-              <div key={`${h.symbol}-${h.provider}`} className="coll">
-                <span className="dot" style={{ background: 'var(--surface-2)', color: 'var(--muted)', fontWeight: 700, fontSize: 11 }}>{h.symbol.slice(0, 2)}</span>
-                <div className="mid"><div className="nm">{h.symbol}</div><div className="sub">{h.asset_type === 'pre_ipo' ? 'Pre-IPO' : h.asset_type === 'rwa' ? 'Naira asset' : 'Stock'} · {Number(h.shares).toFixed(4)} {h.asset_type === 'rwa' ? 'units' : 'shares'}</div></div>
-                <span className="v num">₦{(Number(h.invested_cngn_micro) / 1e6).toLocaleString()}</span>
-              </div>
-            ))}
+            {holdings.map(h => {
+              const cost = Number(h.invested_cngn_micro) / 1e6
+              const val = holdingValue(h)
+              const gain = val != null ? val - cost : null
+              return (
+                <button key={`${h.symbol}-${h.provider}`} className="coll" onClick={() => { setSelectedHolding(h); setMsg('') }}
+                  style={{ width: '100%', background: 'none', border: 0, borderTop: '1px solid var(--line)', cursor: 'pointer', textAlign: 'left' }}>
+                  <span className="dot" style={{ background: 'var(--surface-2)', color: 'var(--muted)', fontWeight: 700, fontSize: 11 }}>{h.symbol.slice(0, 2)}</span>
+                  <div className="mid"><div className="nm">{h.symbol}</div><div className="sub">{h.asset_type === 'pre_ipo' ? 'Pre-IPO' : h.asset_type === 'rwa' ? 'Naira asset' : 'Stock'} · {Number(h.shares).toFixed(4)} {h.asset_type === 'rwa' ? 'units' : 'shares'}</div></div>
+                  <div style={{ textAlign: 'right', flex: 'none' }}>
+                    <div className="v num">₦{(val ?? cost).toLocaleString(undefined, { maximumFractionDigits: val != null ? 2 : 0 })}</div>
+                    {gain != null && <div style={{ fontSize: 11, fontWeight: 600, color: gain >= 0 ? 'var(--green)' : '#e5484d' }}>{gain >= 0 ? '+' : '−'}₦{Math.abs(gain).toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>}
+                  </div>
+                </button>
+              )
+            })}
           </div>
         </>
       )}

@@ -48,7 +48,14 @@ export async function GET() {
     .from('portfolio_holdings')
     .select('symbol, asset_type, provider, invested_cngn_micro, shares, updated_at')
     .order('updated_at', { ascending: false })
-  return NextResponse.json({ holdings: data ?? [], broker: { live: isEquityBrokerLive(), provider: equityProvider() } })
+  // USD→NGN rate so the client can value USD-quoted holdings in cNGN (same setting the
+  // borrow engine uses). Read with the service client to avoid platform_settings RLS.
+  let rate = 1600
+  try {
+    const { data: r } = await serviceClient().from('platform_settings').select('value').eq('key', 'usd_ngn_rate').maybeSingle()
+    rate = Number(r?.value) || 1600
+  } catch { /* fall back to default */ }
+  return NextResponse.json({ holdings: data ?? [], broker: { live: isEquityBrokerLive(), provider: equityProvider() }, rate })
 }
 
 export async function POST(request: NextRequest) {

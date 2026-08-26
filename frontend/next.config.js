@@ -8,6 +8,13 @@ const nextConfig = {
   // (.next/standalone/server.js) so the runtime image needs no node_modules.
   // Vercel ignores this; it only changes what `next build` writes to disk.
   output: 'standalone',
+  experimental: {
+    // HyperFX (Hyperbridge Intent Gateway) deps are OPTIONAL and dark: lib/hyperfx.ts
+    // dynamically imports them only when HYPERFX_ENABLED. Marking them external means the
+    // build does NOT try to bundle/resolve them, so the app compiles and deploys fine
+    // BEFORE `npm i @hyperbridge/sdk viem` — they're required at runtime only when enabled.
+    serverComponentsExternalPackages: ['@hyperbridge/sdk', 'viem'],
+  },
   // Serve the static platform documentation at a clean /docs path.
   async rewrites() {
     return [

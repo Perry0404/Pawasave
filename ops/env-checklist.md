@@ -50,20 +50,29 @@ Ramp tuning (`NGN_USD_RATE`, `LITE_KYC_CAP_NGN`, `BVN_DAILY_CAP_NGN`, `PAWA_DEPO
 rate-limit (`UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`), USSD (`USSD_ENABLED`,
 `USSD_GATEWAY_SECRET`), GetEquity (`GETEQUITY_*`), AWS Secrets Manager (`AWS_SECRETS_ID`, `AWS_REGION`).
 
-## 8. Tokenized stocks (dark — flip on ONLY after Nigeria eligibility is confirmed)
-Buys route on Base: `cNGN → USDC → <stock token>` from the custody wallet (reuses
-`CUSTODY_PRIVATE_KEY`). Stays "coming soon" until BOTH the master switch and a non-empty
-token map are set.
-- `EQUITY_ENABLED=true` — master switch. Leave UNSET until Coinbase/Backed confirm Nigeria is an eligible jurisdiction (the issuer can freeze wallets in prohibited regions).
-- `EQUITY_BROKER=base_dex` — the on-Base aggregator path.
-- `STOCK_TOKEN_MAP` — JSON of **verified** symbol→token address, e.g.
-  `{"AAPL":"0x…","NVDA":"0x…","META":"0x…","GOOGL":"0x…"}` (Coinbase's live B20 tokens:
-  AAPLc/NVDAc/METAc/GOOGLc — paste the addresses from each asset's prospectus/BaseScan, never guess).
-  Optional per-symbol decimals: `{"AAPL":{"address":"0x…","decimals":18}}` (else read on-chain).
-- Optional: `EQUITY_SWAP_AGG=odos|0x` (default `odos`, needs no key), `ZEROX_API_KEY` (only if `0x`),
-  `EQUITY_SLIPPAGE_BPS=100` (per-leg slippage guard, default 1%).
-- Sanity before going live: confirm each stock token has real Aerodrome/DEX USDC liquidity (a
-  route exists), and do ONE tiny real buy end-to-end before opening to testers.
+## 8. Tokenized stocks (dark — flip on ONLY after Nigeria eligibility + a test fill)
+On-chain reality (verified Aug 2026): the B20 stock tokens have real **Uniswap V3** USDC
+liquidity, but **cNGN has ~zero on-chain DEX liquidity** and the swap aggregators block our
+server IP. So a buy is two legs, each on the rail that works:
+`cNGN → USDC` via **HyperFX** (Hyperbridge Intent Gateway — a solver provides the USD; Daya is
+that solver when the deal is live) then `USDC → <stock>` via **Uniswap V3 direct**. Sell reverses
+it. The 4 verified B20 tokens (AAPLc/NVDAc/METAc/GOOGLc, 8dp) are **built into the code** — no
+address pasting needed. Buying is free; **selling charges a flat ₦500** (platform revenue).
+
+Enable ALL of these (any missing → "coming soon", no debit):
+- `EQUITY_ENABLED=true` — master switch. Leave UNSET until Nigeria eligibility is confirmed in writing (the issuer can freeze wallets in prohibited regions).
+- `EQUITY_BROKER=base_dex`.
+- `HYPERFX_ENABLED=true` — the cNGN↔USDC conversion rail. Requires:
+  - `npm i @hyperbridge/sdk viem` (kept as optional server externals, so the app builds fine before this).
+  - `HYPERFX_BUNDLER_URL` — an ERC-4337 bundler for Base (e.g. your Alchemy Base URL).
+  - Custody wallet funded with **native ETH** (gas) + the **Hyperbridge fee token** (solver fee).
+  - Optional: `HYPERFX_COPROCESSOR_WS`, `HYPERFX_INDEXER_URL`, `HYPERFX_AUCTION_MS`, `HYPERFX_GRAFFITI`.
+- Optional: `STOCK_TOKEN_MAP` (JSON) to add/override symbols beyond the built-in 4; `EQUITY_SLIPPAGE_BPS=100`.
+- **DB:** run migrations `032` (buy) + `062` (sell + ₦500 fee) in Supabase.
+- Sanity before testers: do ONE tiny real buy AND one sell end-to-end — the only proof a solver actually fills the cNGN↔USDC leg.
+
+⚠️ A fill also needs a **solver taking the cNGN side** — that's the Daya/HyperFX liquidity
+partnership, not code. Until a solver bids, orders expire (caught → the buy refunds).
 
 ## ⚠️ Finding: `BVN_HASH_SALT` was never set in production
 The code hashes `bvn + (process.env.BVN_HASH_SALT || '')`, so with the var unset **BVN

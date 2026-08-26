@@ -37,7 +37,7 @@ import { CONTRACTS, ERC20_ABI } from './contracts'
 import { getSecret } from './secrets'
 import { getWriteProvider, withBaseRead } from './rpc-provider'
 import { HYPERFX_ENABLED, convertCngnToUsdc, convertUsdcToCngn } from './hyperfx'
-import { custodyCngnBalance, cngnToShares, withdrawFromLend, custodyLendShares } from './custody'
+import { custodyCngnBalance, custodyCngnBalanceFresh, cngnToShares, withdrawFromLend, custodyLendShares } from './custody'
 import { acquireSupplyLock, releaseSupplyLock } from './supply-lock'
 
 const BASE_CHAIN_ID = 8453
@@ -205,8 +205,27 @@ async function ensureFreeCngn(needMicro: bigint): Promise<void> {
   let shares = await cngnToShares(shortfall + shortfall / 100n)
   const held = await custodyLendShares()
   if (shares > held) shares = held
-  if (shares > 0n) await withdrawFromLend(shares) // redeems cNGN back to custody (waits for receipt)
-  const after = await custodyCngnBalance()
+  if (shares <= 0n) {
+    throw new Error(
+      `Insufficient cNGN liquidity: pool holds no redeemable shares, need ₦${(Number(needMicro) / 1e6).toFixed(0)}`,
+    )
+  }
+  // Redeems cNGN back to custody and WAITS for the receipt. `cngnMicro` is parsed
+  // from the mined Withdrawn event, so it is authoritative proof the funds landed —
+  // trust it over an immediate balance re-read, which can hit a lagging public RPC
+  // and report the stale pre-withdraw 0 (which was failing buys spuriously).
+  const { cngnMicro } = await withdrawFromLend(shares)
+  if (cngnMicro > 0n) {
+    if (free + cngnMicro < needMicro) {
+      throw new Error(
+        `Insufficient cNGN liquidity: redeemed ₦${(Number(free + cngnMicro) / 1e6).toFixed(0)}, need ₦${(Number(needMicro) / 1e6).toFixed(0)}`,
+      )
+    }
+    return
+  }
+  // Fallback (Withdrawn event not parsed): confirm via the write RPC, which is
+  // read-after-write consistent with the tx we just awaited — not withBaseRead.
+  const after = await custodyCngnBalanceFresh()
   if (after < needMicro) {
     throw new Error(
       `Insufficient cNGN liquidity: custody has ~₦${(Number(after) / 1e6).toFixed(0)} after pool withdraw, need ₦${(Number(needMicro) / 1e6).toFixed(0)}`,

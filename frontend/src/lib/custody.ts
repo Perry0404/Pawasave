@@ -229,6 +229,24 @@ export async function custodyCngnBalance(): Promise<bigint> {
   })
 }
 
+/**
+ * cNGN (micro) sitting free in custody, read through the SINGLE write RPC
+ * (BASE_WRITE_RPC_URL / Alchemy) rather than the public FallbackProvider pool.
+ *
+ * Use this right after a custody write (e.g. a pool withdraw) that must be
+ * observed by its own follow-up logic: withBaseRead may answer from a lagging
+ * public node that hasn't seen the just-mined block yet and report the stale
+ * pre-write balance, which was making equity buys falsely fail "custody ~₦0
+ * after pool withdraw" even though the LEND→custody redeem had mined. The write
+ * provider is the same endpoint the tx was confirmed on, so it is read-after
+ * -write consistent.
+ */
+export async function custodyCngnBalanceFresh(): Promise<bigint> {
+  const cust = process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address
+  const cngn = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, getWriteProvider())
+  return b(await cngn.balanceOf(cust))
+}
+
 /** Get current cNGN value of psNGN shares held by custody (read-only) */
 export async function custodyLendValue(): Promise<bigint> {
   const cust = process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address

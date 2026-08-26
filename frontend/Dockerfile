@@ -64,6 +64,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
+# The HyperFX (Hyperbridge) SDK persists its one-time session key under
+# ${cwd}/.hyperbridge-cache. /app is root-owned, so create this dir writable by the
+# non-root runtime user or placeOrder fails with ENOENT on the session-key cache.
+RUN mkdir -p /app/.hyperbridge-cache && chown -R nextjs:nodejs /app/.hyperbridge-cache
+
 USER nextjs
 EXPOSE 3000
 

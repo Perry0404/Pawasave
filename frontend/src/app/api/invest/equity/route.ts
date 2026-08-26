@@ -48,6 +48,12 @@ export async function GET() {
     .from('portfolio_holdings')
     .select('symbol, asset_type, provider, invested_cngn_micro, shares, updated_at')
     .order('updated_at', { ascending: false })
+  // Recent orders so the client can poll a background buy's outcome (processing→filled/refunded).
+  const { data: orders } = await supabase
+    .from('equity_orders')
+    .select('id, symbol, status, shares, error, created_at')
+    .order('created_at', { ascending: false })
+    .limit(5)
   // USD→NGN rate so the client can value USD-quoted holdings in cNGN (same setting the
   // borrow engine uses). Read with the service client to avoid platform_settings RLS.
   let rate = 1600
@@ -55,7 +61,7 @@ export async function GET() {
     const { data: r } = await serviceClient().from('platform_settings').select('value').eq('key', 'usd_ngn_rate').maybeSingle()
     rate = Number(r?.value) || 1600
   } catch { /* fall back to default */ }
-  return NextResponse.json({ holdings: data ?? [], broker: { live: isEquityBrokerLive(), provider: equityProvider() }, rate })
+  return NextResponse.json({ holdings: data ?? [], orders: orders ?? [], broker: { live: isEquityBrokerLive(), provider: equityProvider() }, rate })
 }
 
 export async function POST(request: NextRequest) {
@@ -105,24 +111,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: msg }, { status: 400 })
     }
 
+    // Complete the buy in the BACKGROUND and return immediately. The HyperFX solver
+    // auction + swaps take 1–2 min — longer than the client/Cloudflare HTTP timeout
+    // (~100s), which was killing the flow mid-way and stranding orders on 'pending'.
+    // This long-running self-hosted Node server keeps executing after we respond, then
+    // settles the order (fill or refund); the client polls GET for the outcome.
     const admin = serviceClient()
-    try {
-      const fill = await placeEquityOrder({ symbol, assetType, amountCngnMicro: amount, provider })
-      await admin.rpc('settle_equity_order', {
-        p_order_id: orderId,
-        p_status: 'filled',
-        p_usdc_micro: fill.usdcMicro.toString(),
-        p_shares: fill.shares,
-        p_broker_ref: fill.brokerRef,
-      })
-      return NextResponse.json({ status: 'filled', orderId, symbol, shares: fill.shares, brokerRef: fill.brokerRef })
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Broker error'
-      // Refund the debited cNGN.
-      await admin.rpc('settle_equity_order', { p_order_id: orderId, p_status: 'failed', p_error: msg.slice(0, 500) })
-      console.error('[invest/equity] broker failed, refunded:', msg)
-      return NextResponse.json({ error: 'Purchase failed — your cNGN was refunded.' }, { status: 502 })
-    }
+    void (async () => {
+      try {
+        const fill = await placeEquityOrder({ symbol, assetType, amountCngnMicro: amount, provider })
+        await admin.rpc('settle_equity_order', {
+          p_order_id: orderId, p_status: 'filled',
+          p_usdc_micro: fill.usdcMicro.toString(), p_shares: fill.shares, p_broker_ref: fill.brokerRef,
+        })
+        console.info('[invest/equity] filled', { orderId, symbol, shares: fill.shares })
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Broker error'
+        await admin.rpc('settle_equity_order', { p_order_id: orderId, p_status: 'failed', p_error: msg.slice(0, 500) })
+        console.error('[invest/equity] broker failed, refunded:', msg)
+      }
+    })()
+
+    return NextResponse.json({ status: 'processing', orderId, symbol })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Server error'
     console.error('[invest/equity] error:', msg)

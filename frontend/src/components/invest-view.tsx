@@ -77,8 +77,24 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
   useEffect(() => { loadHoldings(); loadNaira() }, [])
 
   const list: Asset[] = cat === 'tokenized_stock' ? STOCKS : cat === 'pre_ipo' ? PREIPO : nairaAssets
-  const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 4000) }
-  const isErr = (m: string) => /minimum|verify|could not|wrong|went/i.test(m)
+  const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 6000) }
+  const isErr = (m: string) => /minimum|verify|could not|wrong|went|didn’t|refund/i.test(m)
+
+  // Poll a background stock buy until it fills or refunds (~2.5 min cap).
+  const pollOrder = (orderId: number, symbol: string) => {
+    let tries = 0
+    const iv = setInterval(async () => {
+      tries++
+      const d = await fetch('/api/invest/equity').then(r => (r.ok ? r.json() : null)).catch(() => null)
+      if (d) {
+        setHoldings(d.holdings || []); setBrokerLive(!!d.broker?.live); setRate(Number(d.rate) || 1600)
+        const o = (d.orders || []).find((x: any) => Number(x.id) === orderId)
+        if (o && o.status === 'filled') { clearInterval(iv); flash(`Bought ${symbol}! ${Number(o.shares || 0).toFixed(4)} shares now in your portfolio.`); refresh(); return }
+        if (o && (o.status === 'failed' || o.status === 'refunded')) { clearInterval(iv); flash(`${symbol} didn’t fill — your cNGN was refunded.`); refresh(); return }
+      }
+      if (tries >= 20) clearInterval(iv)
+    }, 8000)
+  }
 
   async function buy() {
     const naira = parseFloat(amount)
@@ -112,6 +128,14 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
         return
       }
       if (!res.ok) { flash(data.error || 'Could not complete purchase'); return }
+      if (data.status === 'processing') {
+        // Stock buys settle in the background (~1–2 min for the solver auction + swaps).
+        flash(`${selected!.symbol} order placed — processing (~1–2 min). Your portfolio updates when it fills.`)
+        const sym = selected!.symbol
+        setAmount(''); setSelected(null)
+        pollOrder(Number(data.orderId), sym)
+        return
+      }
       flash(`Bought ${selected!.symbol}!`)
       setAmount(''); setSelected(null); refresh(); loadHoldings()
     } catch {

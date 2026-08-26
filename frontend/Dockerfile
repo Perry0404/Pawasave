@@ -17,7 +17,11 @@ WORKDIR /app
 # libc compat for some native deps (e.g. anything pulling in node-gyp builds)
 RUN apk add --no-cache libc6-compat
 COPY package.json package-lock.json ./
-RUN npm ci
+# `npm install` (not `npm ci`): the @hyperbridge/sdk dep tree (polkadot/smoldot)
+# resolves differently across npm versions, so a lockfile generated on a different
+# npm than the build image trips `npm ci`'s strict in-sync check. `npm install`
+# resolves against THIS image's npm/node (22) and installs cleanly.
+RUN npm install --no-audit --no-fund --loglevel=error
 
 # ── builder: compile the Next.js standalone bundle ───────────────────────────
 FROM node:22-alpine AS builder

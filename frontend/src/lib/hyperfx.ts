@@ -199,16 +199,36 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
     throw new Error('HyperFX: order was not placed')
   }
 
-  let filled = false
-  for await (const update of run) {
-    if (update.status === IntentOrderStatus.FILLED) { filled = true; break }
-    if (update.status === IntentOrderStatus.EXPIRED) throw new Error('HyperFX: order expired (no solver filled)')
-    // PARTIAL_FILL / AWAITING_BIDS / BID_SELECTED / retryable FAILED — keep waiting.
-  }
-  if (!filled) throw new Error('HyperFX: order did not fill')
+  // Treat the on-chain OUTPUT BALANCE as the source of truth, not the status stream.
+  // In practice the solver settles the fill on-chain (custody receives the output) and
+  // the SDK then tears its status streams down WITHOUT ever emitting FILLED — so a plain
+  // `for await (update of run)` that waits for FILLED hangs forever even though the money
+  // already arrived (observed: cNGN escrowed, USDC delivered to custody, order stuck
+  // 'pending'). Drain status updates in the BACKGROUND only to catch EXPIRED, and complete
+  // as soon as the received delta is unmistakably a fill (≥ half the quoted output — well
+  // above any fee-deduction noise, since for cngn->usdc the USDC fee is netted out here).
+  let expired = false
+  let statusFilled = false
+  ;(async () => {
+    try {
+      for await (const update of run) {
+        if (update.status === IntentOrderStatus.FILLED) { statusFilled = true; break }
+        if (update.status === IntentOrderStatus.EXPIRED) { expired = true; break }
+      }
+    } catch { /* stream torn down after settle — the balance poll decides the outcome */ }
+  })()
 
-  const received = (await tokenBalance(tokenOut, account.address)) - before
-  if (received <= 0n) throw new Error('HyperFX: filled but no output received')
+  const threshold = quote.amountOut > 1n ? quote.amountOut / 2n : 1n
+  const deadline = Date.now() + AUCTION_MS + 180_000
+  let received = 0n
+  while (Date.now() < deadline) {
+    received = (await tokenBalance(tokenOut, account.address)) - before
+    if (statusFilled || received >= threshold) break
+    if (expired) throw new Error('HyperFX: order expired (no solver filled)')
+    await new Promise((r) => setTimeout(r, 4_000))
+  }
+  received = (await tokenBalance(tokenOut, account.address)) - before
+  if (received <= 0n) throw new Error('HyperFX: order did not fill (no output received)')
   return received
 }
 

@@ -50,6 +50,21 @@ Ramp tuning (`NGN_USD_RATE`, `LITE_KYC_CAP_NGN`, `BVN_DAILY_CAP_NGN`, `PAWA_DEPO
 rate-limit (`UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`), USSD (`USSD_ENABLED`,
 `USSD_GATEWAY_SECRET`), GetEquity (`GETEQUITY_*`), AWS Secrets Manager (`AWS_SECRETS_ID`, `AWS_REGION`).
 
+## 8. Tokenized stocks (dark — flip on ONLY after Nigeria eligibility is confirmed)
+Buys route on Base: `cNGN → USDC → <stock token>` from the custody wallet (reuses
+`CUSTODY_PRIVATE_KEY`). Stays "coming soon" until BOTH the master switch and a non-empty
+token map are set.
+- `EQUITY_ENABLED=true` — master switch. Leave UNSET until Coinbase/Backed confirm Nigeria is an eligible jurisdiction (the issuer can freeze wallets in prohibited regions).
+- `EQUITY_BROKER=base_dex` — the on-Base aggregator path.
+- `STOCK_TOKEN_MAP` — JSON of **verified** symbol→token address, e.g.
+  `{"AAPL":"0x…","NVDA":"0x…","META":"0x…","GOOGL":"0x…"}` (Coinbase's live B20 tokens:
+  AAPLc/NVDAc/METAc/GOOGLc — paste the addresses from each asset's prospectus/BaseScan, never guess).
+  Optional per-symbol decimals: `{"AAPL":{"address":"0x…","decimals":18}}` (else read on-chain).
+- Optional: `EQUITY_SWAP_AGG=odos|0x` (default `odos`, needs no key), `ZEROX_API_KEY` (only if `0x`),
+  `EQUITY_SLIPPAGE_BPS=100` (per-leg slippage guard, default 1%).
+- Sanity before going live: confirm each stock token has real Aerodrome/DEX USDC liquidity (a
+  route exists), and do ONE tiny real buy end-to-end before opening to testers.
+
 ## ⚠️ Finding: `BVN_HASH_SALT` was never set in production
 The code hashes `bvn + (process.env.BVN_HASH_SALT || '')`, so with the var unset **BVN
 hashes have been computed with an empty salt.** Migration impact: **none good** — there's

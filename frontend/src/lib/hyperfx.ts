@@ -59,7 +59,7 @@ function bundlerUrl(): string {
  * so a build BEFORE they're installed still succeeds; here a missing module surfaces as a
  * clear, caught error instead of a build failure. Typed `any` — no @types at dark time.
  */
-async function loadDeps(): Promise<{ sdk: any; viem: any; viemAccounts: any }> {
+async function loadDeps(): Promise<{ sdk: any; viem: any; viemAccounts: any; baseChain: any }> {
   try {
     // @ts-ignore optional dependency, resolved at runtime once installed
     const sdk: any = await import('@hyperbridge/sdk')
@@ -67,7 +67,9 @@ async function loadDeps(): Promise<{ sdk: any; viem: any; viemAccounts: any }> {
     const viem: any = await import('viem')
     // @ts-ignore optional dependency, resolved at runtime once installed
     const viemAccounts: any = await import('viem/accounts')
-    return { sdk, viem, viemAccounts }
+    // @ts-ignore optional dependency, resolved at runtime once installed
+    const viemChains: any = await import('viem/chains')
+    return { sdk, viem, viemAccounts, baseChain: viemChains.base }
   } catch (e) {
     throw new Error('HyperFX deps not installed — run: npm i @hyperbridge/sdk viem')
   }
@@ -99,7 +101,7 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
   if (!HYPERFX_ENABLED) throw new Error('HyperFX is disabled (HYPERFX_ENABLED not set)')
   if (amountInMicro <= 0n) throw new Error('HyperFX: zero amount')
 
-  const { sdk, viem, viemAccounts } = await loadDeps()
+  const { sdk, viem, viemAccounts, baseChain } = await loadDeps()
   const {
     EvmChain, IntentGateway, IntentsCoprocessor, createQueryClient, IntentOrderStatus,
   } = sdk
@@ -111,7 +113,8 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
   const gateway = (await IntentGateway.create(chain, chain, coprocessor)).withQueryClient(queryClient)
 
   const account = await custodyAccount(viemAccounts)
-  const walletClient = viem.createWalletClient({ account, transport: viem.http(RPC) })
+  // `chain` is required so viem can fill chainId/gas/nonce when signing locally.
+  const walletClient = viem.createWalletClient({ account, chain: baseChain, transport: viem.http(RPC) })
 
   const id = chain.config.stateMachineId
   const usdc = chain.configService.getUsdcAsset(id)

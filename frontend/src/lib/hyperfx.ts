@@ -137,17 +137,22 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
     output: { beneficiary: account.address, assets: [{ token: tokenOut, amount: quote.amountOut }], call: '0x' },
   }
 
-  // Solver fee. Pay it in NATIVE ETH: the gateway swaps `nativeValue` wei into the fee
-  // token via its router (unused refunded), so custody only needs ETH — no separate
-  // fee-token balance to fund. The placement tx below carries that nativeValue.
-  const { fees, nativeValue } = await gateway.quoteOrderFees(order)
+  // Solver fee — pay it DIRECTLY in the fee token (USDC on Base), not native ETH. The
+  // native path makes placeOrder swap ETH→feeToken via a UniswapV2 router that reverts
+  // unreliably on Base (its factory() even reverts). Paying the fee token via allowance
+  // hits the gateway's deterministic safeTransferFrom branch — no swap. Custody must hold
+  // a small USDC buffer for fees (msg.value stays 0 so the gateway takes that branch).
+  const { fees, feeToken } = await gateway.quoteOrderFees(order)
   order.fees = fees
-  const feeNative: bigint = BigInt(nativeValue ?? 0n)
   const gatewayAddr = chain.configService.getIntentGatewayAddress(id)
 
-  // Approve only the input token (gross) to the gateway.
+  // Approve the input token (gross) + the exact fee token to the gateway.
   await walletClient.writeContract({ address: tokenIn, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, quote.amountIn] })
     .then((h: string) => chain.client.waitForTransactionReceipt({ hash: h }))
+  if (fees > 0n) {
+    await walletClient.writeContract({ address: feeToken, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, fees] })
+      .then((h: string) => chain.client.waitForTransactionReceipt({ hash: h }))
+  }
 
   const before = await tokenBalance(tokenOut, account.address)
 
@@ -164,9 +169,10 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
   // viem's signTransaction does NOT populate nonce/gas/fees — it signs exactly what it
   // is given, so signing the raw {to,data,value} produced a tx with gasLimit/fees = 0
   // that Alchemy rejects ("invalid parameters"). prepareTransactionRequest fills nonce,
-  // gas estimate, and EIP-1559 fees first. Carry the solver fee as native value.
+  // gas estimate, and EIP-1559 fees first. msg.value stays as the order's native input
+  // (0 for an ERC-20 input) so the gateway pays the fee from the USDC allowance, not a swap.
   const prepared = await walletClient.prepareTransactionRequest({
-    account, chain: baseChain, to, data, value: BigInt(value ?? 0n) + feeNative,
+    account, chain: baseChain, to, data, value: BigInt(value ?? 0n),
   })
   const signed = await walletClient.signTransaction(prepared)
   const placed = await run.next(signed)

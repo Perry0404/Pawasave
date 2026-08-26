@@ -151,11 +151,21 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
   // underpriced". Fetch the pending nonce once and increment it per tx.
   let nonce = Number(await chain.client.getTransactionCount({ address: account.address, blockTag: 'pending' }))
 
-  // Approve the input token (gross) + the exact fee token (USDC) to the gateway.
-  await walletClient.writeContract({ address: tokenIn, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, quote.amountIn], nonce: nonce++ })
-    .then((h: string) => chain.client.waitForTransactionReceipt({ hash: h }))
-  if (fees > 0n) {
-    await walletClient.writeContract({ address: feeToken, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, fees], nonce: nonce++ })
+  const MAX = (1n << 256n) - 1n
+  const allowance = (token: string) => chain.client.readContract({
+    address: token, abi: viem.erc20Abi, functionName: 'allowance', args: [account.address, gatewayAddr],
+  }).then((v: any) => BigInt(v))
+
+  // Approve MAX (not the exact amount) for BOTH the input token and the fee token, only when
+  // the standing allowance is short. The SDK can BUMP order.fees above our quote before
+  // placeOrder, so an exact fee approval reverts "transfer amount exceeds allowance"; a MAX
+  // approval to the (trusted Hyperbridge) gateway covers any bump and skips re-approving.
+  if (await allowance(tokenIn) < quote.amountIn) {
+    await walletClient.writeContract({ address: tokenIn, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, MAX], nonce: nonce++ })
+      .then((h: string) => chain.client.waitForTransactionReceipt({ hash: h }))
+  }
+  if (fees > 0n && await allowance(feeToken) < fees * 4n) {
+    await walletClient.writeContract({ address: feeToken, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, MAX], nonce: nonce++ })
       .then((h: string) => chain.client.waitForTransactionReceipt({ hash: h }))
   }
 

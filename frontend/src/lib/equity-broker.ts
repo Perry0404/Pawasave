@@ -37,6 +37,7 @@ import { CONTRACTS, ERC20_ABI } from './contracts'
 import { getSecret } from './secrets'
 import { getWriteProvider, withBaseRead } from './rpc-provider'
 import { HYPERFX_ENABLED, convertCngnToUsdc, convertUsdcToCngn } from './hyperfx'
+import { custodyCngnBalance, cngnToShares, withdrawFromLend, custodyLendShares } from './custody'
 
 const BASE_CHAIN_ID = 8453
 
@@ -187,6 +188,31 @@ async function uniV3Swap(tokenIn: string, tokenOut: string, amountIn: bigint, pr
   return { received, txHash: receipt.hash }
 }
 
+// ── Custody cNGN liquidity ─────────────────────────────────────────────────────
+
+/**
+ * Ensure custody holds `needMicro` of FREE cNGN before a buy. The reconcile sweeps
+ * idle custody cNGN into PawasaveLend for yield, so custody's free balance is usually
+ * ~0 — the working cNGN lives as psNGN shares in the pool. Redeem just enough (plus a
+ * 1% rounding buffer, capped at what custody holds) back to custody so the HyperFX
+ * escrow can pull it. Throws if the pool can't cover it (a real liquidity shortfall).
+ */
+async function ensureFreeCngn(needMicro: bigint): Promise<void> {
+  const free = await custodyCngnBalance()
+  if (free >= needMicro) return
+  const shortfall = needMicro - free
+  let shares = await cngnToShares(shortfall + shortfall / 100n)
+  const held = await custodyLendShares()
+  if (shares > held) shares = held
+  if (shares > 0n) await withdrawFromLend(shares) // redeems cNGN back to custody (waits for receipt)
+  const after = await custodyCngnBalance()
+  if (after < needMicro) {
+    throw new Error(
+      `Insufficient cNGN liquidity: custody has ~₦${(Number(after) / 1e6).toFixed(0)} after pool withdraw, need ₦${(Number(needMicro) / 1e6).toFixed(0)}`,
+    )
+  }
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -198,6 +224,7 @@ export async function placeEquityOrder(params: EquityOrderParams): Promise<Equit
   if (equityProvider() !== 'base_dex') throw new Error(`Equity provider '${equityProvider()}' not implemented`)
   const token = resolveStock(params.symbol)
 
+  await ensureFreeCngn(params.amountCngnMicro)                          // free cNGN from the pool if needed
   const usdcMicro = await convertCngnToUsdc(params.amountCngnMicro)      // leg 1
   const { received, txHash } = await uniV3Swap(CONTRACTS.USDC, token.address, usdcMicro, token.fee) // leg 2
 

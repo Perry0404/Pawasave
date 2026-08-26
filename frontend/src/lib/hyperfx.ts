@@ -156,15 +156,19 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
     address: token, abi: viem.erc20Abi, functionName: 'allowance', args: [account.address, gatewayAddr],
   }).then((v: any) => BigInt(v))
 
-  // Approve MAX (not the exact amount) for BOTH the input token and the fee token, only when
-  // the standing allowance is short. The SDK can BUMP order.fees above our quote before
-  // placeOrder, so an exact fee approval reverts "transfer amount exceeds allowance"; a MAX
-  // approval to the (trusted Hyperbridge) gateway covers any bump and skips re-approving.
-  if (await allowance(tokenIn) < quote.amountIn) {
+  // Approve MAX to the (trusted Hyperbridge) gateway for BOTH the input token and the fee
+  // token whenever the standing allowance is not already MAX. The SDK BUMPS both order.amountIn
+  // and order.fees slightly above our quote before placeOrder, so any allowance sized to the
+  // exact quote — even one that equals it — reverts "transfer amount exceeds allowance". An
+  // earlier fix bounded this by `< quote.amountIn`, but a prior exact-1000 approval equalled
+  // amountIn, so the guard skipped re-approving and the bumped pull still exceeded it. Approving
+  // MAX once, and only re-approving when it has somehow dropped below MAX, covers every bump and
+  // avoids an approve on every buy.
+  if (await allowance(tokenIn) < MAX) {
     await walletClient.writeContract({ address: tokenIn, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, MAX], nonce: nonce++ })
       .then((h: string) => chain.client.waitForTransactionReceipt({ hash: h }))
   }
-  if (fees > 0n && await allowance(feeToken) < fees * 4n) {
+  if (fees > 0n && await allowance(feeToken) < MAX) {
     await walletClient.writeContract({ address: feeToken, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, MAX], nonce: nonce++ })
       .then((h: string) => chain.client.waitForTransactionReceipt({ hash: h }))
   }

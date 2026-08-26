@@ -161,8 +161,14 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
     throw new Error('HyperFX: expected placement transaction')
   }
   const { to, data, value } = first.value
-  // Carry the solver fee as native value (paid in ETH, swapped by the gateway).
-  const signed = await walletClient.signTransaction({ to, data, value: BigInt(value ?? 0n) + feeNative, type: 'eip1559' })
+  // viem's signTransaction does NOT populate nonce/gas/fees — it signs exactly what it
+  // is given, so signing the raw {to,data,value} produced a tx with gasLimit/fees = 0
+  // that Alchemy rejects ("invalid parameters"). prepareTransactionRequest fills nonce,
+  // gas estimate, and EIP-1559 fees first. Carry the solver fee as native value.
+  const prepared = await walletClient.prepareTransactionRequest({
+    account, chain: baseChain, to, data, value: BigInt(value ?? 0n) + feeNative,
+  })
+  const signed = await walletClient.signTransaction(prepared)
   const placed = await run.next(signed)
   if (placed.done || placed.value.status !== IntentOrderStatus.ORDER_PLACED) {
     throw new Error('HyperFX: order was not placed')

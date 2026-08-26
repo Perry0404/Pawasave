@@ -146,11 +146,16 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
   order.fees = fees
   const gatewayAddr = chain.configService.getIntentGatewayAddress(id)
 
-  // Approve the input token (gross) + the exact fee token to the gateway.
-  await walletClient.writeContract({ address: tokenIn, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, quote.amountIn] })
+  // Manage nonces EXPLICITLY across these back-to-back custody txs: the shared custody
+  // wallet + RPC nonce lag handed two txs the same nonce → "replacement transaction
+  // underpriced". Fetch the pending nonce once and increment it per tx.
+  let nonce = Number(await chain.client.getTransactionCount({ address: account.address, blockTag: 'pending' }))
+
+  // Approve the input token (gross) + the exact fee token (USDC) to the gateway.
+  await walletClient.writeContract({ address: tokenIn, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, quote.amountIn], nonce: nonce++ })
     .then((h: string) => chain.client.waitForTransactionReceipt({ hash: h }))
   if (fees > 0n) {
-    await walletClient.writeContract({ address: feeToken, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, fees] })
+    await walletClient.writeContract({ address: feeToken, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, fees], nonce: nonce++ })
       .then((h: string) => chain.client.waitForTransactionReceipt({ hash: h }))
   }
 
@@ -172,7 +177,7 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
   // gas estimate, and EIP-1559 fees first. msg.value stays as the order's native input
   // (0 for an ERC-20 input) so the gateway pays the fee from the USDC allowance, not a swap.
   const prepared = await walletClient.prepareTransactionRequest({
-    account, chain: baseChain, to, data, value: BigInt(value ?? 0n),
+    account, chain: baseChain, to, data, value: BigInt(value ?? 0n), nonce: nonce++,
   })
   const signed = await walletClient.signTransaction(prepared)
   const placed = await run.next(signed)

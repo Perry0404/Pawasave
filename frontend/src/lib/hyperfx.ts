@@ -137,18 +137,17 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
     output: { beneficiary: account.address, assets: [{ token: tokenOut, amount: quote.amountOut }], call: '0x' },
   }
 
-  // Solver fee (source-chain Hyperbridge fee token). Pay it in the fee token via allowance.
-  const { fees, feeToken } = await gateway.quoteOrderFees(order)
+  // Solver fee. Pay it in NATIVE ETH: the gateway swaps `nativeValue` wei into the fee
+  // token via its router (unused refunded), so custody only needs ETH — no separate
+  // fee-token balance to fund. The placement tx below carries that nativeValue.
+  const { fees, nativeValue } = await gateway.quoteOrderFees(order)
   order.fees = fees
+  const feeNative: bigint = BigInt(nativeValue ?? 0n)
   const gatewayAddr = chain.configService.getIntentGatewayAddress(id)
 
-  // Approvals: input token (gross) + fee token (exact fees), both to the gateway.
+  // Approve only the input token (gross) to the gateway.
   await walletClient.writeContract({ address: tokenIn, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, quote.amountIn] })
     .then((h: string) => chain.client.waitForTransactionReceipt({ hash: h }))
-  if (fees > 0n) {
-    await walletClient.writeContract({ address: feeToken, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, fees] })
-      .then((h: string) => chain.client.waitForTransactionReceipt({ hash: h }))
-  }
 
   const before = await tokenBalance(tokenOut, account.address)
 
@@ -162,7 +161,8 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
     throw new Error('HyperFX: expected placement transaction')
   }
   const { to, data, value } = first.value
-  const signed = await walletClient.signTransaction({ to, data, value, type: 'eip1559' })
+  // Carry the solver fee as native value (paid in ETH, swapped by the gateway).
+  const signed = await walletClient.signTransaction({ to, data, value: BigInt(value ?? 0n) + feeNative, type: 'eip1559' })
   const placed = await run.next(signed)
   if (placed.done || placed.value.status !== IntentOrderStatus.ORDER_PLACED) {
     throw new Error('HyperFX: order was not placed')

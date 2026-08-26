@@ -38,6 +38,7 @@ import { getSecret } from './secrets'
 import { getWriteProvider, withBaseRead } from './rpc-provider'
 import { HYPERFX_ENABLED, convertCngnToUsdc, convertUsdcToCngn } from './hyperfx'
 import { custodyCngnBalance, cngnToShares, withdrawFromLend, custodyLendShares } from './custody'
+import { acquireSupplyLock, releaseSupplyLock } from './supply-lock'
 
 const BASE_CHAIN_ID = 8453
 
@@ -224,8 +225,25 @@ export async function placeEquityOrder(params: EquityOrderParams): Promise<Equit
   if (equityProvider() !== 'base_dex') throw new Error(`Equity provider '${equityProvider()}' not implemented`)
   const token = resolveStock(params.symbol)
 
-  await ensureFreeCngn(params.amountCngnMicro)                          // free cNGN from the pool if needed
-  const usdcMicro = await convertCngnToUsdc(params.amountCngnMicro)      // leg 1
+  // Hold the custody-supply lock across free→escrow: without it, the idle-supply cron
+  // re-pools the cNGN we free during HyperFX's ~20s auction, so the escrow reverts
+  // "transfer amount exceeds balance". Retry a few times in case a cron briefly holds it.
+  let locked = false
+  for (let i = 0; i < 4 && !locked; i++) {
+    locked = await acquireSupplyLock()
+    if (!locked) await new Promise((r) => setTimeout(r, 1500))
+  }
+  let released = false
+  const release = async () => { if (locked && !released) { released = true; await releaseSupplyLock() } }
+
+  let usdcMicro: bigint
+  try {
+    await ensureFreeCngn(params.amountCngnMicro)                        // free cNGN from the pool if needed
+    usdcMicro = await convertCngnToUsdc(params.amountCngnMicro)         // leg 1 — cNGN escrowed into HyperFX
+    await release()                                                    // escrowed → the supply cron may resume
+  } finally {
+    await release()
+  }
   const { received, txHash } = await uniV3Swap(CONTRACTS.USDC, token.address, usdcMicro, token.fee) // leg 2
 
   const shares = Number(received) / 10 ** token.decimals

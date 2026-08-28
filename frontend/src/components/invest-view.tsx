@@ -17,14 +17,19 @@ type Asset = {
   // Naira/GetEquity assets carry these instead of a TradingView chart:
   blurb?: string; kind?: 'term' | 'fund' | 'equity'; token?: string | null; naira?: boolean
 }
+// Buyable today (verified on-chain route) listed first; the rest launched on Base but have
+// no DEX liquidity yet, so they render as "Soon — verification pending" until we add a route.
 const STOCKS: Asset[] = [
   { symbol: 'AAPL', name: 'Apple', tv: 'NASDAQ:AAPL' },
   { symbol: 'NVDA', name: 'NVIDIA', tv: 'NASDAQ:NVDA' },
+  { symbol: 'GOOGL', name: 'Alphabet', tv: 'NASDAQ:GOOGL' },
+  { symbol: 'META', name: 'Meta', tv: 'NASDAQ:META' },
   { symbol: 'TSLA', name: 'Tesla', tv: 'NASDAQ:TSLA' },
   { symbol: 'MSFT', name: 'Microsoft', tv: 'NASDAQ:MSFT' },
-  { symbol: 'GOOGL', name: 'Alphabet', tv: 'NASDAQ:GOOGL' },
   { symbol: 'AMZN', name: 'Amazon', tv: 'NASDAQ:AMZN' },
-  { symbol: 'META', name: 'Meta', tv: 'NASDAQ:META' },
+  { symbol: 'COIN', name: 'Coinbase', tv: 'NASDAQ:COIN' },
+  { symbol: 'INTC', name: 'Intel', tv: 'NASDAQ:INTC' },
+  { symbol: 'MSTR', name: 'Strategy (MicroStrategy)', tv: 'NASDAQ:MSTR' },
   { symbol: 'SPY', name: 'S&P 500 ETF', tv: 'AMEX:SPY' },
 ]
 const PREIPO: Asset[] = [
@@ -45,6 +50,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
   const [cat, setCat] = useState<Cat>('naira')
   const [holdings, setHoldings] = useState<Holding[]>([])
   const [brokerLive, setBrokerLive] = useState(false)
+  const [supported, setSupported] = useState<string[]>([])
   const [rate, setRate] = useState(1600)
   const [nairaAssets, setNairaAssets] = useState<Asset[]>([])
   const [nairaLive, setNairaLive] = useState(false)
@@ -59,7 +65,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
   const loadHoldings = () =>
     fetch('/api/invest/equity')
       .then(r => (r.ok ? r.json() : null))
-      .then(d => { if (d) { setHoldings(d.holdings || []); setBrokerLive(!!d.broker?.live); setRate(Number(d.rate) || 1600) } })
+      .then(d => { if (d) { setHoldings(d.holdings || []); setBrokerLive(!!d.broker?.live); setSupported((d.supportedSymbols || []).map((s: string) => s.toUpperCase())); setRate(Number(d.rate) || 1600) } })
       .catch(() => undefined)
 
   const loadNaira = () =>
@@ -77,6 +83,9 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
   useEffect(() => { loadHoldings(); loadNaira() }, [])
 
   const list: Asset[] = cat === 'tokenized_stock' ? STOCKS : cat === 'pre_ipo' ? PREIPO : nairaAssets
+  // A tokenized stock is buyable only if the broker verified an on-chain route for it.
+  // Everything else in the catalog is shown as "coming soon — verification pending".
+  const stockLive = (sym: string) => brokerLive && supported.includes(String(sym || '').toUpperCase())
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 6000) }
   const isErr = (m: string) => /minimum|verify|could not|wrong|went|didn’t|refund/i.test(m)
 
@@ -87,7 +96,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
       tries++
       const d = await fetch('/api/invest/equity').then(r => (r.ok ? r.json() : null)).catch(() => null)
       if (d) {
-        setHoldings(d.holdings || []); setBrokerLive(!!d.broker?.live); setRate(Number(d.rate) || 1600)
+        setHoldings(d.holdings || []); setBrokerLive(!!d.broker?.live); setSupported((d.supportedSymbols || []).map((s: string) => s.toUpperCase())); setRate(Number(d.rate) || 1600)
         const o = (d.orders || []).find((x: any) => Number(x.id) === orderId)
         if (o && o.status === 'filled') { clearInterval(iv); flash(`Bought ${symbol}! ${Number(o.shares || 0).toFixed(4)} shares now in your portfolio.`); refresh(); return }
         if (o && (o.status === 'failed' || o.status === 'refunded')) { clearInterval(iv); flash(`${symbol} didn’t fill — your cNGN was refunded.`); refresh(); return }
@@ -97,6 +106,11 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
   }
 
   async function buy() {
+    // Unverified tokenized stock → coming soon; never debit (mirrors the API guard).
+    if (selected && !selected.naira && cat === 'tokenized_stock' && !stockLive(selected.symbol)) {
+      flash(`${selected.name} isn't buyable yet — verification pending. We'll notify you when it goes live.`)
+      return
+    }
     const naira = parseFloat(amount)
     if (!naira || naira < 1000) { flash('Minimum investment is ₦1,000'); return }
     if (profile?.kyc_status !== 'verified') {
@@ -214,7 +228,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
 
   // ── Buy sheet ──
   if (selected) {
-    const live = selected.naira ? nairaLive : brokerLive
+    const live = selected.naira ? nairaLive : cat === 'tokenized_stock' ? stockLive(selected.symbol) : brokerLive
     const nairaNote = selected.kind === 'term'
       ? `${selected.blurb || 'Fixed income'} — earns yield to maturity; sell any time at market price.`
       : selected.kind === 'fund'
@@ -244,7 +258,13 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
         <input className="field" type="number" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))} placeholder="0" autoFocus />
         <p className="p" style={{ margin: '6px 3px 0' }}>Minimum ₦1,000 · Available ₦{((wallet?.usdc_balance_micro || 0) / 1_000_000).toLocaleString()}</p>
 
-        {!live && <div className="note">Trading is launching soon. Register interest now — we’ll notify you when {selected.symbol} goes live.</div>}
+        {!live && (
+          <div className="note">
+            {!selected.naira && cat === 'tokenized_stock' && brokerLive
+              ? `${selected.name} is coming soon — verification pending. Register interest and we’ll notify you the moment it’s buyable.`
+              : `Trading is launching soon. Register interest now — we’ll notify you when ${selected.symbol} goes live.`}
+          </div>
+        )}
         {msg && <div className={`flash ${isErr(msg) ? 'err' : 'ok'}`}>{msg}</div>}
 
         <button className="cta" onClick={buy} disabled={busy || !amount}>{busy ? 'Processing…' : live ? `Buy ${selected.symbol}` : `Notify me about ${selected.symbol}`}</button>
@@ -303,12 +323,16 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
         {list.map(a => {
           const q = a.tv ? quotes[a.symbol] : undefined
           const up = (q?.changePct ?? 0) >= 0
+          // Only tokenized stocks are gated per-symbol; naira/pre-IPO keep their own flows.
+          const soon = cat === 'tokenized_stock' && !stockLive(a.symbol)
           return (
-            <button key={a.symbol} className="coll" style={{ width: '100%', background: 'none', border: 0, borderTop: '1px solid var(--line)', cursor: 'pointer', textAlign: 'left' }} onClick={() => { setSelected(a); setAmount(''); setMsg('') }}>
+            <button key={a.symbol} className="coll" style={{ width: '100%', background: 'none', border: 0, borderTop: '1px solid var(--line)', cursor: 'pointer', textAlign: 'left', opacity: soon ? 0.72 : 1 }} onClick={() => { setSelected(a); setAmount(''); setMsg('') }}>
               <span className="dot" style={{ background: 'var(--surface-2)', color: 'var(--muted)', fontWeight: 700, fontSize: 11 }}>{a.symbol.slice(0, 2)}</span>
               <div className="mid"><div className="nm">{a.name}</div><div className="sub">{a.blurb || a.symbol}</div></div>
               {q && <div style={{ width: 48, height: 28, flex: 'none' }}><Sparkline data={q.spark} up={up} height={28} /></div>}
-              {q ? (
+              {soon ? (
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', background: 'var(--surface-2)', padding: '3px 8px', borderRadius: 999, flex: 'none' }}>Soon</span>
+              ) : q ? (
                 <div style={{ textAlign: 'right', flex: 'none', minWidth: 62 }}>
                   <div className="v num">{q.price != null ? `${q.currency === 'USD' ? '$' : ''}${q.price.toFixed(2)}` : '—'}</div>
                   <ChangeBadge q={q} />

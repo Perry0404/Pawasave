@@ -125,6 +125,18 @@ export function isEquityBrokerLive(): boolean {
   return Object.keys(stockTokenMap()).length > 0
 }
 
+/**
+ * Symbols that are actually BUYABLE right now — those with a resolved on-chain token
+ * (and therefore a Uniswap V3 route). The UI lists more tickers than we can route (the
+ * broader Coinbase set launched, but only AAPL/NVDA/META/GOOGL have DEX liquidity today);
+ * anything not in this set must render as "coming soon — verification pending" rather than
+ * letting a user debit cNGN into a buy that can only refund. Empty when the broker is off.
+ */
+export function supportedEquitySymbols(): string[] {
+  if (!isEquityBrokerLive()) return []
+  return Object.keys(stockTokenMap())
+}
+
 // ── Custody signer + Uniswap V3 direct swap ─────────────────────────────────────
 
 async function getSigner(): Promise<ethers.Wallet> {

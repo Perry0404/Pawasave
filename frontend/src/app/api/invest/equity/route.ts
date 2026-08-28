@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import {
   isEquityBrokerLive,
   equityProvider,
+  supportedEquitySymbols,
   placeEquityOrder,
   type EquityAssetType,
 } from '@/lib/equity-broker'
@@ -61,7 +62,7 @@ export async function GET() {
     const { data: r } = await serviceClient().from('platform_settings').select('value').eq('key', 'usd_ngn_rate').maybeSingle()
     rate = Number(r?.value) || 1600
   } catch { /* fall back to default */ }
-  return NextResponse.json({ holdings: data ?? [], orders: orders ?? [], broker: { live: isEquityBrokerLive(), provider: equityProvider() }, rate })
+  return NextResponse.json({ holdings: data ?? [], orders: orders ?? [], broker: { live: isEquityBrokerLive(), provider: equityProvider() }, supportedSymbols: supportedEquitySymbols(), rate })
 }
 
 export async function POST(request: NextRequest) {
@@ -94,6 +95,15 @@ export async function POST(request: NextRequest) {
     if (!isEquityBrokerLive()) {
       return NextResponse.json(
         { status: 'coming_soon', message: 'Tokenized stocks & pre-IPO are launching soon.' },
+        { status: 503 },
+      )
+    }
+
+    // Symbol listed in the catalog but not yet routable (no verified token / DEX pool) →
+    // coming soon, NEVER debit (a buy here could only refund). Mirrors the UI's gating.
+    if (!supportedEquitySymbols().includes(symbol)) {
+      return NextResponse.json(
+        { status: 'coming_soon', message: `${symbol} isn't buyable yet — verification pending.` },
         { status: 503 },
       )
     }

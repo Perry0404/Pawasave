@@ -55,6 +55,12 @@ export async function GET() {
     .select('id, symbol, status, shares, error, created_at')
     .order('created_at', { ascending: false })
     .limit(5)
+  // Recent sales so the client can poll a background sell (processing→filled/failed).
+  const { data: sales } = await supabase
+    .from('equity_sales')
+    .select('id, symbol, status, cngn_net_micro, error, created_at')
+    .order('created_at', { ascending: false })
+    .limit(5)
   // USD→NGN rate so the client can value USD-quoted holdings in cNGN (same setting the
   // borrow engine uses). Read with the service client to avoid platform_settings RLS.
   let rate = 1600
@@ -62,7 +68,7 @@ export async function GET() {
     const { data: r } = await serviceClient().from('platform_settings').select('value').eq('key', 'usd_ngn_rate').maybeSingle()
     rate = Number(r?.value) || 1600
   } catch { /* fall back to default */ }
-  return NextResponse.json({ holdings: data ?? [], orders: orders ?? [], broker: { live: isEquityBrokerLive(), provider: equityProvider() }, supportedSymbols: supportedEquitySymbols(), rate })
+  return NextResponse.json({ holdings: data ?? [], orders: orders ?? [], sales: sales ?? [], broker: { live: isEquityBrokerLive(), provider: equityProvider() }, supportedSymbols: supportedEquitySymbols(), rate })
 }
 
 export async function POST(request: NextRequest) {

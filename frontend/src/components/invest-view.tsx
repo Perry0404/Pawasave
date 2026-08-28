@@ -105,6 +105,26 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
     }, 8000)
   }
 
+  // Poll a background sell until it settles (filled → cNGN credited, or failed → shares back).
+  const pollSale = (saleId: number, symbol: string) => {
+    let tries = 0
+    const iv = setInterval(async () => {
+      tries++
+      const d = await fetch('/api/invest/equity').then(r => (r.ok ? r.json() : null)).catch(() => null)
+      if (d) {
+        setHoldings(d.holdings || []); setBrokerLive(!!d.broker?.live); setRate(Number(d.rate) || 1600)
+        const s = (d.sales || []).find((x: any) => Number(x.id) === saleId)
+        if (s && s.status === 'filled') {
+          clearInterval(iv)
+          flash(`Sold ${symbol} — ₦${(Number(s.cngn_net_micro || 0) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })} credited (after ₦500 fee).`)
+          refresh(); return
+        }
+        if (s && s.status === 'failed') { clearInterval(iv); flash(`${symbol} sale didn’t complete — your shares are unchanged.`); refresh(); return }
+      }
+      if (tries >= 20) clearInterval(iv)
+    }, 8000)
+  }
+
   async function buy() {
     // Unverified tokenized stock → coming soon; never debit (mirrors the API guard).
     if (selected && !selected.naira && cat === 'tokenized_stock' && !stockLive(selected.symbol)) {
@@ -181,6 +201,13 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
       const data = await res.json().catch(() => ({}))
       if (res.status === 503) { flash('Selling is launching soon.'); return }
       if (!res.ok) { flash(data.error || 'Could not sell'); return }
+      if (data.status === 'processing') {
+        // Sells settle in the background (stock→USDC→cNGN, ~1–2 min) — poll for the outcome.
+        flash(`Selling ${h.symbol} — processing (~1–2 min). Your cNGN is credited when it settles.`)
+        setSelectedHolding(null); refresh(); loadHoldings()
+        pollSale(Number(data.saleId), h.symbol)
+        return
+      }
       const net = Number(data.cngnCredited || 0) / 1e6
       flash(`Sold ${h.symbol} — ₦${net.toLocaleString(undefined, { maximumFractionDigits: 2 })} credited`)
       setSelectedHolding(null); refresh(); loadHoldings()

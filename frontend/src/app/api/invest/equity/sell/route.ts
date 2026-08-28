@@ -47,9 +47,18 @@ export async function POST(request: NextRequest) {
     if (!symbol) return NextResponse.json({ error: 'Symbol required' }, { status: 400 })
     if (!(shares > 0)) return NextResponse.json({ error: 'Shares must be positive' }, { status: 400 })
 
-    const { data: profile } = await supabase.from('profiles').select('kyc_status').eq('id', user.id).single()
-    if (profile?.kyc_status !== 'verified') {
-      return NextResponse.json({ error: 'Complete identity verification (KYC) to trade equities.' }, { status: 403 })
+    // Same identity rule as buying: Strails BVN onboarding IS the basic verification; Sense
+    // is only for lifting withdrawal caps. Accept Sense-verified OR a completed onboarding.
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('kyc_status, strails_onboard_status, strails_va_account_number')
+      .eq('id', user.id)
+      .single()
+    const identityOk = profile?.kyc_status === 'verified'
+      || profile?.strails_onboard_status === 'completed'
+      || !!profile?.strails_va_account_number
+    if (!identityOk) {
+      return NextResponse.json({ error: 'Add your BVN to set up your account, then you can trade.' }, { status: 403 })
     }
 
     if (!isEquityBrokerLive()) {
@@ -77,27 +86,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: msg }, { status: 400 })
     }
 
+    // Complete the sale in the BACKGROUND and return immediately. The stock→USDC swap +
+    // HyperFX USDC→cNGN auction take 1–2 min — longer than the client/proxy HTTP timeout
+    // (~100s), which was killing the request mid-flow so settle_equity_sell never ran: the
+    // cNGN arrived on-chain but the user was never credited and the ₦500 fee never booked.
+    // This long-running self-hosted Node server keeps executing after we respond; the client
+    // polls GET for the outcome (filled → credited, or failed → shares restored).
     const admin = serviceClient()
-    try {
-      const sale = await sellEquity(symbol, shares)
-      await admin.rpc('settle_equity_sell', {
-        p_sale_id: saleId,
-        p_status: 'filled',
-        p_usdc_micro: sale.usdcMicro.toString(),
-        p_cngn_gross_micro: sale.cngnGrossMicro.toString(),
-        p_broker_ref: sale.brokerRef,
-      })
-      const net = sale.cngnGrossMicro > FLAT_FEE_MICRO ? sale.cngnGrossMicro - FLAT_FEE_MICRO : 0n
-      return NextResponse.json({
-        status: 'sold', saleId, symbol, shares: sale.shares,
-        cngnCredited: net.toString(), feeNgn: 500, brokerRef: sale.brokerRef,
-      })
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Broker error'
-      await admin.rpc('settle_equity_sell', { p_sale_id: saleId, p_status: 'failed', p_error: msg.slice(0, 500) })
-      console.error('[invest/equity/sell] broker failed, shares restored:', msg)
-      return NextResponse.json({ error: 'Sale failed — your shares are unchanged.' }, { status: 502 })
-    }
+    void (async () => {
+      try {
+        const sale = await sellEquity(symbol, shares)
+        await admin.rpc('settle_equity_sell', {
+          p_sale_id: saleId, p_status: 'filled',
+          p_usdc_micro: sale.usdcMicro.toString(),
+          p_cngn_gross_micro: sale.cngnGrossMicro.toString(),
+          p_broker_ref: sale.brokerRef,
+        })
+        console.info('[invest/equity/sell] filled', { saleId, symbol, gross: sale.cngnGrossMicro.toString() })
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Broker error'
+        await admin.rpc('settle_equity_sell', { p_sale_id: saleId, p_status: 'failed', p_error: msg.slice(0, 500) })
+        console.error('[invest/equity/sell] broker failed, shares restored:', msg)
+      }
+    })()
+
+    return NextResponse.json({ status: 'processing', saleId, symbol })
   } catch (err: unknown) {
     console.error('[invest/equity/sell] error:', err instanceof Error ? err.message : err)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })

@@ -42,12 +42,25 @@ import { acquireSupplyLock, releaseSupplyLock } from './supply-lock'
 
 const BASE_CHAIN_ID = 8453
 
-// Uniswap V3 on Base (the USDC↔stock leg lives here — verified pools).
+// Uniswap V3 on Base (a USDC↔stock venue — thin for these B20 tokens: fine for small
+// buys, but >~$300/order slips badly).
 const UNIV3 = {
   QUOTER: '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a',   // QuoterV2
   ROUTER: '0x2626664c2603336E57B271c5C0b26F421741e481',   // SwapRouter02
 } as const
 const FEE_TIERS = [3000, 500, 10000, 100] as const // tried in this order; best quote wins
+
+// Aerodrome Slipstream (concentrated liquidity) — where the B20 stock pools hold their DEEP
+// liquidity ($1M+ each, ~flat price even at $3k vs Uniswap V3's 30% slippage at $1k). These
+// pools sit on Aerodrome's NEWER CLFactory (0xf8f2eB49…), so we MUST use the matching
+// periphery the same deployer shipped (verified on-chain to quote these pools) — NOT the
+// widely-documented legacy Slipstream router, which targets the old factory and can't reach
+// them. CL pools key on tickSpacing (not a fee tier); their SwapRouter takes a deadline.
+const AERO = {
+  QUOTER: '0x514c8B5f54112481E28028F1166Bd78501089259',   // Slipstream QuoterV2 (new factory)
+  ROUTER: '0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F',   // Slipstream SwapRouter (new factory)
+} as const
+const TICK_SPACINGS = [10, 50, 100, 200, 1, 2000] as const // tried in this order; best quote wins
 
 export type EquityAssetType = 'tokenized_stock' | 'pre_ipo'
 
@@ -147,6 +160,9 @@ async function getSigner(): Promise<ethers.Wallet> {
 
 const QUOTER_ABI = ['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96)) returns (uint256 amountOut,uint160,uint32,uint256)']
 const ROUTER_ABI = ['function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)']
+// Aerodrome Slipstream: quoter keys on tickSpacing (int24); router adds a deadline field.
+const AERO_QUOTER_ABI = ['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,int24 tickSpacing,uint160 sqrtPriceLimitX96)) returns (uint256 amountOut,uint160,uint32,uint256)']
+const AERO_ROUTER_ABI = ['function exactInputSingle((address tokenIn,address tokenOut,int24 tickSpacing,address recipient,uint256 deadline,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)']
 
 /** Best (feeTier, quotedOut) for tokenIn→tokenOut across V3 fee tiers, or null if no pool. */
 async function bestQuote(tokenIn: string, tokenOut: string, amountIn: bigint, preferFee?: number): Promise<{ fee: number; out: bigint } | null> {
@@ -165,11 +181,30 @@ async function bestQuote(tokenIn: string, tokenOut: string, amountIn: bigint, pr
   })
 }
 
+/** Best (tickSpacing, quotedOut) for tokenIn→tokenOut on Aerodrome Slipstream, or null. */
+async function aeroBestQuote(tokenIn: string, tokenOut: string, amountIn: bigint): Promise<{ tickSpacing: number; out: bigint } | null> {
+  return withBaseRead(async (provider) => {
+    const quoter = new ethers.Contract(AERO.QUOTER, AERO_QUOTER_ABI, provider)
+    let best: { tickSpacing: number; out: bigint } | null = null
+    for (const tickSpacing of TICK_SPACINGS) {
+      try {
+        const q = await quoter.quoteExactInputSingle.staticCall({ tokenIn, tokenOut, amountIn, tickSpacing, sqrtPriceLimitX96: 0 })
+        const out = b(q[0])
+        if (out > 0n && (!best || out > best.out)) best = { tickSpacing, out }
+      } catch { /* no CL pool at this tickSpacing */ }
+    }
+    return best
+  })
+}
+
 /**
- * Swap tokenIn→tokenOut on Uniswap V3 from custody, returning the amount actually received
- * (on-chain balance delta). Quotes the best fee tier for the min-out slippage guard.
+ * Swap tokenIn→tokenOut from custody through the DEEPER of Uniswap V3 and Aerodrome
+ * Slipstream, returning the amount actually received (on-chain balance delta). Both venues
+ * are quoted; the one with the larger output wins, so a big buy routes to Aerodrome's deep
+ * CL pool while a pair that only exists on one venue still works. The winning quote sets the
+ * min-out slippage guard, so a thin route can only fail — never fill at a bad price.
  */
-async function uniV3Swap(tokenIn: string, tokenOut: string, amountIn: bigint, preferFee?: number): Promise<{ received: bigint; txHash: string }> {
+async function swapBestVenue(tokenIn: string, tokenOut: string, amountIn: bigint, preferFee?: number): Promise<{ received: bigint; txHash: string; venue: 'aerodrome' | 'univ3' }> {
   if (amountIn <= 0n) throw new Error('Zero swap amount')
   const signer = await getSigner()
   const owner = await signer.getAddress()
@@ -179,26 +214,46 @@ async function uniV3Swap(tokenIn: string, tokenOut: string, amountIn: bigint, pr
   const held = b(await inC.balanceOf(owner))
   if (held < amountIn) throw new Error('Insufficient custody balance for swap')
 
-  const quote = await bestQuote(tokenIn, tokenOut, amountIn, preferFee)
-  if (!quote) throw new Error('No Uniswap V3 route for this pair')
-  const minOut = quote.out - (quote.out * BigInt(slippageBps())) / 10_000n
+  const [v3, aero] = await Promise.all([
+    bestQuote(tokenIn, tokenOut, amountIn, preferFee),
+    aeroBestQuote(tokenIn, tokenOut, amountIn),
+  ])
+  const v3Out = v3?.out ?? 0n
+  const aeroOut = aero?.out ?? 0n
+  if (v3Out === 0n && aeroOut === 0n) throw new Error('No DEX route for this pair')
 
-  const current = b(await inC.allowance(owner, UNIV3.ROUTER))
+  const useAero = aeroOut >= v3Out
+  const quotedOut = useAero ? aeroOut : v3Out
+  const minOut = quotedOut - (quotedOut * BigInt(slippageBps())) / 10_000n
+  const routerAddr = useAero ? AERO.ROUTER : UNIV3.ROUTER
+
+  const current = b(await inC.allowance(owner, routerAddr))
   if (current < amountIn) {
-    await (await inC.approve(UNIV3.ROUTER, MAX_UINT256, { gasLimit: GAS.approve })).wait(1)
+    await (await inC.approve(routerAddr, MAX_UINT256, { gasLimit: GAS.approve })).wait(1)
   }
 
   const before = b(await outC.balanceOf(owner))
-  const router = new ethers.Contract(UNIV3.ROUTER, ROUTER_ABI, signer)
-  const tx = await router.exactInputSingle(
-    { tokenIn, tokenOut, fee: quote.fee, recipient: owner, amountIn, amountOutMinimum: minOut, sqrtPriceLimitX96: 0 },
-    { gasLimit: GAS.swap },
-  )
+  let tx
+  if (useAero) {
+    const router = new ethers.Contract(AERO.ROUTER, AERO_ROUTER_ABI, signer)
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 600)
+    tx = await router.exactInputSingle(
+      { tokenIn, tokenOut, tickSpacing: aero!.tickSpacing, recipient: owner, deadline, amountIn, amountOutMinimum: minOut, sqrtPriceLimitX96: 0 },
+      { gasLimit: GAS.swap },
+    )
+  } else {
+    const router = new ethers.Contract(UNIV3.ROUTER, ROUTER_ABI, signer)
+    tx = await router.exactInputSingle(
+      { tokenIn, tokenOut, fee: v3!.fee, recipient: owner, amountIn, amountOutMinimum: minOut, sqrtPriceLimitX96: 0 },
+      { gasLimit: GAS.swap },
+    )
+  }
   const receipt = await tx.wait()
   if (!receipt || receipt.status !== 1) throw new Error('Swap reverted')
   const received = b(await outC.balanceOf(owner)) - before
   if (received <= 0n) throw new Error('Swap settled but no output received')
-  return { received, txHash: receipt.hash }
+  console.info('[equity] swap filled', { venue: useAero ? 'aerodrome' : 'univ3', received: received.toString() })
+  return { received, txHash: receipt.hash, venue: useAero ? 'aerodrome' : 'univ3' }
 }
 
 // ── Custody cNGN liquidity ─────────────────────────────────────────────────────
@@ -275,7 +330,7 @@ export async function placeEquityOrder(params: EquityOrderParams): Promise<Equit
   } finally {
     await release()
   }
-  const { received, txHash } = await uniV3Swap(CONTRACTS.USDC, token.address, usdcMicro, token.fee) // leg 2
+  const { received, txHash } = await swapBestVenue(CONTRACTS.USDC, token.address, usdcMicro, token.fee) // leg 2
 
   const shares = Number(received) / 10 ** token.decimals
   if (!(shares > 0)) throw new Error('Filled zero shares')
@@ -295,7 +350,7 @@ export async function sellEquity(symbol: string, sharesToSell: number): Promise<
   const tokenBase = BigInt(Math.floor(sharesToSell * 10 ** token.decimals))
   if (tokenBase <= 0n) throw new Error('Amount too small to sell')
 
-  const sold = await uniV3Swap(token.address, CONTRACTS.USDC, tokenBase, token.fee) // stock → USDC
+  const sold = await swapBestVenue(token.address, CONTRACTS.USDC, tokenBase, token.fee) // stock → USDC
   const cngnGrossMicro = await convertUsdcToCngn(sold.received)                     // USDC → cNGN
   return {
     brokerRef: sold.txHash,

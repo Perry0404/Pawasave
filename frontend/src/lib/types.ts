@@ -6,6 +6,10 @@ export interface Profile {
   kyc_type: 'bvn' | 'nin' | null
   kyc_submitted_at: string | null
   kyc_verified_at: string | null
+  // Strails BVN onboarding = the basic identity verification (it's required to get a NUBAN).
+  // A completed onboarding means BVN-verified — enough to invest; Sense only lifts caps.
+  strails_onboard_status: string | null
+  strails_va_account_number: string | null
   xend_member_id: string | null
   transaction_pin_hash: string | null
   pin_set_at: string | null

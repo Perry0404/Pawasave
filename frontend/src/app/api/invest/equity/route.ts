@@ -85,10 +85,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Minimum investment is ₦1,000' }, { status: 400 })
     }
 
-    // KYC gate (also enforced in the RPC) — clean message before any debit.
-    const { data: profile } = await supabase.from('profiles').select('kyc_status').eq('id', user.id).single()
-    if (profile?.kyc_status !== 'verified') {
-      return NextResponse.json({ error: 'Complete identity verification (KYC) to invest in equities.' }, { status: 403 })
+    // Identity gate before any debit. Strails BVN onboarding IS the basic verification
+    // (mandatory to get a NUBAN), so a completed onboarding is sufficient to invest — full
+    // Sense biometric is only required to lift withdrawal caps. Sense-verified passes too.
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('kyc_status, strails_onboard_status, strails_va_account_number')
+      .eq('id', user.id)
+      .single()
+    const identityOk = profile?.kyc_status === 'verified'
+      || profile?.strails_onboard_status === 'completed'
+      || !!profile?.strails_va_account_number
+    if (!identityOk) {
+      return NextResponse.json({ error: 'Add your BVN to set up your account, then you can invest.' }, { status: 403 })
     }
 
     // Not live yet → surface clearly and DO NOT debit.

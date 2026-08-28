@@ -42,7 +42,7 @@ const PREIPO: Asset[] = [
 const STOCK_SYMBOLS = STOCKS.map(s => s.symbol)
 
 interface Holding { symbol: string; asset_type: string; provider: string; invested_cngn_micro: number; shares: number }
-interface Props { wallet: Wallet | null; profile: { kyc_status?: string } | null; refresh: () => void; onStartKyc: () => void }
+interface Props { wallet: Wallet | null; profile: { kyc_status?: string; strails_onboard_status?: string | null; strails_va_account_number?: string | null } | null; refresh: () => void; onStartKyc: () => void }
 
 const IconLock = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
 
@@ -113,10 +113,15 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
     }
     const naira = parseFloat(amount)
     if (!naira || naira < 1000) { flash('Minimum investment is ₦1,000'); return }
-    if (profile?.kyc_status !== 'verified') {
-      const kycOn = process.env.NEXT_PUBLIC_KYC_ENABLED === 'true'
-      flash(kycOn ? 'Verify your identity (KYC) to invest.' : 'Investing needs identity verification — coming soon.')
-      if (kycOn) onStartKyc()
+    // Identity check for investing: BVN onboarding via Strails IS the verification (it's
+    // required to get a NUBAN), so a completed onboarding is enough. Full Sense biometric
+    // is only needed to lift withdrawal caps — not to buy. Sense-verified also passes.
+    const identityOk = profile?.kyc_status === 'verified'
+      || profile?.strails_onboard_status === 'completed'
+      || !!profile?.strails_va_account_number
+    if (!identityOk) {
+      flash('Add your BVN to set up your account, then you can invest.')
+      onStartKyc()
       return
     }
     setBusy(true)

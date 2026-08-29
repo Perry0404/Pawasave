@@ -14,10 +14,16 @@
 SHELL=/bin/sh
 CRON_TZ=UTC
 
+# ── every 3 min ──────────────────────────────────────────────────────────────
+# Deposit detection/crediting runs hot so cNGN + Strails NUBAN deposits land in
+# ~minutes. Both credit idempotently (crypto: tx_key unique; Strails: advisory-lock
+# + reference check in credit_strails_deposit, migration 067), so the tight interval
+# and the webhook can overlap without double-crediting.
+*/3 * * * *   . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/scan-deposits     "$HC_SCAN_DEPOSITS"
+*/3 * * * *   . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/strails-reconcile  "$HC_STRAILS_RECONCILE"
+
 # ── every 10 min ─────────────────────────────────────────────────────────────
-*/10 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/scan-deposits     "$HC_SCAN_DEPOSITS"
 */10 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/update-oracle      "$HC_UPDATE_ORACLE"
-*/10 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/strails-reconcile  "$HC_STRAILS_RECONCILE"
 
 # ── every 15 min ─────────────────────────────────────────────────────────────
 */15 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/reconcile-withdrawals "$HC_RECONCILE_WITHDRAWALS"

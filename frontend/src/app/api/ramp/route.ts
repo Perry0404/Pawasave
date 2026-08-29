@@ -42,10 +42,12 @@ const DEFAULT_FLIPEET_ESTIMATED_FEE = 100
 // Flint rejects on-ramp amounts below ₦2,000 (Zod min). Enforce up-front so users
 // see a clear minimum instead of an opaque provider validation error. Configurable.
 const FLINT_MIN_ONRAMP_NGN = Number(process.env.FLINT_MIN_ONRAMP_NGN) || 2000
-// PawaSave uses Flipeet only (cNGN end-to-end). Flint and Xend are disabled
-// until explicitly re-enabled with FLINT_ENABLED=true / XEND_ENABLED=true —
-// even if their API keys are present. This keeps them easy to switch back on.
-const FLINT_CONFIGURED = Boolean(FLINT_API_KEY) && process.env.FLINT_ENABLED === 'true'
+// PawaSave uses Strails for fiat on-ramp (per-user NUBAN) and Flipeet for off-ramp
+// (cNGN end-to-end). Flint is RETIRED — hard-disabled here so it can never be offered
+// as a provider regardless of env (an FLINT_ENABLED left set won't re-enable it). Xend
+// stays env-gated. To ever bring Flint back, restore the env check below.
+// Retired: force off. (Was: Boolean(FLINT_API_KEY) && process.env.FLINT_ENABLED === 'true')
+const FLINT_CONFIGURED: boolean = false
 const XEND_CONFIGURED = Boolean(
   process.env.XEND_MERCHANT_ID && process.env.XEND_API_KEY && process.env.XEND_PRIVATE_KEY,
 ) && process.env.XEND_ENABLED === 'true'

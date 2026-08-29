@@ -173,27 +173,21 @@ export async function POST(request: NextRequest) {
     )
     const reference = depositId || `strails_${Date.now()}`
 
-    await admin.from('transactions').insert({
-      user_id: userId,
-      type: 'deposit',
-      direction: 'credit',
-      amount_kobo: Math.round(amountNgn * 100), // gross received into the NUBAN
-      platform_fee_kobo: Math.round(ourFeeNgn * 100),
-      amount_usdc_micro: cngnMicro,             // net credited to the wallet
-      description: `Received via Strails${ourFeeNgn > 0 ? ` (₦${ourFeeNgn.toLocaleString('en-NG')} fee)` : ''}`,
-      reference,
-      status: 'completed',
-      metadata: { channel: 'Strails', sender_name: senderName || null, sender_account: senderAccount || null, gross_naira: amountNgn, fee_naira: ourFeeNgn },
+    // ATOMIC credit (migration 067): idempotency-check + ledger row + wallet credit +
+    // fee, all in one transaction. Replaces the old insert-then-credit_wallet, which
+    // could leave a 'completed' row with no balance credited if it died mid-way (then
+    // the reference was consumed and the deposit was never credited on retry).
+    const { data: credited } = await admin.rpc('credit_strails_deposit', {
+      p_user_id: userId,
+      p_reference: reference,
+      p_gross_kobo: Math.round(amountNgn * 100),   // gross received into the NUBAN
+      p_net_micro: cngnMicro,                       // net credited to the wallet
+      p_fee_kobo: Math.round(ourFeeNgn * 100),
+      p_fee_percent: depositFeePercent,
+      p_description: `Received via Strails${ourFeeNgn > 0 ? ` (₦${ourFeeNgn.toLocaleString('en-NG')} fee)` : ''}`,
+      p_metadata: { channel: 'Strails', sender_name: senderName || null, sender_account: senderAccount || null, gross_naira: amountNgn, fee_naira: ourFeeNgn },
     })
-    await admin.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: cngnMicro })
-    if (ourFeeNgn > 0) {
-      try {
-        await admin.rpc('record_platform_fee', {
-          p_user_id: userId, p_reference: reference, p_fee_type: 'ramp_onramp',
-          p_gross_kobo: Math.round(amountNgn * 100), p_fee_kobo: Math.round(ourFeeNgn * 100), p_fee_percent: depositFeePercent,
-        })
-      } catch { /* fee-booking failure must not fail the credit */ }
-    }
+    if (credited === false) return NextResponse.json({ ok: true, already_processed: true })
     sendPushToUser(userId, { title: 'Deposit received', body: `₦${netNgn.toLocaleString('en-NG')} has landed in your PawaSave balance.`, url: '/', tag: 'deposit' }).catch(() => {})
     sendDepositEmail(userId, { amountNgn: netNgn, senderName, senderAccount, channel: 'Strails', reference }).catch(() => {})
     return NextResponse.json({ ok: true, credited: cngnMicro })

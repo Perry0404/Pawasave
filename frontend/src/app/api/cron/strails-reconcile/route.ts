@@ -66,13 +66,6 @@ export async function GET(request: NextRequest) {
     if (!ref) continue
     const reference = `strails_${ref}`
 
-    // NOT maybeSingle(): it errors when more than one row matches and returns null,
-    // which reads as "not credited" and credits AGAIN — compounding every run. A
-    // duplicate must still count as already-processed.
-    const { data: seen } = await admin
-      .from('transactions').select('id').eq('reference', reference).limit(1)
-    if (seen && seen.length > 0) continue // already credited (webhook or earlier run)
-
     // Map Strails' user id back to our profile.
     const sUser = String(t.userId ?? t.user_id ?? '')
     if (!sUser) continue
@@ -94,23 +87,21 @@ export async function GET(request: NextRequest) {
     const netNgn = Math.max(0, ngn - ourFeeNgn)
     const micro = Math.floor(netNgn * 1_000_000)
 
-    await admin.from('transactions').insert({
-      user_id: profile.id, type: 'deposit', direction: 'credit',
-      amount_kobo: Math.round(ngn * 100), amount_usdc_micro: micro,
-      platform_fee_kobo: Math.round(ourFeeNgn * 100),
-      description: `Received via Strails${ourFeeNgn > 0 ? ` (₦${ourFeeNgn.toLocaleString('en-NG')} fee)` : ''}`,
-      reference, status: 'completed',
-      metadata: { channel: 'Strails', fee_naira: ourFeeNgn, strails_fee_naira: strailsFeeNgn },
+    // ATOMIC credit (migration 067): idempotency-check + ledger + wallet credit + fee
+    // in one transaction, with an advisory lock on the reference so this cron can't race
+    // the webhook and double-credit. Returns false if already processed (webhook/earlier
+    // run) — replaces the old separate seen-check + insert + credit_wallet.
+    const { data: didCredit } = await admin.rpc('credit_strails_deposit', {
+      p_user_id: profile.id,
+      p_reference: reference,
+      p_gross_kobo: Math.round(ngn * 100),
+      p_net_micro: micro,
+      p_fee_kobo: Math.round(ourFeeNgn * 100),
+      p_fee_percent: depositFeePercent,
+      p_description: `Received via Strails${ourFeeNgn > 0 ? ` (₦${ourFeeNgn.toLocaleString('en-NG')} fee)` : ''}`,
+      p_metadata: { channel: 'Strails', fee_naira: ourFeeNgn, strails_fee_naira: strailsFeeNgn },
     })
-    await admin.rpc('credit_wallet', { p_user_id: profile.id, p_naira_kobo: 0, p_usdc_micro: micro })
-    if (ourFeeNgn > 0) {
-      try {
-        await admin.rpc('record_platform_fee', {
-          p_user_id: profile.id, p_reference: reference, p_fee_type: 'ramp_onramp',
-          p_gross_kobo: Math.round(ngn * 100), p_fee_kobo: Math.round(ourFeeNgn * 100), p_fee_percent: depositFeePercent,
-        })
-      } catch { /* fee-booking failure must not fail the credit */ }
-    }
+    if (didCredit === false) continue // already credited (webhook or earlier run)
     sendDepositEmail(profile.id, { amountNgn: netNgn, channel: 'Strails', reference }).catch(() => {})
     result.credited++
     result.creditedNgn += ngn

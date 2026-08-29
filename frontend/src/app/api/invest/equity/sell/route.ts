@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { isEquityBrokerLive, equityProvider, sellEquity } from '@/lib/equity-broker'
+import { sendEquitySellEmail } from '@/lib/notify-tx'
 
 /**
  * POST /api/invest/equity/sell   { symbol, shares }
@@ -103,6 +104,17 @@ export async function POST(request: NextRequest) {
           p_broker_ref: sale.brokerRef,
         })
         console.info('[invest/equity/sell] filled', { saleId, symbol, gross: sale.cngnGrossMicro.toString() })
+        // Congratulatory receipt — net = gross − ₦500 flat fee. Isolated so an email
+        // failure can't flip an already-settled sale to 'failed'.
+        try {
+          const netMicro = sale.cngnGrossMicro - FLAT_FEE_MICRO
+          await sendEquitySellEmail(user.id, {
+            symbol, shares,
+            netNgn: Number(netMicro > 0n ? netMicro : 0n) / 1e6,
+            feeNgn: Number(FLAT_FEE_MICRO) / 1e6,
+            reference: sale.brokerRef || `equity_sell_${saleId}`,
+          })
+        } catch (mailErr) { console.error('[invest/equity/sell] sell email failed:', mailErr) }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Broker error'
         await admin.rpc('settle_equity_sell', { p_sale_id: saleId, p_status: 'failed', p_error: msg.slice(0, 500) })

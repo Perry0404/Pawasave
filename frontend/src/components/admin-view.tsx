@@ -251,6 +251,11 @@ export default function AdminView() {
           <p className="text-[10px] text-slate-500 uppercase tracking-wider">Loans (fee + interest)</p>
           <p className="text-sm font-bold text-slate-800 mt-0.5">{formatNaira(fees?.total_loan_fees || 0)}</p>
         </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-3.5">
+          <TrendingUp className="w-4 h-4 text-indigo-500 mb-1.5" />
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider">Stocks (sell fee)</p>
+          <p className="text-sm font-bold text-slate-800 mt-0.5">{formatNaira(fees?.total_investment_fees || 0)}</p>
+        </div>
       </div>
 
       {/* Platform Stats */}

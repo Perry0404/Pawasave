@@ -163,6 +163,7 @@ export interface AdminFeeSummary {
   total_offramp_fees: number
   total_penalty_fees: number
   total_loan_fees: number
+  total_investment_fees: number
   fee_count: number
   today_fees_kobo: number
   this_month_fees_kobo: number

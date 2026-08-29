@@ -9,6 +9,7 @@ import {
   placeEquityOrder,
   type EquityAssetType,
 } from '@/lib/equity-broker'
+import { sendEquityBuyEmail } from '@/lib/notify-tx'
 
 /**
  * POST /api/invest/equity   { assetType, symbol, amountCngnMicro, provider? }
@@ -150,6 +151,13 @@ export async function POST(request: NextRequest) {
           p_usdc_micro: fill.usdcMicro.toString(), p_shares: fill.shares, p_broker_ref: fill.brokerRef,
         })
         console.info('[invest/equity] filled', { orderId, symbol, shares: fill.shares })
+        // Congratulatory receipt — isolated so an email failure can't flip a filled order.
+        try {
+          await sendEquityBuyEmail(user.id, {
+            symbol, shares: fill.shares, investedNgn: Number(amount) / 1e6,
+            reference: fill.brokerRef || `equity_${orderId}`,
+          })
+        } catch (mailErr) { console.error('[invest/equity] buy email failed:', mailErr) }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Broker error'
         await admin.rpc('settle_equity_order', { p_order_id: orderId, p_status: 'failed', p_error: msg.slice(0, 500) })

@@ -135,3 +135,76 @@ export async function sendWithdrawalEmail(userId: string, w: WithdrawalNotice): 
   })
   await sendMail({ to: r.email, subject: `You sent ${naira(w.amountNgn)} from PawaSave`, html, text: `You sent ${naira(w.amountNgn)} to ${w.accountName || ''} (${w.bankName || ''}, ${maskAccount(w.accountNumber)}). Ref ${w.reference || ''}.` })
 }
+
+/** Trim a share count to a readable precision (stocks are fractional, e.g. 0.00219349). */
+const fmtShares = (n: number) => Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 6 })
+
+export interface EquityBuyNotice {
+  symbol: string
+  shares: number
+  investedNgn: number
+  reference?: string | null
+  dateISO?: string
+}
+
+export async function sendEquityBuyEmail(userId: string, b: EquityBuyNotice): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(userId)
+  if (!r) return
+  const html = shell({
+    heading: `You own a piece of ${esc(b.symbol)} 🎉`,
+    sub: `Way to go, ${r.name}! Your order filled and the shares are now in your PawaSave portfolio.`,
+    amount: `${fmtShares(b.shares)} ${b.symbol}`,
+    amountColor: '#0A6B42',
+    rows: [
+      ['Stock', b.symbol],
+      ['Shares', fmtShares(b.shares)],
+      ['Invested', naira(b.investedNgn)],
+      ['Date', when(b.dateISO)],
+      ['Reference', b.reference || ''],
+    ],
+    note: 'Prices move with the market — track your holding any time in the Invest tab. Welcome to the markets! 📈',
+  })
+  await sendMail({
+    to: r.email,
+    subject: `🎉 You just bought ${fmtShares(b.shares)} ${b.symbol}`,
+    html,
+    text: `Congrats ${r.name}! You bought ${fmtShares(b.shares)} ${b.symbol} for ${naira(b.investedNgn)} on PawaSave. Ref ${b.reference || ''}.`,
+  })
+}
+
+export interface EquitySellNotice {
+  symbol: string
+  shares: number
+  netNgn: number
+  feeNgn: number
+  reference?: string | null
+  dateISO?: string
+}
+
+export async function sendEquitySellEmail(userId: string, s: EquitySellNotice): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(userId)
+  if (!r) return
+  const html = shell({
+    heading: `Sold! ${esc(s.symbol)} cashed out 💚`,
+    sub: `Nice one, ${r.name}! Your ${s.symbol} sale went through and the cash is in your PawaSave balance.`,
+    amount: '+' + naira(s.netNgn),
+    amountColor: '#0A6B42',
+    rows: [
+      ['Stock', s.symbol],
+      ['Shares sold', fmtShares(s.shares)],
+      ['Trading fee', naira(s.feeNgn)],
+      ['Credited', naira(s.netNgn)],
+      ['Date', when(s.dateISO)],
+      ['Reference', s.reference || ''],
+    ],
+    note: 'Your cNGN is ready to spend, save, or reinvest. Thanks for trading with PawaSave! 🚀',
+  })
+  await sendMail({
+    to: r.email,
+    subject: `💚 You sold ${s.symbol} — ${naira(s.netNgn)} credited`,
+    html,
+    text: `Nice, ${r.name}! You sold ${fmtShares(s.shares)} ${s.symbol} on PawaSave. ${naira(s.netNgn)} credited (after ${naira(s.feeNgn)} fee). Ref ${s.reference || ''}.`,
+  })
+}

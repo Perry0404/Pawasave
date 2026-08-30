@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ethers } from 'ethers'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { getSecret } from '@/lib/secrets'
-import { getBaseProvider } from '@/lib/rpc-provider'
+import { getWriteProvider } from '@/lib/rpc-provider'
 
 /**
  * GET /api/cron/liquidate
@@ -62,7 +62,11 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const provider = getBaseProvider()
+    // Sign through ONE endpoint (not the FallbackProvider): this keeper does
+    // SEQUENTIAL writes — approve + liquidate, and a liquidate per borrower — and
+    // FallbackProvider races nonces across endpoints, so the 2nd+ tx would reuse a
+    // stale nonce and silently drop. Same fix already applied to oracle/custody/off-ramp.
+    const provider = getWriteProvider()
     const keeper   = new ethers.Wallet(keeperKey, provider)
     const lend     = new ethers.Contract(lendAddr, LEND_ABI, keeper)
     const cngn     = new ethers.Contract(CNGN, ERC20_ABI, keeper)

@@ -163,10 +163,16 @@ export async function POST(request: NextRequest) {
   }
 
   if (isCompletedStatus(status)) {
-    await supabase
+    // Guarded claim: only ONE actor may move this row off 'pending' and then credit.
+    // Without the status guard, concurrent Flipeet retries (or a webhook racing the
+    // reconciler) could both pass the pending-select above and credit twice.
+    const { data: claimed } = await supabase
       .from('transactions')
       .update({ status: 'completed', paychant_tx_id: transactionId || tx.paychant_tx_id })
       .eq('id', tx.id)
+      .eq('status', 'pending')
+      .select('id')
+    if (!claimed || claimed.length === 0) return NextResponse.json({ ok: true, already_processed: true })
 
     if (tx.type === 'deposit') {
       // cNGN end-to-end: user deposits NGN → credited as cNGN (1 NGN = 1 cNGN).
@@ -203,10 +209,15 @@ export async function POST(request: NextRequest) {
       // so this deposit branch is effectively dormant — kept consistent regardless.)
     }
   } else if (isFailedStatus(status)) {
-    await supabase
+    // Guarded claim: only ONE actor may move this row off 'pending' and then refund,
+    // so a webhook racing the reconciler (or a Flipeet retry) can't double-refund.
+    const { data: claimed } = await supabase
       .from('transactions')
       .update({ status: 'failed', paychant_tx_id: transactionId || tx.paychant_tx_id })
       .eq('id', tx.id)
+      .eq('status', 'pending')
+      .select('id')
+    if (!claimed || claimed.length === 0) return NextResponse.json({ ok: true, already_processed: true })
 
     if (tx.type === 'withdrawal') {
       // Refund the cNGN that was debited (1 NGN = 1 cNGN). amount_kobo → cNGN micro.

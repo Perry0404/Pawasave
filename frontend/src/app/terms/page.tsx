@@ -103,7 +103,7 @@ export default function TermsPage() {
           <h2 className="text-xl font-bold text-emerald-400 mb-3">7. Flexible Savings — Ajo (Yield Vault)</h2>
           <div className="space-y-4 text-slate-300">
             <p className="leading-relaxed">
-              Funds saved to the Flexible Vault (Ajo) are supplied to the PawasaveLend protocol on Base. The indicative supply APY is variable and depends on borrowing demand in the lending pool — it may be higher or lower at any time, and advertised rates are targets, not guarantees.
+              Funds saved to the Flexible Vault (Ajo) are held custodially by PawaSave (currently pooled in the PawasaveLend contract on Base as a holding layer). Any yield is generated through PawaSave&apos;s treasury management, including licensed money-market partners; it is variable, not guaranteed, and may be zero. Advertised rates are indicative targets, not guarantees.
             </p>
             <p className="leading-relaxed">
               Flexible vault funds can be withdrawn at any time subject to available pool liquidity. In the unlikely event that the lending pool has insufficient liquidity, withdrawals may be temporarily delayed until repayments restore liquidity.
@@ -115,7 +115,7 @@ export default function TermsPage() {
           <h2 className="text-xl font-bold text-emerald-400 mb-3">8. Fixed Savings Locks</h2>
           <div className="space-y-4 text-slate-300">
             <p className="leading-relaxed">
-              Fixed Savings Locks let you lock cNGN for a set term (30 to 365 days) at an indicative, term-based APY. Rates are variable, depend on protocol utilization, and are targets rather than guarantees.
+              Fixed Savings Locks let you lock cNGN for a set term (30 to 365 days) at an indicative, term-based APY. Rates are variable, depend on prevailing money-market rates and PawaSave&apos;s treasury management, and are indicative targets rather than guarantees.
             </p>
             <p className="leading-relaxed">
               <span className="text-white font-semibold">Early withdrawal:</span> You may withdraw a fixed lock before maturity, but you forfeit all accrued interest and incur a <span className="text-white font-medium">0.5% penalty</span> on the principal. The penalty is retained by PawaSave as a platform fee.
@@ -142,7 +142,7 @@ export default function TermsPage() {
           <h2 className="text-xl font-bold text-emerald-400 mb-3">10. Esusu Group Savings</h2>
           <div className="space-y-4 text-slate-300">
             <p className="leading-relaxed">
-              Esusu is a cooperative savings product where a group of members contribute a fixed amount per round and each member receives the pooled amount in rotation. While funds are held in the Esusu pool, they earn yield via the PawasaveLend protocol.
+              Esusu is a cooperative savings product where a group of members contribute a fixed amount per round and each member receives the pooled amount in rotation. While funds are held in the Esusu pool, any yield is generated through PawaSave&apos;s treasury management; it is variable, not guaranteed, and may be zero.
             </p>
             <p className="leading-relaxed">
               PawaSave does not guarantee the behaviour of other Esusu group members. Members who fail to contribute on time may be removed from the group at the admin&apos;s discretion. PawaSave is not liable for losses arising from member defaults within a group.
@@ -166,10 +166,10 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">12. PawaSave Protocol (Lending &amp; Borrowing)</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">12. Asset-Backed Borrowing</h2>
           <div className="space-y-4 text-slate-300">
             <p className="leading-relaxed">
-              The PawaSave Protocol is a lending pool on Base. You may earn yield on supplied cNGN, or borrow cNGN against collateral (your savings locks or eligible held assets). By using the Protocol you acknowledge:
+              PawaSave offers asset-backed borrowing: you may borrow cNGN against collateral you already hold with us — your fixed savings locks or eligible held assets such as tokenized stocks — without selling them. The underlying PawasaveLend pool on Base holds supplied balances as a custodial holding layer and does not currently offer open pool borrowing. By borrowing you acknowledge:
             </p>
             <ul className="space-y-2 list-none">
               <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> Positions may be partially liquidated if collateral value falls below the liquidation threshold, or if a loan passes its due date and grace period.</li>
@@ -184,7 +184,7 @@ export default function TermsPage() {
           <h2 className="text-xl font-bold text-emerald-400 mb-3">13. Risk Disclosures</h2>
           <ul className="space-y-3 text-slate-300">
             <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Stablecoin &amp; custody risk:</span> Your balance is held as cNGN in wallets PawaSave controls. cNGN aims to stay pegged to the Naira but is issued by a third party; a loss of peg or an issuer failure could affect your balance.</span></li>
-            <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Yield rate risk:</span> APY rates depend on PawasaveLend pool utilization. Rates may decrease, potentially to zero, if borrowing demand falls.</span></li>
+            <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Yield rate risk:</span> Yield is variable and not guaranteed. It depends on prevailing money-market rates and PawaSave&apos;s treasury management, and may be reduced to zero.</span></li>
             <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Market risk (Investing):</span> Tokenized stocks fluctuate in value; you may get back less than you invested.</span></li>
             <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Smart contract risk:</span> On-chain contracts may contain undiscovered vulnerabilities. PawaSave is not liable for losses caused by smart contract failures.</span></li>
             <li className="flex gap-2"><span className="text-yellow-400 flex-shrink-0">⚠</span> <span><span className="text-white font-medium">Regulatory risk:</span> Nigerian regulations on crypto assets are evolving. Regulatory changes could affect the availability of features or the platform.</span></li>

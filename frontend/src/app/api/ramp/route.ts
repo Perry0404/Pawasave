@@ -892,7 +892,7 @@ async function runFlipeet(
 // key off kyc_status and never read the new kyc_tier column — safe to deploy in any
 // order relative to the migration.
 const LITE_KYC_CAP_NGN  = Number(process.env.LITE_KYC_CAP_NGN)  || 20000      // no BVN yet — per withdrawal
-const BVN_DAILY_CAP_NGN = Number(process.env.BVN_DAILY_CAP_NGN) || 5_000_000  // BVN-verified (tier 1) — per rolling 24h; above this needs full (Sense) KYC
+const BVN_DAILY_CAP_NGN = Number(process.env.BVN_DAILY_CAP_NGN) || 3_000_000  // BVN-verified (tier 1) — per rolling 24h; above this needs full (Sense) KYC
 
 async function enforceWithdrawalKycCap(
   supabase: any,
@@ -918,7 +918,7 @@ async function enforceWithdrawalKycCap(
     return null
   }
 
-  // BVN-verified (tier 1): up to ₦5,000,000 per rolling 24 hours (above → full Sense KYC,
+  // BVN-verified (tier 1): up to ₦3,000,000 per rolling 24 hours (above → full Sense KYC,
   // which is uncapped above). Sum this user's own
   // recent withdrawals (completed + still-pending, so parallel requests can't bypass it).
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()

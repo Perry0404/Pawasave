@@ -192,14 +192,14 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     const hasBvn = Boolean((profile as any)?.strails_va_account_number)
     const naira = parseFloat(amount)
     if (!naira || naira < 100) { flash('Minimum amount is ₦100'); return }
-    // Tier limits: full-KYC uncapped; BVN (Naira account) up to ₦1,000,000/day (the
+    // Tier limits: full-KYC uncapped; BVN (Naira account) up to ₦5,000,000/day (the
     // server enforces the daily total); no BVN yet capped at ₦20,000 per withdrawal.
     if (!verified && !hasBvn && naira > 20000) {
       flash('Add your BVN (get a Naira account) to withdraw more than ₦20,000.')
       return
     }
-    if (!verified && hasBvn && naira > 1000000) {
-      flash('Your daily withdrawal limit is ₦1,000,000.')
+    if (!verified && hasBvn && naira > 5000000) {
+      flash('Your daily withdrawal limit is ₦5,000,000. Verify your identity to withdraw more.')
       return
     }
     if (!bankCode || !accountNumber || accountNumber.length < 10) {
@@ -625,9 +625,9 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
         {profile?.kyc_status !== 'verified' && (
           (profile as any)?.strails_va_account_number ? (
             <div className="mb-4 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
-              <p className="text-xs text-emerald-800 font-medium">Tier 1 · ₦1,000,000 daily limit</p>
+              <p className="text-xs text-emerald-800 font-medium">Tier 1 · ₦5,000,000 daily limit</p>
               <p className="text-xs text-emerald-700 mt-1">
-                You can withdraw up to ₦1,000,000 per day.{kycAvailable ? ' Full verification removes the limit.' : ''}
+                You can withdraw up to ₦5,000,000 per day.{kycAvailable ? ' Full verification removes the limit.' : ''}
               </p>
               {kycAvailable && (
                 <button
@@ -642,7 +642,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
             <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
               <p className="text-xs text-amber-800 font-medium">₦20,000 limit</p>
               <p className="text-xs text-amber-700 mt-1">
-                Add your BVN to get a Naira account and raise your limit to ₦1,000,000 per day.
+                Add your BVN to get a Naira account and raise your limit to ₦5,000,000 per day.
               </p>
             </div>
           )

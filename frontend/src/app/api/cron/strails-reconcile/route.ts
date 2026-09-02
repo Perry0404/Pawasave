@@ -5,6 +5,7 @@ import { STRAILS_ENABLED, listTransactions, getUserDetails, addExternalWallet, w
 import { custodyAddress, custodyCngnBalance, cngnBalanceOf, supplyToLend } from '@/lib/custody'
 import { acquireSupplyLock, releaseSupplyLock } from '@/lib/supply-lock'
 import { sendDepositEmail } from '@/lib/notify-tx'
+import { depositFeeNgn } from '@/lib/deposit-fee'
 
 /**
  * GET /api/cron/strails-reconcile
@@ -80,10 +81,10 @@ export async function GET(request: NextRequest) {
     const ngn = num(t.fundingAmount) || gross
     if (ngn <= 0) continue
     const strailsFeeNgn = Math.max(0, gross - ngn) // Strails' own fee (theirs)
-    // PawaSave 1.5% deposit fee — deducted from the funded amount (push can't gross up).
-    // Kept in custody after the sweep = our revenue. Strails' fee stays theirs.
-    const depositFeePercent = Number(process.env.PAWA_DEPOSIT_FEE_PERCENT) || 1.5
-    const ourFeeNgn = Math.round(ngn * depositFeePercent / 100)
+    // PawaSave deposit fee: FREE under ₦50k, flat ₦30 at/above (see deposit-fee.ts).
+    // Threshold on the GROSS the user sent; deducted from the funded amount (push can't
+    // gross up). Kept in custody after the sweep = our revenue. Strails' fee stays theirs.
+    const ourFeeNgn = depositFeeNgn(gross)
     const netNgn = Math.max(0, ngn - ourFeeNgn)
     const micro = Math.floor(netNgn * 1_000_000)
 
@@ -97,7 +98,7 @@ export async function GET(request: NextRequest) {
       p_gross_kobo: Math.round(ngn * 100),
       p_net_micro: micro,
       p_fee_kobo: Math.round(ourFeeNgn * 100),
-      p_fee_percent: depositFeePercent,
+      p_fee_percent: 0, // flat fee, not a percentage
       p_description: `Received via Strails${ourFeeNgn > 0 ? ` (₦${ourFeeNgn.toLocaleString('en-NG')} fee)` : ''}`,
       p_metadata: { channel: 'Strails', fee_naira: ourFeeNgn, strails_fee_naira: strailsFeeNgn },
     })

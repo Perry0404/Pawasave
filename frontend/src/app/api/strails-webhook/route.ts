@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { verifyStrailsWebhook, getUserDetails } from '@/lib/strails'
 import { sendPushToUser } from '@/lib/push-send'
 import { sendDepositEmail } from '@/lib/notify-tx'
+import { depositFeeNgn } from '@/lib/deposit-fee'
 
 /**
  * POST /api/strails-webhook
@@ -155,11 +156,11 @@ export async function POST(request: NextRequest) {
 
     const amountNgn = readNumber(data?.amount, data?.source?.amount, body?.amount)
     if (amountNgn <= 0) return NextResponse.json({ ok: true, note: 'no amount' })
-    // PawaSave deposit fee (1.5%): a push-deposit can't be grossed up, so our fee is
-    // DEDUCTED from what's credited (Strails already took its own fee upstream — that's
-    // theirs; this is ours). The fee cNGN stays in custody after the sweep = real revenue.
-    const depositFeePercent = Number(process.env.PAWA_DEPOSIT_FEE_PERCENT) || 1.5
-    const ourFeeNgn = Math.round(amountNgn * depositFeePercent / 100)
+    // PawaSave deposit fee: FREE under ₦50k, flat ₦30 at/above (see deposit-fee.ts).
+    // A push-deposit can't be grossed up, so our fee is DEDUCTED from what's credited
+    // (Strails already took its own fee upstream — that's theirs; this is ours). The
+    // fee cNGN stays in custody after the sweep = real revenue.
+    const ourFeeNgn = depositFeeNgn(amountNgn)
     const netNgn = Math.max(0, amountNgn - ourFeeNgn)
     const cngnMicro = Math.floor(netNgn * 1_000_000) // credited (net of our fee), 1 NGN = 1 cNGN
 
@@ -183,7 +184,7 @@ export async function POST(request: NextRequest) {
       p_gross_kobo: Math.round(amountNgn * 100),   // gross received into the NUBAN
       p_net_micro: cngnMicro,                       // net credited to the wallet
       p_fee_kobo: Math.round(ourFeeNgn * 100),
-      p_fee_percent: depositFeePercent,
+      p_fee_percent: 0, // flat fee, not a percentage
       p_description: `Received via Strails${ourFeeNgn > 0 ? ` (₦${ourFeeNgn.toLocaleString('en-NG')} fee)` : ''}`,
       p_metadata: { channel: 'Strails', sender_name: senderName || null, sender_account: senderAccount || null, gross_naira: amountNgn, fee_naira: ourFeeNgn },
     })

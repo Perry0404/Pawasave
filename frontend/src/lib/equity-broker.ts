@@ -114,12 +114,13 @@ const DEFAULT_STOCKS: Record<string, StockToken> = {
   TSLA:  { address: '0xb2000000000000000000001e800a7f5189430cD0', decimals: 8, fee: 3000 },
 }
 
-// Ultra-thin pools where a buy can "settle with no output" (the CL pool quotes a route
-// but delivers 0 shares) — disabled by DEFAULT so users don't hit refunds. TSLA was a
-// confirmed live refund; MSFT/MSTR/SNDK have <40 shares of depth and are the same risk.
-// Re-enable per-symbol as liquidity deepens by setting EQUITY_DISABLED_SYMBOLS (even to
-// empty to enable everything). AMZN (~214 sh) and SPCX (proven fill) stay live.
-const DEFAULT_DISABLED_SYMBOLS = 'TSLA,MSFT,MSTR,SNDK'
+// Per-symbol kill-switch default. Founder decision (2026-09-04): keep ALL verified
+// stocks enabled through redeploys — accepting that the ultra-thin pools (TSLA/MSFT/
+// MSTR/SNDK, <40 shares of depth) can occasionally refund a buy ("Swap settled but no
+// output received"; cNGN is safely refunded, no loss). So the DEFAULT disables nothing;
+// a redeploy won't drop them. To disable a misbehaving symbol WITHOUT a redeploy, set
+// EQUITY_DISABLED_SYMBOLS (comma list) in the env — that overrides this default.
+const DEFAULT_DISABLED_SYMBOLS = ''
 
 /** Built-in verified map, extended by STOCK_TOKEN_MAP (JSON), minus disabled symbols. */
 function stockTokenMap(): Record<string, StockToken> {

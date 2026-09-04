@@ -5,29 +5,9 @@ import { createClient } from '@/lib/supabase'
 import type { User } from '@supabase/supabase-js'
 import type { Profile, Wallet, Transaction, SavingsLock, SavingsGoal, PlatformSetting, AdminFeeSummary, AdminUserStats, AdminTxVolume, PlatformFee } from '@/lib/types'
 
-const supabase = createClient()
+import { siteBaseUrl } from '@/lib/site-url'
 
-/**
- * Base URL for auth redirect links (confirm-signup, OAuth, password reset).
- *
- * window.location.origin is WRONG in the installed app: a PWA/TWA/Capacitor
- * wrapper (or a dev server bound to 0.0.0.0) reports its origin as
- * `http://0.0.0.0:3000` / `capacitor://localhost`, which then got baked into
- * confirmation links — Safari refused them ("restricted network port", host
- * 0.0.0.0). Prefer an explicit NEXT_PUBLIC_SITE_URL; else use a real http(s)
- * origin that isn't 0.0.0.0 (keeps localhost usable in dev); else fall back to
- * the production domain. Email templates also hardcode {{ .SiteURL }}, but this
- * covers OAuth/magic-link flows whose link comes from this redirect value.
- */
-function authBaseUrl(): string {
-  const env = process.env.NEXT_PUBLIC_SITE_URL
-  if (env) return env.replace(/\/$/, '')
-  if (typeof window !== 'undefined') {
-    const o = window.location.origin
-    if (/^https?:\/\//i.test(o) && !/\/\/0\.0\.0\.0(?::|\/|$)/i.test(o)) return o
-  }
-  return 'https://pawasave.xyz'
-}
+const supabase = createClient()
 
 export async function hashValue(raw: string): Promise<string> {
   const encoder = new TextEncoder()
@@ -63,7 +43,7 @@ export function useAuth() {
       options: {
         // Confirmation link routes through our callback so the user lands
         // signed-in on the app (not the Supabase default Site URL).
-        emailRedirectTo: `${authBaseUrl()}/auth/callback?next=/`,
+        emailRedirectTo: `${siteBaseUrl()}/auth/callback?next=/`,
         data: {
           display_name: displayName,
           transaction_pin_hash: transactionPinHash,
@@ -89,7 +69,7 @@ export function useAuth() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${authBaseUrl()}/auth/callback?next=/`,
+        redirectTo: `${siteBaseUrl()}/auth/callback?next=/`,
         queryParams: { prompt: 'select_account' },
       },
     })
@@ -106,7 +86,7 @@ export function useAuth() {
     // /auth/callback failed the exchange (verifier not available) and dumped users on
     // the sign-in screen instead of the set-password form.
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${authBaseUrl()}/reset-password`,
+      redirectTo: `${siteBaseUrl()}/reset-password`,
     })
     if (error) throw error
   }

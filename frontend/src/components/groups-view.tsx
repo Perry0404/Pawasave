@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { formatNaira, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
+import { siteBaseUrl } from '@/lib/site-url'
 import { Loader2, Copy, Check } from 'lucide-react'
 import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
@@ -106,7 +107,7 @@ export default function GroupsView({ user, wallet }: Props) {
 
   const handleShare = async () => {
     if (!selected) return
-    const url = `${window.location.origin}/join/${selected.id}`
+    const url = `${siteBaseUrl()}/join/${selected.id}`
     if (typeof navigator.share === 'function') {
       try {
         await navigator.share({ title: `Join my Ajo circle: ${selected.name}`, text: `Contribute ${formatNaira(selected.contribution_amount_kobo)} ${selected.cycle_period} in our savings circle on PawaSave.`, url })

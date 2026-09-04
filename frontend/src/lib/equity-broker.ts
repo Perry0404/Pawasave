@@ -216,7 +216,7 @@ async function aeroBestQuote(tokenIn: string, tokenOut: string, amountIn: bigint
  * CL pool while a pair that only exists on one venue still works. The winning quote sets the
  * min-out slippage guard, so a thin route can only fail — never fill at a bad price.
  */
-async function swapBestVenue(tokenIn: string, tokenOut: string, amountIn: bigint, preferFee?: number): Promise<{ received: bigint; txHash: string; venue: 'aerodrome' | 'univ3' }> {
+async function swapBestVenue(tokenIn: string, tokenOut: string, amountIn: bigint, preferFee?: number, minAcceptableOut?: bigint): Promise<{ received: bigint; txHash: string; venue: 'aerodrome' | 'univ3' }> {
   if (amountIn <= 0n) throw new Error('Zero swap amount')
   const signer = await getSigner()
   const owner = await signer.getAddress()
@@ -236,6 +236,15 @@ async function swapBestVenue(tokenIn: string, tokenOut: string, amountIn: bigint
 
   const useAero = aeroOut >= v3Out
   const quotedOut = useAero ? aeroOut : v3Out
+  // Fair-value floor (sell side): if the best DEX quote is below the caller's floor
+  // — i.e. selling would dump into a thin pool well under the stock's real market
+  // value — REFUSE before the irreversible swap. The caller (sell route) restores the
+  // shares, so the user keeps them and can try a smaller amount or later, instead of
+  // being fleeced. The 1% minOut below only guards quote→exec movement, not the price
+  // impact already baked into quotedOut, which is why this separate floor is needed.
+  if (minAcceptableOut !== undefined && quotedOut < minAcceptableOut) {
+    throw new Error(`Route too thin: quote ${quotedOut} below fair-value floor ${minAcceptableOut} — try a smaller amount or later`)
+  }
   const minOut = quotedOut - (quotedOut * BigInt(slippageBps())) / 10_000n
   const routerAddr = useAero ? AERO.ROUTER : UNIV3.ROUTER
 
@@ -354,7 +363,7 @@ export async function placeEquityOrder(params: EquityOrderParams): Promise<Equit
  * Returns the GROSS cNGN received; the flat ₦500 platform fee is deducted by the caller.
  * Throws on any failure so the caller leaves the holding intact.
  */
-export async function sellEquity(symbol: string, sharesToSell: number): Promise<EquitySale> {
+export async function sellEquity(symbol: string, sharesToSell: number, minUsdcOutMicro?: bigint): Promise<EquitySale> {
   if (!isEquityBrokerLive()) throw new Error('Equity broker not configured')
   if (!(sharesToSell > 0)) throw new Error('Zero shares to sell')
   const token = resolveStock(symbol)
@@ -362,7 +371,10 @@ export async function sellEquity(symbol: string, sharesToSell: number): Promise<
   const tokenBase = BigInt(Math.floor(sharesToSell * 10 ** token.decimals))
   if (tokenBase <= 0n) throw new Error('Amount too small to sell')
 
-  const sold = await swapBestVenue(token.address, CONTRACTS.USDC, tokenBase, token.fee) // stock → USDC
+  // minUsdcOutMicro (optional) = fair-value floor for the stock→USDC leg, so a large
+  // sell can't be dumped into a thin pool far below the stock's market price. Below the
+  // floor the swap refuses and the caller restores the shares (see settle_equity_sell).
+  const sold = await swapBestVenue(token.address, CONTRACTS.USDC, tokenBase, token.fee, minUsdcOutMicro) // stock → USDC
   const cngnGrossMicro = await convertUsdcToCngn(sold.received)                     // USDC → cNGN
   return {
     brokerRef: sold.txHash,

@@ -71,11 +71,24 @@ export async function POST(request: NextRequest) {
     const { data: priceRow } = await supabase
       .from('equity_prices').select('price_ngn_micro').eq('symbol', symbol).maybeSingle()
     const priceMicro = BigInt(Math.floor(Number(priceRow?.price_ngn_micro) || 0))
+    // Fair-value floor for the stock→USDC leg: refuse a sell that would fill more than
+    // EQUITY_SELL_MAX_IMPACT_BPS (default 10%) below the stock's market value, so a large
+    // order can't be dumped into a thin pool. If the swap can't clear this, sellEquity
+    // throws and settle_equity_sell restores the shares — user keeps them, no loss.
+    let minUsdcFloor: bigint | undefined
     if (priceMicro > 0n) {
-      const estMicro = priceMicro * BigInt(Math.floor(shares * 1e6)) / 1_000_000n
+      const estMicro = priceMicro * BigInt(Math.floor(shares * 1e6)) / 1_000_000n // NGN-micro
       if (estMicro <= FLAT_FEE_MICRO) {
         return NextResponse.json({ error: 'Sale too small — proceeds must exceed the ₦500 fee.' }, { status: 400 })
       }
+      try {
+        const { data: rateRow } = await serviceClient()
+          .from('platform_settings').select('value').eq('key', 'usd_ngn_rate').maybeSingle()
+        const rate = Number(rateRow?.value) || 1600
+        const expectedUsdc = estMicro / BigInt(Math.max(1, Math.round(rate))) // NGN-micro / (NGN/USD) = USDC-micro
+        const maxImpactBps = BigInt(Number(process.env.EQUITY_SELL_MAX_IMPACT_BPS) || 1000) // 10%
+        minUsdcFloor = expectedUsdc - (expectedUsdc * maxImpactBps) / 10_000n
+      } catch { /* no rate → skip the fair-value floor, keep the dynamic route */ }
     }
 
     // Reserve the shares (atomic decrement + pending sale) via the user's session.
@@ -96,7 +109,7 @@ export async function POST(request: NextRequest) {
     const admin = serviceClient()
     void (async () => {
       try {
-        const sale = await sellEquity(symbol, shares)
+        const sale = await sellEquity(symbol, shares, minUsdcFloor)
         await admin.rpc('settle_equity_sell', {
           p_sale_id: saleId, p_status: 'filled',
           p_usdc_micro: sale.usdcMicro.toString(),

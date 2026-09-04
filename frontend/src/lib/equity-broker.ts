@@ -114,11 +114,18 @@ const DEFAULT_STOCKS: Record<string, StockToken> = {
   TSLA:  { address: '0xb2000000000000000000001e800a7f5189430cD0', decimals: 8, fee: 3000 },
 }
 
-/** Built-in verified map, extended/overridden by STOCK_TOKEN_MAP (JSON) if present. */
+// Ultra-thin pools where a buy can "settle with no output" (the CL pool quotes a route
+// but delivers 0 shares) — disabled by DEFAULT so users don't hit refunds. TSLA was a
+// confirmed live refund; MSFT/MSTR/SNDK have <40 shares of depth and are the same risk.
+// Re-enable per-symbol as liquidity deepens by setting EQUITY_DISABLED_SYMBOLS (even to
+// empty to enable everything). AMZN (~214 sh) and SPCX (proven fill) stay live.
+const DEFAULT_DISABLED_SYMBOLS = 'TSLA,MSFT,MSTR,SNDK'
+
+/** Built-in verified map, extended by STOCK_TOKEN_MAP (JSON), minus disabled symbols. */
 function stockTokenMap(): Record<string, StockToken> {
   const out: Record<string, StockToken> = { ...DEFAULT_STOCKS }
-  let raw: any
-  try { raw = JSON.parse(process.env.STOCK_TOKEN_MAP || '{}') } catch { return out }
+  let raw: any = {}
+  try { raw = JSON.parse(process.env.STOCK_TOKEN_MAP || '{}') } catch { raw = {} }
   for (const [k, v] of Object.entries(raw || {})) {
     const key = k.trim().toUpperCase()
     if (typeof v === 'string') { if (ethers.isAddress(v)) out[key] = { address: v, decimals: 8 } }
@@ -126,6 +133,11 @@ function stockTokenMap(): Record<string, StockToken> {
       out[key] = { address: (v as any).address, decimals: Number((v as any).decimals) || 8, fee: Number((v as any).fee) || undefined }
     }
   }
+  // Operational per-symbol kill-switch (env unset → the safe default above). Applies to
+  // supportedEquitySymbols() AND resolveStock(), so a disabled symbol is hidden in the UI
+  // and refused by the API BEFORE any debit — instant disable without a code redeploy.
+  const disRaw = process.env.EQUITY_DISABLED_SYMBOLS ?? DEFAULT_DISABLED_SYMBOLS
+  for (const d of disRaw.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)) delete out[d]
   return out
 }
 

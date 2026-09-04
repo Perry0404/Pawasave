@@ -27,6 +27,7 @@ const STOCKS: Asset[] = [
   { symbol: 'TSLA', name: 'Tesla', tv: 'NASDAQ:TSLA' },
   { symbol: 'MSFT', name: 'Microsoft', tv: 'NASDAQ:MSFT' },
   { symbol: 'AMZN', name: 'Amazon', tv: 'NASDAQ:AMZN' },
+  { symbol: 'SNDK', name: 'SanDisk', tv: 'NASDAQ:SNDK' },
   { symbol: 'COIN', name: 'Coinbase', tv: 'NASDAQ:COIN' },
   { symbol: 'INTC', name: 'Intel', tv: 'NASDAQ:INTC' },
   { symbol: 'MSTR', name: 'Strategy (MicroStrategy)', tv: 'NASDAQ:MSTR' },
@@ -127,7 +128,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
 
   async function buy() {
     // Unverified tokenized stock → coming soon; never debit (mirrors the API guard).
-    if (selected && !selected.naira && cat === 'tokenized_stock' && !stockLive(selected.symbol)) {
+    if (selected && !selected.naira && (cat === 'tokenized_stock' || cat === 'pre_ipo') && !stockLive(selected.symbol)) {
       flash(`${selected.name} isn't buyable yet — verification pending. We'll notify you when it goes live.`)
       return
     }
@@ -260,7 +261,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
 
   // ── Buy sheet ──
   if (selected) {
-    const live = selected.naira ? nairaLive : cat === 'tokenized_stock' ? stockLive(selected.symbol) : brokerLive
+    const live = selected.naira ? nairaLive : stockLive(selected.symbol)
     const nairaNote = selected.kind === 'term'
       ? `${selected.blurb || 'Fixed income'} — earns yield to maturity; sell any time at market price.`
       : selected.kind === 'fund'
@@ -292,7 +293,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
 
         {!live && (
           <div className="note">
-            {!selected.naira && cat === 'tokenized_stock' && brokerLive
+            {!selected.naira && (cat === 'tokenized_stock' || cat === 'pre_ipo') && brokerLive
               ? `${selected.name} is coming soon — verification pending. Register interest and we’ll notify you the moment it’s buyable.`
               : `Trading is launching soon. Register interest now — we’ll notify you when ${selected.symbol} goes live.`}
           </div>
@@ -356,7 +357,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
           const q = a.tv ? quotes[a.symbol] : undefined
           const up = (q?.changePct ?? 0) >= 0
           // Only tokenized stocks are gated per-symbol; naira/pre-IPO keep their own flows.
-          const soon = cat === 'tokenized_stock' && !stockLive(a.symbol)
+          const soon = (cat === 'tokenized_stock' || cat === 'pre_ipo') && !stockLive(a.symbol)
           return (
             <button key={a.symbol} className="coll" style={{ width: '100%', background: 'none', border: 0, borderTop: '1px solid var(--line)', cursor: 'pointer', textAlign: 'left', opacity: soon ? 0.72 : 1 }} onClick={() => { setSelected(a); setAmount(''); setMsg('') }}>
               <span className="dot" style={{ background: 'var(--surface-2)', color: 'var(--muted)', fontWeight: 700, fontSize: 11 }}>{a.symbol.slice(0, 2)}</span>

@@ -94,12 +94,24 @@ const slippageBps = () => Number(process.env.EQUITY_SLIPPAGE_BPS) || 100
 
 interface StockToken { address: string; decimals: number; fee?: number }
 
-// Verified on-chain 2026-08-26 (symbol() + Uniswap-V3 route confirmed). 8 decimals.
+// Verified on-chain (symbol() + decimals()=8 + live USDC pool confirmed via paid RPC).
+// All route through Aerodrome Slipstream CL (tickSpacing 10), auto-discovered by the
+// router; `fee` is only the Uniswap-V3 fallback hint. First 4 verified 2026-08-26.
+// Batch of 6 added 2026-09-04 with these USDC pool depths at enable time:
+//   AMZN ~$54.6k · SNDK ~$5.3k · SPCX ~$5.2k · MSFT ~$5.1k · MSTR ~$5.1k · TSLA ~$5.0k
+// The thin (~$5k) pools support normal retail buys; oversized buys refund via the
+// slippage guard (EQUITY_SLIPPAGE_BPS) rather than filling badly.
 const DEFAULT_STOCKS: Record<string, StockToken> = {
   AAPL:  { address: '0xb200000000000000000000C2e324d24d7eEcd1fb', decimals: 8, fee: 3000 },
   NVDA:  { address: '0xb20000000000000000000078ee7ce2fE4908108C', decimals: 8, fee: 3000 },
   META:  { address: '0xb2000000000000000000008bC8786B856E61707C', decimals: 8, fee: 3000 },
   GOOGL: { address: '0xb2000000000000000000002D0BA3164cc74f58B7', decimals: 8, fee: 3000 },
+  AMZN:  { address: '0xb200000000000000000000d9192b6B456483C2E8', decimals: 8, fee: 3000 },
+  MSFT:  { address: '0xB200000000000000000000Ab99cFa739E253872B', decimals: 8, fee: 3000 },
+  MSTR:  { address: '0xb2000000000000000000004884b426556b92883d', decimals: 8, fee: 3000 },
+  SNDK:  { address: '0xb200000000000000000000397293Cb8cda9a10c5', decimals: 8, fee: 3000 },
+  SPCX:  { address: '0xb2000000000000000000007b9fcbd005511aCBd5', decimals: 8, fee: 3000 },
+  TSLA:  { address: '0xb2000000000000000000001e800a7f5189430cD0', decimals: 8, fee: 3000 },
 }
 
 /** Built-in verified map, extended/overridden by STOCK_TOKEN_MAP (JSON) if present. */
@@ -140,10 +152,10 @@ export function isEquityBrokerLive(): boolean {
 
 /**
  * Symbols that are actually BUYABLE right now — those with a resolved on-chain token
- * (and therefore a Uniswap V3 route). The UI lists more tickers than we can route (the
- * broader Coinbase set launched, but only AAPL/NVDA/META/GOOGL have DEX liquidity today);
- * anything not in this set must render as "coming soon — verification pending" rather than
- * letting a user debit cNGN into a buy that can only refund. Empty when the broker is off.
+ * (and therefore an Aerodrome/Uniswap route). Currently AAPL/NVDA/META/GOOGL plus the
+ * 2026-09-04 batch (AMZN/MSFT/MSTR/SNDK/SPCX/TSLA), all with a verified live USDC pool.
+ * Any ticker NOT in this set must render as "coming soon — verification pending" rather
+ * than letting a user debit cNGN into a buy that can only refund. Empty when broker off.
  */
 export function supportedEquitySymbols(): string[] {
   if (!isEquityBrokerLive()) return []

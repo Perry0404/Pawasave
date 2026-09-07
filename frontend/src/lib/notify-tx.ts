@@ -106,6 +106,34 @@ export async function sendDepositEmail(userId: string, d: DepositNotice): Promis
   await sendMail({ to: r.email, subject: `You received ${naira(d.amountNgn)} on PawaSave`, html, text: `You received ${naira(d.amountNgn)} on PawaSave from ${from}. Ref ${d.reference || ''}.` })
 }
 
+export interface AjoContributeNotice {
+  amountNgn: number
+  groupName: string
+  cycle?: number | null
+  reference?: string | null
+  dateISO?: string
+}
+
+export async function sendAjoContributeEmail(userId: string, c: AjoContributeNotice): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(userId)
+  if (!r) return
+  const html = shell({
+    heading: 'Contribution received 🤝',
+    sub: `Hi ${r.name}, your Ajo contribution to "${c.groupName}" is in. Keep it up!`,
+    amount: '−' + naira(c.amountNgn),
+    amountColor: '#131A15',
+    rows: [
+      ['Circle', c.groupName],
+      ['Cycle', c.cycle != null ? String(c.cycle) : ''],
+      ['Date', when(c.dateISO)],
+      ['Reference', c.reference || ''],
+    ],
+    note: 'Every member contributes each cycle, and one member receives the pooled payout in turn. You’ll be notified when it’s your turn to receive.',
+  })
+  await sendMail({ to: r.email, subject: `Your ₦ contribution to "${c.groupName}" is in`, html, text: `You contributed ${naira(c.amountNgn)} to "${c.groupName}"${c.cycle != null ? ` (cycle ${c.cycle})` : ''} on PawaSave.` })
+}
+
 export interface WithdrawalNotice {
   amountNgn: number
   bankName?: string | null

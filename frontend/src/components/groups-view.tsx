@@ -182,6 +182,7 @@ export default function GroupsView({ user, wallet }: Props) {
       if (error) { setFeedback(error.message) } else {
         setFeedback('Crypto contribution recorded!')
         openGroup(selected)
+        fetch('/api/esusu/contributed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: selected.id }) }).catch(() => {})
         fetch('/api/esusu/yield', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deposit', group_id: selected.id, contribution_kobo: selected.contribution_amount_kobo }) }).catch(() => {})
       }
       setBusy(false); setTimeout(() => setFeedback(''), 3000); return
@@ -201,6 +202,7 @@ export default function GroupsView({ user, wallet }: Props) {
     if (error) { setFeedback(error.message) } else {
       setFeedback('Contribution sent!')
       openGroup(selected)
+      fetch('/api/esusu/contributed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: selected.id }) }).catch(() => {})
       fetch('/api/esusu/yield', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deposit', group_id: selected.id, contribution_kobo: selected.contribution_amount_kobo }) }).catch(() => {})
       const { data: payoutResult } = await supabase.rpc('process_esusu_payout', { p_group_id: selected.id })
       if (payoutResult?.ok) {

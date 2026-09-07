@@ -23,17 +23,26 @@ export function useAuth() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user)
-      setLoading(false)
-    })
+    let cancelled = false
+
+    // getUser() can reject. gotrue serialises auth calls behind a single lock, and
+    // if the holder runs past 5s it steals the lock and the queued calls throw
+    // AbortError. Without the catch, loading never cleared and the page spun forever.
+    supabase.auth.getUser()
+      .then(({ data }) => { if (!cancelled) setUser(data.user) })
+      .catch(() => { if (!cancelled) setUser(null) })
+      .finally(() => { if (!cancelled) setLoading(false) })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) return
       setUser(session?.user ?? null)
       setLoading(false)
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      cancelled = true
+      subscription.unsubscribe()
+    }
   }, [])
 
   const signUp = async (email: string, password: string, displayName: string, transactionPinHash: string) => {
@@ -98,10 +107,15 @@ export function useProfile() {
   const [profile, setProfile] = useState<Profile | null>(null)
 
   const refresh = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single()
-    if (data) setProfile(data)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+      if (data) setProfile(data)
+    } catch {
+      // Same stolen-lock rejection as useAuth. Leave profile null for the next
+      // refresh instead of throwing into an unhandled rejection.
+    }
   }, [])
 
   useEffect(() => { refresh() }, [refresh])
@@ -114,11 +128,18 @@ export function useWallet() {
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    const { data } = await supabase.from('wallets').select('*').eq('user_id', user.id).single()
-    if (data) setWallet(data)
-    setLoading(false)
+    // setLoading(false) must run on every path. It used to sit after an early
+    // return, so a signed-out user or a rejected getUser() left the view loading.
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data } = await supabase.from('wallets').select('*').eq('user_id', user.id).single()
+      if (data) setWallet(data)
+    } catch {
+      // Realtime and the next refresh will retry.
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { refresh() }, [refresh])

@@ -1,7 +1,10 @@
 # PawaSave — self-hosting runbook (Coolify on a VPS)
 
 Target: your own box, Cloudflare in front, flat cost, secrets you control.
-Keep Vercel live until the new host is verified — cut DNS over last.
+
+> **Status, 07 Sep 2026.** Cutover is done. Coolify on Hetzner is serving production
+> and Vercel is no longer in use. Sections 1 to 7 are historical. Sections 4, 8 and 9
+> have been corrected below, they described the pre-cutover state and were misleading.
 
 ---
 
@@ -34,7 +37,11 @@ Open `https://<server-ip>:8000`, create the admin account, **enable 2FA**.
 Restrict the Coolify dashboard port (8000) to your IP in `ufw`, or reach it via Cloudflare Tunnel.
 
 ## 4. Deploy the app
-- New Resource → **Public/Private Git** → your repo, branch `main` (or your deploy branch).
+- New Resource → **Public/Private Git** → your repo, branch **`audit-v2-remediation-and-flint-onramp`**.
+
+> **Do not deploy `main`.** It is roughly 110 commits behind and predates equities,
+> loans, USSD and KYC. Deploying it would silently remove live features.
+> The Coolify app is already configured for the correct branch.
 - **Base Directory:** `frontend`  ·  **Build Pack:** Dockerfile (uses `frontend/Dockerfile`).
 - Add all env vars per `ops/env-checklist.md`. Mark every `NEXT_PUBLIC_*` as **Build Variable**.
 - Port: **3000** (the image listens on 3000). Set the domain to `pawasave.xyz`.
@@ -66,10 +73,28 @@ sudo chmod 600 /opt/pawasave/cron.env
 - [ ] Webhooks: update Strails/Flipeet/Flint/Sense webhook URLs to the new host.
 - [ ] Push, email (SMTP), KYC session all work.
 
-## 8. Cut over
-- Lower DNS TTL a day ahead. Flip Cloudflare DNS to the box. Watch logs + healthchecks.
-- Keep Vercel running 48–72h as instant rollback (just flip DNS back).
-- After a clean window: remove the Vercel project (secrets are now yours), revoke old keys.
+## 8. Deploying and rolling back (current process)
+
+**Pushing does not deploy.** There is no auto-deploy webhook wired, so a push to the
+trunk sits there until someone triggers a build. Either wire the webhook or treat the
+trigger as a required manual step.
+
+Trigger a deploy:
+```sh
+curl -s -X POST -H "Authorization: Bearer $COOLIFY_TOKEN" \
+  "$COOLIFY_URL/api/v1/deploy?uuid=vtzujghz9qygbzxb9cy0xqa9"
+```
+
+Confirm what is actually live, no credentials needed. The chunk hash changes on every
+build, so this is the definitive check:
+```sh
+curl -s https://pawasave.xyz | grep -oE 'app/page-[a-f0-9]+\.js'
+```
+A build takes about 3.5 minutes end to end.
+
+**Rollback.** Vercel is gone, so "flip DNS back" no longer exists. The path is to
+redeploy the previous image from the Coolify dashboard. **This has not been tested.**
+Verify it and record the steps and timing here before the next risky change.
 
 ## 9. Phase 2 (later) — custody-key isolation
 Move signing (custody sweeps, withdrawals, oracle) to a **separate worker box** not

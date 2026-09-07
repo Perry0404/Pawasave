@@ -18,6 +18,7 @@ import { sendEquitySellEmail } from '@/lib/notify-tx'
  * Protected by CRON_SECRET. Runs every ~10 min (see vercel.json / ops/cron/crontab).
  */
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store' // this route reads a table via GET (see below)
 
 const FLAT_FEE_MICRO = 500_000_000n // ₦500
 
@@ -32,7 +33,13 @@ export async function GET(request: NextRequest) {
   const admin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY,
-    { auth: { persistSession: false } },
+    {
+      auth: { persistSession: false },
+      // This cron READS a table with a GET (unlike the rpc()-POST crons). Next's App Router
+      // caches GET fetches, so without no-store the first empty response (no settling sales
+      // yet) gets cached and served forever — the cron would never see later parked sales.
+      global: { fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, cache: 'no-store' }) },
+    },
   )
 
   const { data: sales, error } = await admin

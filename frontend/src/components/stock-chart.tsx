@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 
 /**
  * Native, self-contained market UI for the Invest screen. No third-party widget
@@ -102,6 +102,48 @@ export function Sparkline({
   )
 }
 
+// Ticker → brand domain, for logos. Clearbit serves a clean logo per domain with no API
+// key; anything not mapped (or that 404s) gracefully falls back to the 2-letter monogram.
+const LOGO_DOMAINS: Record<string, string> = {
+  AAPL: 'apple.com', NVDA: 'nvidia.com', GOOGL: 'abc.xyz', META: 'meta.com',
+  TSLA: 'tesla.com', MSFT: 'microsoft.com', AMZN: 'amazon.com', SNDK: 'sandisk.com',
+  COIN: 'coinbase.com', INTC: 'intel.com', MSTR: 'strategy.com', SPY: 'ssga.com',
+  SPCX: 'spacex.com', STRIPE: 'stripe.com', OPENAI: 'openai.com',
+  ANTHROPIC: 'anthropic.com', DATABRICKS: 'databricks.com',
+}
+
+/**
+ * Round brand icon for a ticker (uses the shared `.dot` sizing). Renders the company
+ * logo when we have a domain for it, falling back to a 2-letter monogram if there's no
+ * mapping or the image fails to load — so a row always shows something legible.
+ */
+export function StockLogo({ symbol, size = 36 }: { symbol: string; size?: number }) {
+  const [err, setErr] = useState(false)
+  const sym = String(symbol || '').toUpperCase()
+  const domain = LOGO_DOMAINS[sym]
+  // Self-sized (doesn't rely on the .dot CSS parent) so it works in list rows AND the
+  // Tailwind market cards alike.
+  const base: CSSProperties = {
+    width: size, height: size, borderRadius: Math.round(size * 0.3), flex: 'none',
+    display: 'grid', placeItems: 'center', overflow: 'hidden',
+  }
+  if (domain && !err) {
+    return (
+      <span style={{ ...base, background: '#fff', border: '1px solid var(--line)' }}>
+        <img
+          src={`https://logo.clearbit.com/${domain}?size=72`} alt={sym} loading="lazy"
+          style={{ width: '80%', height: '80%', objectFit: 'contain' }} onError={() => setErr(true)}
+        />
+      </span>
+    )
+  }
+  return (
+    <span style={{ ...base, background: 'var(--surface-2)', color: 'var(--muted)', fontWeight: 700, fontSize: Math.max(10, Math.round(size * 0.32)) }}>
+      {sym.slice(0, 2)}
+    </span>
+  )
+}
+
 /** Coloured % change badge. */
 export function ChangeBadge({ q }: { q?: Quote }) {
   const up = (q?.changePct ?? 0) >= 0
@@ -129,7 +171,10 @@ export function MarketCards({
         return (
           <div key={s.symbol} className="snap-start shrink-0 w-36 bg-white border border-slate-200 rounded-xl p-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-bold text-slate-900">{s.symbol}</span>
+              <span className="flex items-center gap-1.5 min-w-0">
+                <StockLogo symbol={s.symbol} size={20} />
+                <span className="text-sm font-bold text-slate-900 truncate">{s.symbol}</span>
+              </span>
               <ChangeBadge q={q} />
             </div>
             <p className="text-[11px] text-slate-400 truncate mb-1.5">{s.name}</p>

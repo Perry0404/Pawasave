@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { Wallet } from '@/lib/types'
-import { useStockQuotes, MarketCards, StockQuotePanel, ChangeBadge, Sparkline } from './stock-chart'
+import { useStockQuotes, MarketCards, StockQuotePanel, ChangeBadge, Sparkline, StockLogo } from './stock-chart'
 
 /**
  * InvestView — buy tokenized stocks (xStocks) and pre-IPO tokens with cNGN.
@@ -59,6 +59,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
   const [selectedHolding, setSelectedHolding] = useState<Holding | null>(null)
   const [sellBusy, setSellBusy] = useState(false)
   const [amount, setAmount] = useState('')
+  const [sellAmount, setSellAmount] = useState('') // ₦ value to sell; empty = sell all
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const { quotes } = useStockQuotes(STOCK_SYMBOLS)
@@ -194,11 +195,22 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
   }
 
   async function sell(h: Holding) {
+    // Work out how many shares to sell from the ₦ amount the user entered. Empty (or ≥ the
+    // holding's full value) = sell everything; otherwise sell that ₦-worth as a fraction of
+    // the position. Without a live price we can only sell all (can't size a partial).
+    const val = holdingValue(h)
+    const amt = parseFloat(sellAmount)
+    let sharesToSell = h.shares
+    if (val != null && val > 0 && amt > 0 && amt < val) {
+      if (amt <= 500) { flash('Sell at least ₦500 more than the fee to make it worthwhile.'); return }
+      sharesToSell = Math.min(h.shares, (amt / val) * h.shares)
+    }
+    if (!(sharesToSell > 0)) { flash('Enter a valid amount to sell.'); return }
     setSellBusy(true)
     try {
       const res = await fetch('/api/invest/equity/sell', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: h.symbol, shares: h.shares }),
+        body: JSON.stringify({ symbol: h.symbol, shares: sharesToSell }),
       })
       const data = await res.json().catch(() => ({}))
       if (res.status === 503) { flash('Selling is launching soon.'); return }
@@ -228,7 +240,6 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
     const gain = val != null ? val - cost : null
     const gpct = gain != null && cost > 0 ? (gain / cost) * 100 : null
     const sellable = h.asset_type === 'tokenized_stock'
-    const net = val != null ? Math.max(0, val - 500) : null
     return (
       <div className="b">
         <button className="back" onClick={() => setSelectedHolding(null)}>← Back</button>
@@ -247,9 +258,37 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
 
         {sellable ? (
           <>
-            <div className="note" style={{ marginTop: 14 }}>
-              Selling all {Number(h.shares).toFixed(4)} shares. A flat <b>₦500</b> fee applies{net != null ? ` — you'll receive about ₦${net.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : ''}.
-            </div>
+            {val != null ? (() => {
+              // Live preview of the entered amount: how many shares it maps to, the ₦500 fee,
+              // and what actually lands. Empty or ≥ full value = sell everything.
+              const amt = parseFloat(sellAmount)
+              const partial = amt > 0 && amt < val
+              const grossSell = partial ? amt : val
+              const sharesSell = partial ? (amt / val) * h.shares : h.shares
+              const netGet = Math.max(0, grossSell - 500)
+              return (
+                <>
+                  <label className="lab" style={{ marginTop: 14 }}>Amount to sell (cNGN)</label>
+                  <div style={{ position: 'relative' }}>
+                    <input className="field" type="number" inputMode="decimal" value={sellAmount}
+                      onChange={e => setSellAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                      placeholder={val.toLocaleString(undefined, { maximumFractionDigits: 2 })} autoFocus />
+                    <button type="button" onClick={() => setSellAmount(String(Math.floor(val)))}
+                      style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 0, background: 'var(--surface-2)', color: 'var(--green)', fontWeight: 700, fontSize: 12, padding: '4px 10px', borderRadius: 999, cursor: 'pointer' }}>
+                      Max
+                    </button>
+                  </div>
+                  <p className="p" style={{ margin: '6px 3px 0' }}>Holding worth ₦{val.toLocaleString(undefined, { maximumFractionDigits: 2 })} · {Number(h.shares).toFixed(4)} shares</p>
+                  <div className="note" style={{ marginTop: 12 }}>
+                    Selling <b>{Number(sharesSell).toFixed(4)}</b> shares (₦{grossSell.toLocaleString(undefined, { maximumFractionDigits: 2 })}). Flat <b>₦500</b> fee — you’ll receive about <b>₦{netGet.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b>.
+                  </div>
+                </>
+              )
+            })() : (
+              <div className="note" style={{ marginTop: 14 }}>
+                No live price right now — this sells all {Number(h.shares).toFixed(4)} shares. A flat <b>₦500</b> fee applies.
+              </div>
+            )}
             {msg && <div className={`flash ${isErr(msg) ? 'err' : 'ok'}`}>{msg}</div>}
             <button className="cta" onClick={() => sell(h)} disabled={sellBusy}>{sellBusy ? 'Selling…' : `Sell ${h.symbol}`}</button>
           </>
@@ -337,9 +376,9 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
               const val = holdingValue(h)
               const gain = val != null ? val - cost : null
               return (
-                <button key={`${h.symbol}-${h.provider}`} className="coll" onClick={() => { setSelectedHolding(h); setMsg('') }}
+                <button key={`${h.symbol}-${h.provider}`} className="coll" onClick={() => { setSelectedHolding(h); setSellAmount(''); setMsg('') }}
                   style={{ width: '100%', background: 'none', border: 0, borderTop: '1px solid var(--line)', cursor: 'pointer', textAlign: 'left' }}>
-                  <span className="dot" style={{ background: 'var(--surface-2)', color: 'var(--muted)', fontWeight: 700, fontSize: 11 }}>{h.symbol.slice(0, 2)}</span>
+                  <StockLogo symbol={h.symbol} />
                   <div className="mid"><div className="nm">{h.symbol}</div><div className="sub">{h.asset_type === 'pre_ipo' ? 'Pre-IPO' : h.asset_type === 'rwa' ? 'Naira asset' : 'Stock'} · {Number(h.shares).toFixed(4)} {h.asset_type === 'rwa' ? 'units' : 'shares'}</div></div>
                   <div style={{ textAlign: 'right', flex: 'none' }}>
                     <div className="v num">₦{(val ?? cost).toLocaleString(undefined, { maximumFractionDigits: val != null ? 2 : 0 })}</div>
@@ -361,7 +400,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
           const soon = (cat === 'tokenized_stock' || cat === 'pre_ipo') && !stockLive(a.symbol)
           return (
             <button key={a.symbol} className="coll" style={{ width: '100%', background: 'none', border: 0, borderTop: '1px solid var(--line)', cursor: 'pointer', textAlign: 'left', opacity: soon ? 0.72 : 1 }} onClick={() => { setSelected(a); setAmount(''); setMsg('') }}>
-              <span className="dot" style={{ background: 'var(--surface-2)', color: 'var(--muted)', fontWeight: 700, fontSize: 11 }}>{a.symbol.slice(0, 2)}</span>
+              <StockLogo symbol={a.symbol} />
               <div className="mid"><div className="nm">{a.name}</div><div className="sub">{a.blurb || a.symbol}</div></div>
               {q && <div style={{ width: 48, height: 28, flex: 'none' }}><Sparkline data={q.spark} up={up} height={28} /></div>}
               {soon ? (

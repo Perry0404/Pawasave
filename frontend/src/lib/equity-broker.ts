@@ -85,6 +85,23 @@ export interface EquitySale {
   shares: number                 // shares actually sold
 }
 
+/**
+ * Thrown when leg 1 (stock → USDC) has already executed on-chain but leg 2
+ * (USDC → cNGN) can't fill yet — no solver bid the auction. The stock is GONE, so the
+ * caller must NOT restore the shares; it parks the sale as 'settling' with the USDC now
+ * in custody, and the equity-sell-reconcile cron finishes the conversion + credit later.
+ */
+export class EquitySellCngnPending extends Error {
+  usdcMicro: bigint
+  brokerRef: string
+  constructor(message: string, usdcMicro: bigint, brokerRef: string) {
+    super(message)
+    this.name = 'EquitySellCngnPending'
+    this.usdcMicro = usdcMicro
+    this.brokerRef = brokerRef
+  }
+}
+
 const b = (v: unknown): bigint => BigInt((v as any) ?? 0)
 const MAX_UINT256 = (1n << 256n) - 1n
 const GAS = { approve: 120_000n, swap: 800_000n } as const
@@ -381,18 +398,58 @@ export async function sellEquity(symbol: string, sharesToSell: number, minUsdcOu
   if (!(sharesToSell > 0)) throw new Error('Zero shares to sell')
   const token = resolveStock(symbol)
 
-  const tokenBase = BigInt(Math.floor(sharesToSell * 10 ** token.decimals))
+  let tokenBase = BigInt(Math.floor(sharesToSell * 10 ** token.decimals))
   if (tokenBase <= 0n) throw new Error('Amount too small to sell')
+
+  // Clamp to what custody ACTUALLY holds. The ledger and on-chain custody can drift by
+  // dust (rounding on a buy, a prior partial sell), and a "sell all" that asks for even
+  // one unit more than custody holds reverts the whole swap "insufficient custody balance".
+  // Selling min(requested, held) lets a full exit always go through; the reserve already
+  // decremented the ledger by the requested amount, so a full exit lands the holding at 0.
+  const custodyHeld = await custodyStockBalance(token.address)
+  if (custodyHeld < tokenBase) tokenBase = custodyHeld
+  if (tokenBase <= 0n) throw new Error('No custody balance to sell for this stock')
 
   // minUsdcOutMicro (optional) = fair-value floor for the stock→USDC leg, so a large
   // sell can't be dumped into a thin pool far below the stock's market price. Below the
   // floor the swap refuses and the caller restores the shares (see settle_equity_sell).
   const sold = await swapBestVenue(token.address, CONTRACTS.USDC, tokenBase, token.fee, minUsdcOutMicro) // stock → USDC
-  const cngnGrossMicro = await convertUsdcToCngn(sold.received)                     // USDC → cNGN
+
+  // Leg 2: USDC → cNGN via HyperFX. The stock is now SOLD (irreversible), so a transient
+  // no-solver auction must not lose the proceeds. Retry a couple of times; if still unfilled,
+  // throw EquitySellCngnPending so the caller parks the sale as 'settling' (USDC recorded,
+  // shares NOT restored) for the reconcile cron to finish — never a false 'failed'/restore.
+  let cngnGrossMicro = 0n
+  let lastErr: unknown
+  const attempts = Math.max(1, Number(process.env.EQUITY_SELL_CNGN_RETRIES) || 2)
+  for (let i = 0; i < attempts; i++) {
+    try {
+      cngnGrossMicro = await convertUsdcToCngn(sold.received)
+      if (cngnGrossMicro > 0n) break
+    } catch (e) {
+      lastErr = e
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 5_000))
+    }
+  }
+  if (cngnGrossMicro <= 0n) {
+    throw new EquitySellCngnPending(
+      lastErr instanceof Error ? lastErr.message : 'USDC→cNGN conversion pending (no solver)',
+      sold.received, sold.txHash,
+    )
+  }
   return {
     brokerRef: sold.txHash,
     usdcMicro: sold.received,
     cngnGrossMicro,
     shares: Number(tokenBase) / 10 ** token.decimals,
   }
+}
+
+/** cNGN/stock (base units) of a token currently held by the custody wallet (read-only). */
+async function custodyStockBalance(tokenAddr: string): Promise<bigint> {
+  const owner = (await getSigner()).address
+  return withBaseRead(async (provider) => {
+    const c = new ethers.Contract(tokenAddr, ERC20_ABI, provider)
+    return b(await c.balanceOf(owner))
+  })
 }

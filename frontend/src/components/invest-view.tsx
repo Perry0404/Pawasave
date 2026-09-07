@@ -120,6 +120,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
           flash(`Sold ${symbol} — ₦${(Number(s.cngn_net_micro || 0) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })} credited (after ₦500 fee).`)
           refresh(); return
         }
+        if (s && s.status === 'settling') { clearInterval(iv); flash(`${symbol} sold — converting to cNGN. It’ll land in your balance within a few minutes.`); refresh(); return }
         if (s && s.status === 'failed') { clearInterval(iv); flash(`${symbol} sale didn’t complete — your shares are unchanged.`); refresh(); return }
       }
       if (tries >= 20) clearInterval(iv)

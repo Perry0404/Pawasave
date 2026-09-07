@@ -25,6 +25,8 @@ CRON_TZ=UTC
 
 # ── every 10 min ─────────────────────────────────────────────────────────────
 */10 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/update-oracle      "$HC_UPDATE_ORACLE"
+# Finish stock sells stuck between legs (stock→USDC done, USDC→cNGN awaiting a solver).
+*/10 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/equity-sell-reconcile "$HC_EQUITY_SELL_RECONCILE"
 
 # ── every 15 min ─────────────────────────────────────────────────────────────
 */15 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/reconcile-withdrawals "$HC_RECONCILE_WITHDRAWALS"

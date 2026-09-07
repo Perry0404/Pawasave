@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
-import { isEquityBrokerLive, equityProvider, sellEquity } from '@/lib/equity-broker'
+import { isEquityBrokerLive, equityProvider, sellEquity, EquitySellCngnPending } from '@/lib/equity-broker'
 import { sendEquitySellEmail } from '@/lib/notify-tx'
 
 /**
@@ -129,6 +129,17 @@ export async function POST(request: NextRequest) {
           })
         } catch (mailErr) { console.error('[invest/equity/sell] sell email failed:', mailErr) }
       } catch (e: unknown) {
+        // Leg 1 sold the stock but leg 2 (USDC→cNGN) found no solver: park as 'settling'
+        // (USDC recorded, shares NOT restored) — the reconcile cron finishes the credit.
+        if (e instanceof EquitySellCngnPending) {
+          await admin.rpc('mark_equity_sell_settling', {
+            p_sale_id: saleId, p_usdc_micro: e.usdcMicro.toString(), p_broker_ref: e.brokerRef,
+          })
+          console.warn('[invest/equity/sell] leg2 pending, parked settling:', { saleId, symbol, msg: e.message })
+          return
+        }
+        // Leg 1 never executed (or a fair-value/liquidity guard fired before it): the stock
+        // is intact, so restore the reserved shares.
         const msg = e instanceof Error ? e.message : 'Broker error'
         await admin.rpc('settle_equity_sell', { p_sale_id: saleId, p_status: 'failed', p_error: msg.slice(0, 500) })
         console.error('[invest/equity/sell] broker failed, shares restored:', msg)

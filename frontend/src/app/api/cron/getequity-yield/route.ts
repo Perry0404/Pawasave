@@ -25,7 +25,7 @@ import { acquireSupplyLock, releaseSupplyLock } from '@/lib/supply-lock'
  *    can't spend cNGN the first already deployed.
  *  • Guarded by the shared custody-supply lock (054) so it can't race the Lend crons.
  *  • DARK by default: does nothing unless GETEQUITY_ENABLED is set AND a route has a
- *    token + a POSITIVE cap. Not scheduled in vercel.json — add it when enabling.
+ *    token + a POSITIVE cap. Not scheduled in ops/cron/crontab — add it when enabling.
  *
  * Each route per run: (1) claim accrued interest back into custody, then (2) top up
  * toward its cap with deployable idle float.

@@ -9,7 +9,7 @@ import { readYieldSources, blendYield, splitYield } from '@/lib/yield/aggregator
  * Reads a live/quoted APY from every yield source, blends them by real
  * allocation, applies the user/platform split, and writes the result so
  * accrue_daily_yield credits users the honest rate (and books the spread as
- * platform revenue). Runs a few times a day (see vercel.json).
+ * platform revenue). Runs every 6 hours (see ops/cron/crontab).
  */
 export async function GET(request: NextRequest) {
   const denied = checkCronAuth(request)

@@ -5,7 +5,7 @@ import { checkCronAuth } from '@/lib/cron-auth'
 /**
  * GET /api/cron/accrue-yield
  *
- * Called once per day by Vercel Cron (see vercel.json).
+ * Called once per day by the host crontab (see ops/cron/crontab).
  * Accrues daily yield on all users' cngn_pool_micro balances.
  *
  * Protected by the CRON_SECRET env var — Vercel sends this automatically

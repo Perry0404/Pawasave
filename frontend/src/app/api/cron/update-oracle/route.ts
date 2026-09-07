@@ -15,7 +15,7 @@ import { getWriteProvider } from '@/lib/rpc-provider'
  * and PawasaveLend prices collateral via the staleness-enforced getPrice (FIND-SC-13),
  * so once the oracle goes stale borrows AND liquidations stop working. At the old
  * every-30-min cadence that was only 2 attempts per hour — two consecutive failures
- * and the pool breaks. Now every 10 min (see vercel.json): ~6 attempts inside every
+ * and the pool breaks. Now every 10 min (see ops/cron/crontab): ~6 attempts inside every
  * staleness window, so a run has to fail 5 times running to hurt. Cheap on a paid RPC.
  *
  * RWAs / T-bills are NOT priced here — they need their own per-asset NAV feed.

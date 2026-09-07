@@ -28,7 +28,7 @@ import { sendWithdrawalEmail } from '@/lib/notify-tx'
  *
  * Refund path flips status to 'failed' FIRST (claiming the row via a status=pending
  * guard so a concurrent run can't double-act), then credits; if the credit throws,
- * the row is reverted to 'pending' for the next run. Runs every 15 min (vercel.json).
+ * the row is reverted to 'pending' for the next run. Runs every 15 min (ops/cron/crontab).
  */
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60

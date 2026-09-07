@@ -1,5 +1,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# PawaSave crontab — exact mirror of the former frontend/vercel.json crons.
+# PawaSave crontab. The single source of truth for cron schedules.
+# frontend/vercel.json has been deleted, Vercel is no longer in use.
 # Install on the VPS host:   crontab /opt/pawasave/crontab
 #
 # IMPORTANT: Vercel Cron ran in UTC. CRON_TZ=UTC below keeps the daily jobs

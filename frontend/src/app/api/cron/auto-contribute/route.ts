@@ -8,7 +8,7 @@ import { sendAjoDefaulterEmail } from '@/lib/notify-tx'
 /**
  * GET /api/cron/auto-contribute
  *
- * Called once per day by Vercel Cron (see vercel.json).
+ * Called once per day by the host crontab (see ops/cron/crontab).
  * Processes all active savings goals due for their next scheduled contribution,
  * then drains the PawasaveLend supply retry queue (V2-MED-06).
  *

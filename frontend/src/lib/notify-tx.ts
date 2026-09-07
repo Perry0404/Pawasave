@@ -134,6 +134,46 @@ export async function sendAjoContributeEmail(userId: string, c: AjoContributeNot
   await sendMail({ to: r.email, subject: `Your ₦ contribution to "${c.groupName}" is in`, html, text: `You contributed ${naira(c.amountNgn)} to "${c.groupName}"${c.cycle != null ? ` (cycle ${c.cycle})` : ''} on PawaSave.` })
 }
 
+export interface AjoDefaulterNotice {
+  action: 'debited' | 'strike' | 'removed'
+  groupName: string
+  cycle?: number | null
+  amountNgn?: number
+  strikes?: number
+}
+
+export async function sendAjoDefaulterEmail(userId: string, d: AjoDefaulterNotice): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(userId)
+  if (!r) return
+  let heading: string, sub: string, subject: string, amount = '', amountColor = '#131A15'
+  if (d.action === 'debited') {
+    heading = 'Ajo auto-contribution 🔄'
+    sub = `Hi ${r.name}, we auto-collected your Ajo contribution to "${d.groupName}" so you don't miss your cycle.`
+    amount = '−' + naira(d.amountNgn || 0)
+    subject = `Auto-contributed ${naira(d.amountNgn || 0)} to "${d.groupName}"`
+  } else if (d.action === 'strike') {
+    heading = `Missed Ajo contribution ⚠️ (strike ${d.strikes}/3)`
+    sub = `Hi ${r.name}, we couldn't collect your ${naira(d.amountNgn || 0)} contribution to "${d.groupName}" — not enough balance. Fund your wallet before the next cycle. After 3 misses you'll be removed from the circle.`
+    amountColor = '#B45309'
+    subject = `Ajo contribution missed — strike ${d.strikes}/3 ("${d.groupName}")`
+  } else {
+    heading = 'Removed from Ajo circle'
+    sub = `Hi ${r.name}, you've been removed from "${d.groupName}" after 3 missed contributions. The circle creator can add you back — reach out to them.`
+    amountColor = '#B42318'
+    subject = `Removed from "${d.groupName}" after 3 missed contributions`
+  }
+  const html = shell({
+    heading, sub, amount, amountColor,
+    rows: [
+      ['Circle', d.groupName],
+      ['Cycle', d.cycle != null ? String(d.cycle) : ''],
+      ...(d.strikes ? [['Strikes', `${d.strikes}/3`] as [string, string]] : []),
+    ],
+  })
+  await sendMail({ to: r.email, subject, html, text: sub })
+}
+
 export interface WithdrawalNotice {
   amountNgn: number
   bankName?: string | null

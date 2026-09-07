@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { supplyToLend } from '@/lib/custody'
 import { acquireSupplyLock, releaseSupplyLock } from '@/lib/supply-lock'
+import { sendAjoDefaulterEmail } from '@/lib/notify-tx'
 
 /**
  * GET /api/cron/auto-contribute
@@ -107,6 +108,17 @@ export async function GET(request: NextRequest) {
   try {
     const { data: e } = await supabase.rpc('esusu_autodebit', { p_grace_hours: 24 })
     esusu = (e as Record<string, unknown>) ?? {}
+    // Email each affected member: auto-debited, missed (strike), or removed (migration 070).
+    const events = Array.isArray((esusu as any)?.events) ? (esusu as any).events : []
+    for (const ev of events) {
+      sendAjoDefaulterEmail(String(ev.user_id), {
+        action: ev.action,
+        groupName: String(ev.group || 'Ajo'),
+        cycle: ev.cycle ?? null,
+        amountNgn: ev.amount_kobo != null ? Number(ev.amount_kobo) / 100 : undefined,
+        strikes: ev.strikes ?? undefined,
+      }).catch(() => {})
+    }
   } catch (e: unknown) {
     esusu = { error: e instanceof Error ? e.message : String(e) }
   }

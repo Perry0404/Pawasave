@@ -188,14 +188,13 @@ export default function GroupsView({ user, wallet }: Props) {
       setBusy(false); setTimeout(() => setFeedback(''), 3000); return
     }
 
-    if (paymentMethod === 'usdc') {
-      const rate = getRate()
-      const usdcMicro = koboToMicroUsdc(selected.contribution_amount_kobo, rate)
-      const freeUsdc = wallet?.usdc_balance_micro || 0
-      const cngnPool = wallet?.cngn_pool_micro || 0
-      if (usdcMicro > freeUsdc + cngnPool) { setFeedback('Insufficient cNGN balance'); setBusy(false); setTimeout(() => setFeedback(''), 3000); return }
-      const { data: vaultOk, error: vaultErr } = await supabase.rpc('withdraw_vault_atomic', { p_user_id: user.id, p_naira_kobo: selected.contribution_amount_kobo, p_usdc_micro: usdcMicro })
-      if (vaultErr || !vaultOk) { setFeedback(vaultErr?.message || 'Insufficient cNGN balance'); setBusy(false); setTimeout(() => setFeedback(''), 3000); return }
+    // cNGN pre-check for the non-crypto path. esusu_contribute (migration 070) now debits
+    // the cNGN balance (usdc_balance_micro + pool) directly — no naira-conversion hop, so
+    // no double-move. 1 NGN = 1 cNGN, so need micro = contribution kobo × 10000.
+    {
+      const needMicro = selected.contribution_amount_kobo * 10000
+      const avail = (wallet?.usdc_balance_micro || 0) + (wallet?.cngn_pool_micro || 0)
+      if (needMicro > avail) { setFeedback('Insufficient cNGN balance'); setBusy(false); setTimeout(() => setFeedback(''), 3000); return }
     }
 
     const { error } = await supabase.rpc('esusu_contribute', { p_user_id: user.id, p_group_id: selected.id, p_member_id: member.id, p_amount_kobo: selected.contribution_amount_kobo, p_cycle: selected.current_cycle })

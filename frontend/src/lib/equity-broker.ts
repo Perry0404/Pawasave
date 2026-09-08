@@ -36,7 +36,7 @@ import { ethers } from 'ethers'
 import { CONTRACTS, ERC20_ABI } from './contracts'
 import { getSecret } from './secrets'
 import { getWriteProvider, withBaseRead } from './rpc-provider'
-import { HYPERFX_ENABLED, convertCngnToUsdc, convertUsdcToCngn } from './hyperfx'
+import { HYPERFX_ENABLED, convertCngnToUsdc, convertUsdcToCngn, HyperFxEscrowStranded } from './hyperfx'
 import { custodyCngnBalance, custodyCngnBalanceFresh, custodyUsdcBalanceFresh, cngnToShares, withdrawFromLend, custodyLendShares } from './custody'
 import { withLease } from './custody-lease'
 
@@ -94,11 +94,14 @@ export interface EquitySale {
 export class EquitySellCngnPending extends Error {
   usdcMicro: bigint
   brokerRef: string
-  constructor(message: string, usdcMicro: bigint, brokerRef: string) {
+  /** Set when the USDC is escrowed in the gateway rather than sitting in custody. */
+  stranded?: HyperFxEscrowStranded
+  constructor(message: string, usdcMicro: bigint, brokerRef: string, stranded?: HyperFxEscrowStranded) {
     super(message)
     this.name = 'EquitySellCngnPending'
     this.usdcMicro = usdcMicro
     this.brokerRef = brokerRef
+    this.stranded = stranded
   }
 }
 
@@ -500,6 +503,8 @@ export async function sellEquity(symbol: string, sharesToSell: number, minUsdcOu
       throw new EquitySellCngnPending(
         lastErr instanceof Error ? lastErr.message : 'USDC→cNGN conversion pending (no solver)',
         sold.received, sold.txHash,
+        // Carry the placement hash through so the caller can record which order to cancel.
+        lastErr instanceof HyperFxEscrowStranded ? lastErr : undefined,
       )
     }
     return {

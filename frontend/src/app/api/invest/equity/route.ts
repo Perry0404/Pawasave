@@ -10,6 +10,7 @@ import {
   EquityBuyStockPending,
   type EquityAssetType,
 } from '@/lib/equity-broker'
+import { HyperFxEscrowStranded } from '@/lib/hyperfx'
 import { sendEquityBuyEmail } from '@/lib/notify-tx'
 
 /**
@@ -179,6 +180,25 @@ export async function POST(request: NextRequest) {
         }
         await admin.rpc('settle_equity_order', { p_order_id: orderId, p_status: 'failed', p_error: msg.slice(0, 500) })
         console.error('[invest/equity] broker failed, refunded:', msg)
+
+        // The refund above is right, the customer got no shares. But if leg 1 had already
+        // escrowed the cNGN then custody is short by that much, so write it down instead of
+        // letting it disappear into the float.
+        if (e instanceof HyperFxEscrowStranded) {
+          await admin.rpc('record_custody_divergence', {
+            p_kind: 'equity_buy_cngn_escrow_stranded',
+            p_asset: 'cngn',
+            p_amount_micro: e.amountInMicro.toString(),
+            p_ref_table: 'equity_orders',
+            p_ref_id: orderId,
+            p_user_id: user.id,
+            p_place_tx: e.placeTxHash,
+            p_detail: `customer refunded, cNGN escrowed in the intent gateway: ${msg}`.slice(0, 1000),
+          })
+          console.error('[invest/equity] cNGN stranded in gateway, recorded divergence', {
+            orderId, placeTx: e.placeTxHash, amountMicro: e.amountInMicro.toString(),
+          })
+        }
       }
     })()
 

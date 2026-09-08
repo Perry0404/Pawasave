@@ -152,6 +152,26 @@ async function main() {
     return
   }
 
+  // Close the matching custody_divergence row so the open shortfall drops as funds come
+  // back, rather than needing a separate manual edit.
+  const resolve = async (placeTx, amountMicro) => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!url || !key) { console.log('    (no service role key, divergence row left open)'); return }
+    const { createClient } = await import('@supabase/supabase-js')
+    const db = createClient(url, key, { auth: { persistSession: false } })
+    const { data: rows } = await db.from('custody_divergence').select('id').eq('place_tx', placeTx).eq('status', 'open')
+    if (!rows?.length) { console.log('    (no open divergence row for this tx)'); return }
+    const { data: ok } = await db.rpc('resolve_custody_divergence', {
+      p_id: rows[0].id,
+      p_status: 'recovered',
+      p_recovered_amount_micro: amountMicro.toString(),
+      p_recovered_tx: placeTx,
+      p_detail: 'reclaimed by cancelling the expired intent order',
+    })
+    console.log(ok ? `    divergence ${rows[0].id} marked recovered` : '    could not resolve divergence row')
+  }
+
   for (const { hash, order } of orders) {
     console.log(`\ncancelling ${hash}`)
     try {
@@ -159,6 +179,7 @@ async function main() {
         console.log(`  ${ev.status ?? ev.kind ?? JSON.stringify(ev).slice(0, 200)}`)
       }
       console.log('  done')
+      await resolve(hash, order.inputs[0].amount)
     } catch (e) {
       console.log(`  failed: ${e instanceof Error ? e.message : e}`)
     }

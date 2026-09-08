@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { convertUsdcToCngn } from '@/lib/hyperfx'
+import { custodyUsdcBalanceFresh } from '@/lib/custody'
+import { withLease, LeaseUnavailableError } from '@/lib/custody-lease'
 import { sendEquitySellEmail } from '@/lib/notify-tx'
 
 /**
@@ -21,6 +23,10 @@ export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store' // this route reads a table via GET (see below)
 
 const FLAT_FEE_MICRO = 500_000_000n // ₦500
+
+// Roughly two hours of 10-minute runs. Past this the sale needs a human, see
+// equity_sales_needing_attention in migration 074.
+const MAX_ATTEMPTS = 12
 
 export async function GET(request: NextRequest) {
   const denied = checkCronAuth(request)
@@ -44,8 +50,9 @@ export async function GET(request: NextRequest) {
 
   const { data: sales, error } = await admin
     .from('equity_sales')
-    .select('id,user_id,symbol,shares,usdc_micro,broker_ref')
+    .select('id,user_id,symbol,shares,usdc_micro,broker_ref,settle_attempts')
     .eq('status', 'settling')
+    .lt('settle_attempts', MAX_ATTEMPTS)
     .order('created_at', { ascending: true })
     .limit(10)
   if (error) {
@@ -55,37 +62,68 @@ export async function GET(request: NextRequest) {
 
   let settled = 0
   let stillPending = 0
-  for (const s of sales ?? []) {
-    try {
-      const usdc = BigInt(s.usdc_micro || 0)
-      if (usdc <= 0n) { stillPending++; continue }
+  let gaveUp = 0
 
-      const cngnGross = await convertUsdcToCngn(usdc) // retry the leg that missed a solver
-      if (cngnGross <= 0n) { stillPending++; continue }
-
-      await admin.rpc('settle_equity_sell', {
-        p_sale_id: s.id, p_status: 'filled',
-        p_usdc_micro: usdc.toString(),
-        p_cngn_gross_micro: cngnGross.toString(),
-        p_broker_ref: s.broker_ref,
-      })
-      settled++
-      console.info('[equity-sell-reconcile] settled', { saleId: s.id, symbol: s.symbol, gross: cngnGross.toString() })
-
-      try {
-        const netMicro = cngnGross - FLAT_FEE_MICRO
-        await sendEquitySellEmail(s.user_id, {
-          symbol: s.symbol, shares: Number(s.shares),
-          netNgn: Number(netMicro > 0n ? netMicro : 0n) / 1e6,
-          feeNgn: Number(FLAT_FEE_MICRO) / 1e6,
-          reference: s.broker_ref || `equity_sell_${s.id}`,
-        })
-      } catch (mailErr) { console.error('[equity-sell-reconcile] email failed:', mailErr) }
-    } catch (e: unknown) {
-      stillPending++
-      console.warn('[equity-sell-reconcile] still pending', s.id, e instanceof Error ? e.message : e)
-    }
+  const note = async (id: number, msg: string) => {
+    const { data } = await admin.rpc('bump_equity_sell_attempt', { p_sale_id: id, p_error: msg })
+    if (typeof data === 'number' && data >= MAX_ATTEMPTS) gaveUp++
   }
 
-  return NextResponse.json({ ok: true, scanned: sales?.length ?? 0, settled, stillPending })
+  try {
+    // One lease for the whole batch. Each conversion signs with custody, so running
+    // alongside a buy or an off-ramp means two txs share a nonce.
+    await withLease('custody:signer', async (lease) => {
+      for (const s of sales ?? []) {
+        lease.assertHeld()
+        try {
+          const usdc = BigInt(s.usdc_micro || 0)
+          if (usdc <= 0n) { stillPending++; await note(s.id, 'no usdc recorded on the sale'); continue }
+
+          // Confirm custody still holds the proceeds. Converting a recorded amount that
+          // is no longer there spends USDC belonging to another sale or a pending buy.
+          const held = await custodyUsdcBalanceFresh()
+          if (held < usdc) {
+            stillPending++
+            await note(s.id, `custody holds ${held} usdc micro, sale recorded ${usdc}`)
+            console.warn('[equity-sell-reconcile] custody short of recorded usdc', {
+              saleId: s.id, held: held.toString(), recorded: usdc.toString(),
+            })
+            continue
+          }
+
+          const cngnGross = await convertUsdcToCngn(usdc) // retry the leg that missed a solver
+          if (cngnGross <= 0n) { stillPending++; await note(s.id, 'no solver on usdc->cngn'); continue }
+
+          await admin.rpc('settle_equity_sell', {
+            p_sale_id: s.id, p_status: 'filled',
+            p_usdc_micro: usdc.toString(),
+            p_cngn_gross_micro: cngnGross.toString(),
+            p_broker_ref: s.broker_ref,
+          })
+          settled++
+          console.info('[equity-sell-reconcile] settled', { saleId: s.id, symbol: s.symbol, gross: cngnGross.toString() })
+
+          try {
+            const netMicro = cngnGross - FLAT_FEE_MICRO
+            await sendEquitySellEmail(s.user_id, {
+              symbol: s.symbol, shares: Number(s.shares),
+              netNgn: Number(netMicro > 0n ? netMicro : 0n) / 1e6,
+              feeNgn: Number(FLAT_FEE_MICRO) / 1e6,
+              reference: s.broker_ref || `equity_sell_${s.id}`,
+            })
+          } catch (mailErr) { console.error('[equity-sell-reconcile] email failed:', mailErr) }
+        } catch (e: unknown) {
+          stillPending++
+          const msg = e instanceof Error ? e.message : String(e)
+          await note(s.id, msg)
+          console.warn('[equity-sell-reconcile] still pending', s.id, msg)
+        }
+      }
+    }, { holder: 'equity-sell-reconcile', waitMs: 10_000 })
+  } catch (e) {
+    if (!(e instanceof LeaseUnavailableError)) throw e
+    return NextResponse.json({ ok: true, scanned: sales?.length ?? 0, skipped: e.message })
+  }
+
+  return NextResponse.json({ ok: true, scanned: sales?.length ?? 0, settled, stillPending, gaveUp })
 }

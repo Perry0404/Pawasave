@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 import { isAuthorisedAdmin } from '@/lib/admin-session'
 import { initializeFlipeetOffRamp, FlipeetApiError } from '@/lib/flipeet'
 import { sendCngn, custodyCngnBalance } from '@/lib/custody'
+import { withLease } from '@/lib/custody-lease'
 
 /** Flipeet rejects names with non-alphanumerics — strip accents/punctuation. */
 function sanitizeBeneficiaryName(name: string): string {
@@ -114,10 +115,23 @@ export async function POST(request: NextRequest) {
   // decrement the revenue counter — so a failed send never loses the revenue record.
   let txHash: string
   try {
-    txHash = await sendCngn(depositAddress, cngnMicro)
+    // Re-check the balance under the lease. Anything read before it is only a hint,
+    // a cron can pool the float between the check and the send.
+    txHash = await withLease('custody:signer', async (lease) => {
+      const free = await custodyCngnBalance()
+      if (free < cngnMicro) {
+        throw new Error(`custody holds ₦${(Number(free) / 1e6).toFixed(2)}, need ₦${(Number(cngnMicro) / 1e6).toFixed(2)}`)
+      }
+      lease.assertHeld()
+      return sendCngn(depositAddress, cngnMicro)
+    }, { holder: 'revenue-withdraw', waitMs: 25_000 })
   } catch (e) {
     console.error('[revenue-withdraw] custody send failed:', e instanceof Error ? e.message : e)
-    return NextResponse.json({ error: 'On-chain settlement failed — no revenue was withdrawn.' }, { status: 502 })
+    const detail = e instanceof Error ? e.message : String(e)
+    return NextResponse.json(
+      { error: `On-chain settlement failed (${detail}). No revenue was withdrawn.` },
+      { status: 502 },
+    )
   }
 
   await supabase

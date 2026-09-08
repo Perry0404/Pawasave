@@ -11,6 +11,7 @@ import {
 } from '@/lib/flipeet'
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
 import { sendCngn, cngnToShares, withdrawFromLend, custodyCngnBalance, custodyAddress } from '@/lib/custody'
+import { withLease } from '@/lib/custody-lease'
 import { createClient } from '@supabase/supabase-js'
 import { verifyPin } from '@/lib/pin-hash'
 import { pinLockGuard, recordPinResult } from '@/lib/pin-lockout'
@@ -757,61 +758,64 @@ async function runFlipeet(
         // pool balance implies; the old code always redeemed shares sized to the
         // FULL payout, so lend.withdraw reverted "Insufficient shares" and aborted a
         // withdrawal the raw balance could have settled. Pool redemption is best-effort.
-        let available = await custodyCngnBalance()
-        if (available < cngnMicro) {
-          const custShares = await custodyLendShares()
-          if (custShares > 0n) {
-            const wantShares = await cngnToShares(cngnMicro - available)
-            const redeem     = wantShares < custShares ? wantShares : custShares
-            if (redeem > 0n) {
-              try {
-                const { cngnMicro: realised } = await withdrawFromLend(redeem)
-                console.info('Flipeet off-ramp: redeemed pool shortfall', {
-                  reference, redeem: redeem.toString(), realised: realised.toString(),
-                })
-              } catch (poolErr: unknown) {
-                console.warn('Flipeet off-ramp: pool redemption failed, using raw custody cNGN', {
-                  reference, err: poolErr instanceof Error ? poolErr.message : String(poolErr),
-                })
+        // Under the custody lease from the balance read to the send. Checking the balance
+        // and then sending is only safe if nothing else moves custody in between, and a
+        // concurrent signer would also collide on the nonce. Failing to get the lease
+        // throws to the catch below, which refunds, and that is correct because nothing
+        // was sent.
+        const onChainTxHash = await withLease('custody:signer', async (lease) => {
+          let available = await custodyCngnBalance()
+          if (available < cngnMicro) {
+            const custShares = await custodyLendShares()
+            if (custShares > 0n) {
+              const wantShares = await cngnToShares(cngnMicro - available)
+              const redeem     = wantShares < custShares ? wantShares : custShares
+              if (redeem > 0n) {
+                try {
+                  const { cngnMicro: realised } = await withdrawFromLend(redeem)
+                  console.info('Flipeet off-ramp: redeemed pool shortfall', {
+                    reference, redeem: redeem.toString(), realised: realised.toString(),
+                  })
+                } catch (poolErr: unknown) {
+                  console.warn('Flipeet off-ramp: pool redemption failed, using raw custody cNGN', {
+                    reference, err: poolErr instanceof Error ? poolErr.message : String(poolErr),
+                  })
+                }
+                available = await custodyCngnBalance()
               }
-              available = await custodyCngnBalance()
             }
           }
-        }
 
-        // V2-MED-05: never send more cNGN than custody actually holds. If the pool
-        // redemption came up short and the custody float can't cover the gap, refund
-        // and fail cleanly rather than over-drawing the shared float (or reverting
-        // deep inside the ERC-20 transfer and leaking gas).
-        if (available < cngnMicro) {
-          console.error('Flipeet off-ramp: custody cNGN shortfall', {
-            reference, needed: cngnMicro.toString(), available: available.toString(),
-          })
-          await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
-          await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
-          const e: any = new Error(`Not enough settled cNGN to cover this withdrawal (have ${(Number(available) / 1e6).toFixed(2)}, need ${(Number(cngnMicro) / 1e6).toFixed(2)}) — your balance was refunded.`)
-          e.onChainFail = true
-          // This path ALREADY refunded. Without this flag the catch below treats the
-          // throw as a failed send and refunds a SECOND time — which silently paid a
-          // user +₦1,500 per failed withdrawal (observed live, balance ₦1,500→₦4,500
-          // after two attempts). Never refund twice for one debit.
-          e.alreadyRefunded = true
-          throw e
-        }
+          // Never send more cNGN than custody actually holds. If the pool redemption came
+          // up short and the float can't cover the gap, refund and fail cleanly rather than
+          // over-drawing the shared float or reverting inside the ERC-20 transfer.
+          if (available < cngnMicro) {
+            console.error('Flipeet off-ramp: custody cNGN shortfall', {
+              reference, needed: cngnMicro.toString(), available: available.toString(),
+            })
+            await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
+            await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
+            const e: any = new Error(`Not enough settled cNGN to cover this withdrawal (have ${(Number(available) / 1e6).toFixed(2)}, need ${(Number(cngnMicro) / 1e6).toFixed(2)}). Your balance was refunded.`)
+            e.onChainFail = true
+            // This path already refunded. Without the flag the catch below treats the throw
+            // as a failed send and refunds a second time, which silently paid a user +₦1,500
+            // per failed withdrawal. Never refund twice for one debit.
+            e.alreadyRefunded = true
+            throw e
+          }
 
-        // Record the destination BEFORE the irreversible send, and CONFIRM it
-        // persisted. This marker is what lets the reconciler verify a stranded
-        // withdrawal on-chain and complete it. If it can't be durably written, do
-        // NOT send: an un-markered send is exactly what stranded a delivered ₦4,900
-        // (cNGN left custody, row stuck 'pending', reconciler blind). Throwing here
-        // hits the catch below, which refunds — correct, because nothing was sent.
-        const marked = await commitSettlementMarker(supabase, reference, depositAddress)
-        if (!marked) {
-          throw new Error('could not record settlement marker before send — aborted, nothing sent')
-        }
+          // Record the destination before the irreversible send and confirm it persisted.
+          // This marker is what lets the reconciler verify a stranded withdrawal on-chain.
+          // An un-markered send is what stranded a delivered ₦4,900 with the row stuck
+          // 'pending'. Throwing here refunds, which is right because nothing was sent.
+          const marked = await commitSettlementMarker(supabase, reference, depositAddress)
+          if (!marked) {
+            throw new Error('could not record settlement marker before send, aborted, nothing sent')
+          }
 
-        // Send cNGN from custody to Flipeet's dynamic address
-        const onChainTxHash = await sendCngn(depositAddress, cngnMicro)
+          lease.assertHeld()
+          return sendCngn(depositAddress, cngnMicro)
+        }, { holder: `offramp ${reference}`, waitMs: 25_000 })
 
         // Mark the withdrawal COMPLETED now. Sending cNGN to Flipeet's deposit
         // address is the point of no return — PawaSave's side of the off-ramp is

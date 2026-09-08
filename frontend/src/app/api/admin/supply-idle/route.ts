@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isAuthorisedAdmin } from '@/lib/admin-session'
 import { custodyAddress, custodyCngnBalance, supplyToLend } from '@/lib/custody'
-import { acquireSupplyLock, releaseSupplyLock } from '@/lib/supply-lock'
+import { withLease, LeaseUnavailableError } from '@/lib/custody-lease'
 
 /**
  * POST /api/admin/supply-idle
@@ -23,43 +23,46 @@ export async function POST(request: NextRequest) {
   }
 
   const addr = await custodyAddress().catch(() => '(unknown)')
-  const free = await custodyCngnBalance().catch(() => 0n) // micro
-  const freeCngn = Number(free) / 1e6
 
-  const requested = body.amountCngn && body.amountCngn > 0
-    ? BigInt(Math.floor(body.amountCngn * 1e6))
-    : free
-  const toSupply = requested > free ? free : requested
-
-  if (toSupply <= 0n) {
-    return NextResponse.json({
-      custodyAddress: addr, freeCngn, supplied: 0,
-      note: 'No idle cNGN in the custody wallet to supply.',
-    })
-  }
-
-  // Serialise against the idle-supply crons (migration 054) so a manual supply can't
-  // race a cron and double-fire supply(idle).
-  if (!(await acquireSupplyLock())) {
-    return NextResponse.json({ error: 'A supply is already in progress — try again shortly.' }, { status: 409 })
-  }
   try {
-    const { txHash, shares } = await supplyToLend(toSupply)
-    return NextResponse.json({
-      custodyAddress: addr,
-      freeCngnBefore: freeCngn,
-      suppliedCngn: Number(toSupply) / 1e6,
-      txHash,
-      shares: shares.toString(),
-    })
+    // Read the balance inside the lease. Reading first and supplying after leaves room
+    // for a cron to move the balance in between.
+    const result = await withLease('custody:signer', async () => {
+      const free = await custodyCngnBalance().catch(() => 0n) // micro
+      const requested = body.amountCngn && body.amountCngn > 0
+        ? BigInt(Math.floor(body.amountCngn * 1e6))
+        : free
+      const toSupply = requested > free ? free : requested
+
+      if (toSupply <= 0n) {
+        return {
+          custodyAddress: addr, freeCngn: Number(free) / 1e6, supplied: 0,
+          note: 'No idle cNGN in the custody wallet to supply.',
+        }
+      }
+
+      const { txHash, shares } = await supplyToLend(toSupply)
+      return {
+        custodyAddress: addr,
+        freeCngnBefore: Number(free) / 1e6,
+        suppliedCngn: Number(toSupply) / 1e6,
+        txHash,
+        shares: shares.toString(),
+      }
+    }, { holder: 'admin/supply-idle', waitMs: 5000 })
+
+    return NextResponse.json(result)
   } catch (e: any) {
-    // If this fails with "insufficient", the idle cNGN is at a different address
-    // than the custody signer — i.e. FLIPEET_CUSTODY_ADDRESS ≠ the signer wallet.
+    if (e instanceof LeaseUnavailableError) {
+      // 'held' is worth retrying, 'unavailable' means the lease itself is broken.
+      const status = e.reason === 'held' ? 409 : 503
+      return NextResponse.json({ error: e.message, custodyAddress: addr }, { status })
+    }
+    // "insufficient" here means the idle cNGN sits at a different address than the
+    // signer, so FLIPEET_CUSTODY_ADDRESS is not the signer wallet.
     return NextResponse.json(
-      { error: e?.message || 'supply failed', custodyAddress: addr, freeCngn },
+      { error: e?.message || 'supply failed', custodyAddress: addr },
       { status: 500 },
     )
-  } finally {
-    await releaseSupplyLock()
   }
 }

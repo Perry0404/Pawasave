@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { GETEQUITY_ENABLED, listAssets, buyWithCngn, type GetEquityAsset } from '@/lib/getequity'
+import { withLease } from '@/lib/custody-lease'
 
 /**
  * GET  /api/invest/getequity  → regulated Nigerian RWA products (T-bills, funds,
@@ -156,7 +157,13 @@ export async function POST(request: NextRequest) {
 
     const admin = serviceClient()
     try {
-      const { txHash, units } = await buyWithCngn(token, amount)
+      // Under the lease. This signs with custody, and failing to get it lands in the
+      // catch below, which refunds, which is right because nothing was bought.
+      const { txHash, units } = await withLease(
+        'custody:signer',
+        () => buyWithCngn(token, amount),
+        { holder: `getequity-buy ${symbol}`, waitMs: 25_000 },
+      )
       await admin.rpc('settle_getequity_order', {
         p_order_id: orderId,
         p_status: 'filled',

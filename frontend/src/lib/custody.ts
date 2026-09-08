@@ -247,6 +247,17 @@ export async function custodyCngnBalanceFresh(): Promise<bigint> {
   return b(await cngn.balanceOf(cust))
 }
 
+/**
+ * USDC (micro) sitting free in custody, read through the write RPC.
+ * Callers use this to confirm a recorded sale's USDC is really still there before
+ * converting it, so a stale record cannot spend someone else's proceeds.
+ */
+export async function custodyUsdcBalanceFresh(): Promise<bigint> {
+  const cust = process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address
+  const usdc = new ethers.Contract(CONTRACTS.USDC, ERC20_ABI, getWriteProvider())
+  return b(await usdc.balanceOf(cust))
+}
+
 /** Get current cNGN value of psNGN shares held by custody (read-only) */
 export async function custodyLendValue(): Promise<bigint> {
   const cust = process.env.FLIPEET_CUSTODY_ADDRESS || (await getSigner()).address

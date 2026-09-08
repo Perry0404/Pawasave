@@ -21,6 +21,8 @@ import { sendEquitySellEmail } from '@/lib/notify-tx'
  */
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store' // this route reads a table via GET (see below)
+// A batch of 10 conversions, each a solver auction, needs more than the default 60.
+export const maxDuration = 300
 
 const FLAT_FEE_MICRO = 500_000_000n // ₦500
 

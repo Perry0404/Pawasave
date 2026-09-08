@@ -14,6 +14,8 @@ import { sendEquitySellEmail } from '@/lib/notify-tx'
  *   Buying is free; the ₦500 flat fee is charged only here, as platform revenue.
  */
 export const dynamic = 'force-dynamic'
+// Same reason as the buy route: both legs run after we respond and outlive the default.
+export const maxDuration = 300
 
 const FLAT_FEE_MICRO = 500_000_000n // ₦500
 

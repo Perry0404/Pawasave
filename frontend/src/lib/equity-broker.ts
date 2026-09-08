@@ -102,6 +102,21 @@ export class EquitySellCngnPending extends Error {
   }
 }
 
+/**
+ * Thrown when leg 1 (cNGN → USDC) has already executed but leg 2 (USDC → stock) has not.
+ * The cNGN is GONE from custody, so the caller must NOT refund; it parks the order as
+ * 'settling' with the USDC now in custody and lets equity-buy-reconcile finish the buy.
+ * Refunding here would pay the customer out of float and hide that custody is short.
+ */
+export class EquityBuyStockPending extends Error {
+  usdcMicro: bigint
+  constructor(message: string, usdcMicro: bigint) {
+    super(message)
+    this.name = 'EquityBuyStockPending'
+    this.usdcMicro = usdcMicro
+  }
+}
+
 const b = (v: unknown): bigint => BigInt((v as any) ?? 0)
 const MAX_UINT256 = (1n << 256n) - 1n
 const GAS = { approve: 120_000n, swap: 800_000n } as const
@@ -382,15 +397,44 @@ export async function placeEquityOrder(params: EquityOrderParams): Promise<Equit
     await ensureFreeCngn(params.amountCngnMicro)
     const usdcMicro = await convertCngnToUsdc(params.amountCngnMicro) // leg 1, cNGN into HyperFX escrow
 
-    // HyperFX can run past the TTL. If the refresh lost the lease, stop before leg 2
-    // rather than sign alongside whoever took it.
-    lease.assertHeld()
-    const { received, txHash } = await swapBestVenue(CONTRACTS.USDC, token.address, usdcMicro, token.fee) // leg 2
+    // Past this point the cNGN has left custody, so every failure has to come back as
+    // EquityBuyStockPending. A plain throw makes the caller refund cNGN we no longer hold.
+    if (lease.lost) {
+      throw new EquityBuyStockPending('Lost the custody lease after the cNGN leg', usdcMicro)
+    }
 
+    try {
+      const { received, txHash } = await swapBestVenue(CONTRACTS.USDC, token.address, usdcMicro, token.fee) // leg 2
+      const shares = Number(received) / 10 ** token.decimals
+      if (!(shares > 0)) throw new Error('Filled zero shares')
+      return { brokerRef: txHash, usdcMicro, shares }
+    } catch (e) {
+      throw new EquityBuyStockPending(
+        e instanceof Error ? e.message : 'USDC→stock swap pending', usdcMicro,
+      )
+    }
+  }, { holder: `equity-buy ${params.symbol}`, waitMs: 20_000 })
+}
+
+/**
+ * Leg 2 on its own, for a buy parked as 'settling' with USDC already in custody.
+ * Caller must confirm custody still holds usdcMicro first, otherwise this spends USDC
+ * belonging to another order.
+ */
+export async function completeEquityBuyFromUsdc(
+  symbol: string,
+  usdcMicro: bigint,
+): Promise<{ brokerRef: string; shares: number }> {
+  if (!isEquityBrokerLive()) throw new Error('Equity broker not configured')
+  if (usdcMicro <= 0n) throw new Error('Zero USDC amount')
+  const token = resolveStock(symbol)
+
+  return withLease('custody:signer', async () => {
+    const { received, txHash } = await swapBestVenue(CONTRACTS.USDC, token.address, usdcMicro, token.fee)
     const shares = Number(received) / 10 ** token.decimals
     if (!(shares > 0)) throw new Error('Filled zero shares')
-    return { brokerRef: txHash, usdcMicro, shares }
-  }, { holder: `equity-buy ${params.symbol}`, waitMs: 20_000 })
+    return { brokerRef: txHash, shares }
+  }, { holder: `equity-buy-retry ${symbol}`, waitMs: 15_000 })
 }
 
 /**

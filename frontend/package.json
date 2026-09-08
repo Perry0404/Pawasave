@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "3.1068.0",
-    "@hyperbridge/sdk": "^2.8.8",
+    "@hyperbridge/sdk": "^2.8.11",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.0",
     "@types/nodemailer": "^8.0.1",

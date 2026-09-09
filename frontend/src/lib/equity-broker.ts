@@ -121,6 +121,27 @@ export class EquityBuyStockPending extends Error {
 }
 
 const b = (v: unknown): bigint => BigInt((v as any) ?? 0)
+
+const TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)')
+
+/**
+ * Sum of `token` moved to `recipient` by this transaction, read from its own logs.
+ * A multi-hop route can credit the recipient more than once, so these are added up.
+ */
+function transferredTo(receipt: ethers.TransactionReceipt, token: string, recipient: string): bigint {
+  const wantToken = token.toLowerCase()
+  const wantTo = ethers.zeroPadValue(recipient, 32).toLowerCase()
+  let total = 0n
+  for (const log of receipt.logs) {
+    if (log.address.toLowerCase() !== wantToken) continue
+    if (log.topics[0] !== TRANSFER_TOPIC || log.topics.length < 3) continue
+    if (log.topics[2].toLowerCase() !== wantTo) continue
+    // A non-standard token could index the value, leaving data empty. Skip rather than throw.
+    if (!log.data || log.data === '0x') continue
+    total += BigInt(log.data)
+  }
+  return total
+}
 const MAX_UINT256 = (1n << 256n) - 1n
 const GAS = { approve: 120_000n, swap: 800_000n } as const
 const slippageBps = () => Number(process.env.EQUITY_SLIPPAGE_BPS) || 100
@@ -313,6 +334,7 @@ async function swapBestVenue(tokenIn: string, tokenOut: string, amountIn: bigint
     await (await inC.approve(routerAddr, MAX_UINT256, { gasLimit: GAS.approve })).wait(1)
   }
 
+  // Kept only to cross-check the receipt below, not to attribute the fill.
   const before = b(await outC.balanceOf(owner))
   let tx
   if (useAero) {
@@ -331,8 +353,22 @@ async function swapBestVenue(tokenIn: string, tokenOut: string, amountIn: bigint
   }
   const receipt = await tx.wait()
   if (!receipt || receipt.status !== 1) throw new Error('Swap reverted')
-  const received = b(await outC.balanceOf(owner)) - before
+
+  // Attribute the fill from this transaction's own Transfer events, not from the wallet
+  // balance. A whole-wallet delta counts anything else that landed in the same window,
+  // and custody receives on-ramp deposits that no lease can hold back.
+  const received = transferredTo(receipt, tokenOut, owner)
   if (received <= 0n) throw new Error('Swap settled but no output received')
+
+  const walletDelta = b(await outC.balanceOf(owner)) - before
+  if (walletDelta !== received) {
+    // Not fatal, the receipt is authoritative. It does mean something else moved custody
+    // mid-swap, which is worth knowing about.
+    console.warn('[equity] custody moved during the swap', {
+      fromReceipt: received.toString(), walletDelta: walletDelta.toString(), tx: receipt.hash,
+    })
+  }
+
   console.info('[equity] swap filled', { venue: useAero ? 'aerodrome' : 'univ3', received: received.toString() })
   return { received, txHash: receipt.hash, venue: useAero ? 'aerodrome' : 'univ3' }
 }

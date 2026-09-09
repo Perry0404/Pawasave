@@ -224,6 +224,11 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
   const stranded = (msg: string) =>
     new HyperFxEscrowStranded(`HyperFX: ${msg}`, direction, quote.amountIn, tokenIn, placeTxHash)
 
+  // The solver fills in its own transaction, which we never see a hash for, so unlike the
+  // DEX legs there is no receipt to parse and this has to fall back to a wallet delta. That
+  // makes the number vulnerable to anything else crediting custody in the same window, and
+  // an on-ramp deposit is exactly that. The clamp after the loop bounds the damage.
+  //
   // Treat the on-chain OUTPUT BALANCE as the source of truth, not the status stream.
   // In practice the solver settles the fill on-chain (custody receives the output) and
   // the SDK then tears its status streams down WITHOUT ever emitting FILLED — so a plain
@@ -254,6 +259,19 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
   }
   received = (await tokenBalance(tokenOut, account.address)) - before
   if (received <= 0n) throw stranded('order did not fill (no output received)')
+
+  // A solver delivers the output the order asked for and no more, so a delta above that is
+  // something else that landed in custody, most likely an on-ramp deposit. Crediting it to
+  // this order would pay a customer with another customer's money and the deposit scanner
+  // would then credit the same funds again. Attribute only what the order was owed and
+  // leave the rest for whoever it belongs to.
+  if (received > quote.amountOut) {
+    console.warn('[hyperfx] custody received more than this order required, clamping', {
+      direction, received: received.toString(), orderOutput: quote.amountOut.toString(),
+      placeTx: placeTxHash,
+    })
+    return quote.amountOut
+  }
   return received
 }
 

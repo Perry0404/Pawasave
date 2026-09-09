@@ -415,32 +415,10 @@ export async function getApySettings(): Promise<ApySettings> {
   }
 }
 
-// ── Admin (uses service role via API) ──
-
-export async function getAdminFeeSummary(): Promise<AdminFeeSummary | null> {
-  const { data, error } = await supabase.rpc('admin_fee_summary')
-  if (error || !data || data.length === 0) return null
-  return data[0]
-}
-
-export async function getAdminUserStats(): Promise<AdminUserStats | null> {
-  const { data, error } = await supabase.rpc('admin_user_stats')
-  if (error || !data || data.length === 0) return null
-  return data[0]
-}
-
-export async function getAdminTxVolume(): Promise<AdminTxVolume | null> {
-  const { data, error } = await supabase.rpc('admin_tx_volume')
-  if (error || !data || data.length === 0) return null
-  return data[0]
-}
-
-export async function getAdminRecentFees(limit = 50): Promise<PlatformFee[]> {
-  const { data, error } = await supabase.rpc('admin_recent_fees', { p_limit: limit })
-  if (error) return []
-  return data || []
-}
-
+// ── Admin ────────────────────────────────────────────────────────────────────
+// The fee summary, user stats, tx volume and recent fees helpers used to live here and
+// called their RPCs straight from the browser. They had no callers, and those functions
+// are now service-role only. /api/admin/dashboard is the way in.
 export async function isAdmin(): Promise<boolean> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user?.email) return false
@@ -454,15 +432,9 @@ export async function isAdmin(): Promise<boolean> {
   return emails.includes(user.email.toLowerCase())
 }
 
-export async function updateTransactionPin(userId: string, pin: string) {
-  if (!/^\d{4}$/.test(pin)) throw new Error('PIN must be exactly 4 digits')
-  const pinHash = await hashValue(pin)
-  const { error } = await supabase
-    .from('profiles')
-    .update({ transaction_pin_hash: pinHash, pin_set_at: new Date().toISOString() })
-    .eq('id', userId)
-  if (error) throw error
-}
+// updateTransactionPin was removed. It wrote profiles.transaction_pin_hash directly from
+// the browser, had no callers, and migration 045's trigger rejects that write anyway.
+// Use /api/security/pin, which hashes server-side under the service role.
 
 // ── Savings Goals ────────────────────────────────────────────────────────────
 

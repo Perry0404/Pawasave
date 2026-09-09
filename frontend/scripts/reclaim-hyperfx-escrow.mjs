@@ -5,7 +5,8 @@
  * decoded back out of its own placeOrder calldata. Dry run by default: it decodes, checks
  * the order is past its deadline, and quotes the cancel. Pass --execute to actually cancel.
  *
- *   node scripts/reclaim-hyperfx-escrow.mjs
+ *   node scripts/reclaim-hyperfx-escrow.mjs                      # open rows in custody_divergence
+ *   node scripts/reclaim-hyperfx-escrow.mjs 0xplaceOrderTxHash   # a specific order
  *   node scripts/reclaim-hyperfx-escrow.mjs --execute
  *
  * Needs BASE_WRITE_RPC_URL, HYPERFX_BUNDLER_URL and CUSTODY_PRIVATE_KEY in the environment.
@@ -13,16 +14,30 @@
  */
 import { ethers } from 'ethers'
 
-// The orders that escrowed after the Base gateway moved to the validUntil implementation
-// at block 50926074 on 5 Sep 2026. Every one of these expired unfilled.
-const STUCK = [
-  '0xbdd5bd90e7f10da271946fa496ca0ae1f5d0937a887dbef44932eecaffb9d867',
-  '0x43e43cce885e022517bd1d4ba94e5c61b8330d399f7e50d58f7397277c2d935b',
-  '0x36b2505d2dbc57665951e2357c1c7e9701b26eaff0faa2135be37b7e0f2e9676',
-  '0xf1d6773c569888669bc49db2fb800d7b082d8c78d2342a2345659eadb23d26ed',
-  '0x955260c13b79f8e552b2f86db107957a06f0f1c4bb2c83a7bd87d0edb4437229',
-  '0x0d1d5bbbdc63ae3d4d0ecfc32d126c4027ea7f55e986a8343729454899bb8ddd',
-]
+/**
+ * Which placeOrder transactions to reclaim. Pass them as arguments, or let it read the open
+ * rows from custody_divergence, which is where record_custody_divergence puts them.
+ *
+ * The six orders stranded on 7 Sep 2026 are deliberately NOT hardcoded here. They were
+ * cancelled at 09:40 UTC on 8 Sep and 6.505402 USDC came back, so a baked-in list would only
+ * go stale and mislead the next person.
+ */
+async function ordersToReclaim() {
+  const fromArgs = process.argv.slice(2).filter((a) => /^0x[0-9a-f]{64}$/i.test(a))
+  if (fromArgs.length) return fromArgs
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) return []
+  const { createClient } = await import('@supabase/supabase-js')
+  const db = createClient(url, key, { auth: { persistSession: false } })
+  const { data } = await db
+    .from('custody_divergence')
+    .select('place_tx')
+    .eq('status', 'open')
+    .not('place_tx', 'is', null)
+  return (data ?? []).map((r) => r.place_tx)
+}
 
 const EXECUTE = process.argv.includes('--execute')
 const RPC = process.env.BASE_WRITE_RPC_URL || process.env.BASE_MAINNET_RPC_URL
@@ -49,8 +64,17 @@ async function main() {
 
   // Decode first. This needs nothing but an RPC, so a decode problem shows up before we
   // touch the coprocessor or ask for a key.
+  const targets = await ordersToReclaim()
+  if (!targets.length) {
+    console.log('Nothing to reclaim. Pass placeOrder tx hashes as arguments, or set')
+    console.log('NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to read the open')
+    console.log('rows from custody_divergence.')
+    return
+  }
+  console.log(`${targets.length} order(s) to look at\n`)
+
   const orders = []
-  for (const hash of STUCK) {
+  for (const hash of targets) {
     const tx = await provider.getTransaction(hash)
     if (!tx) { console.log(`${hash}  not found`); continue }
     const parsed = iface.parseTransaction({ data: tx.data, value: tx.value })
@@ -97,7 +121,9 @@ async function main() {
     console.log(`  in  ${fmt6(input.amount)} ${token}   out ${fmt6(out.amount)} ${outToken}`)
     console.log(`  nonce ${order.nonce}  fees ${fmt6(order.fees)}  session ${order.session}`)
   }
-  console.log(`\n${orders.length} orders, ${fmt6(totalIn)} USDC of escrowed input to reclaim\n`)
+  console.log(`\n${orders.length} orders, ${fmt6(totalIn)} USDC of escrowed input if all are still open`)
+  console.log('Note: the calldata cannot tell an already cancelled order from a live one, both')
+  console.log('read as EXPIRED. The cancel quote below is what confirms an order is reclaimable.\n')
 
   const live = orders.filter((o) => Number(o.order.deadline) >= head)
   if (live.length) {

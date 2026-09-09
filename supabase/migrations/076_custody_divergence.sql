@@ -3,11 +3,12 @@
 -- Records the cases where the database made a customer whole but on-chain custody did not
 -- match, so the shortfall is a visible number instead of a quiet float leak.
 --
--- The case that forced this: a stock buy escrows cNGN into the HyperFX gateway, no solver
--- fills, and the order expires. Refunding the customer is the right call, they got no
--- shares. But the cNGN is sitting in the gateway and only the customer side of that was
--- ever written down. Six of these accumulated 6.38 USDC before anyone noticed, and only
--- because someone went looking on-chain.
+-- The case that forced this: an order escrows its input into the HyperFX gateway, no solver
+-- fills, and the order expires. Refunding the customer is the right call, they got nothing.
+-- But the input is sitting in the gateway and only the customer side of that was ever
+-- written down. Six of these built up 6.38 USDC over 20 hours on 7 Sep and were found only
+-- because someone went looking on-chain. They were recovered by cancelling the orders, so
+-- the lasting cost was small, but nothing in the database would have shown the gap.
 --
 -- place_tx is the important column. Cancelling a stranded intent order needs the exact Order
 -- struct, which is only recoverable by decoding that transaction's calldata.

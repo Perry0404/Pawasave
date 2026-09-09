@@ -4,7 +4,11 @@ import './globals.css'
 import { ConfirmProvider } from '@/components/confirm-dialog'
 import ServiceWorkerRegister from '@/components/service-worker-register'
 
-const inter = Inter({ subsets: ['latin'] })
+// `variable`, not the default class-only setup: next/font self-hosts under a
+// generated family name (__Inter_xxxxxx) and never registers the literal name
+// "Inter". globals.css asks for "Inter", so without this the whole `.ps` app
+// silently fell through to the system font and weights 650/680 snapped to 700.
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
 
 export const metadata: Metadata = {
   title: 'PawaSave — Save Smarter for Your Business',
@@ -44,7 +48,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       </head>
-      <body className={inter.className}><ConfirmProvider>{children}</ConfirmProvider><ServiceWorkerRegister /></body>
+      <body className={inter.variable}><ConfirmProvider>{children}</ConfirmProvider><ServiceWorkerRegister /></body>
     </html>
   )
 }

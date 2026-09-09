@@ -234,7 +234,7 @@ async function maybeDebitForWithdrawal(
       await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
       return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 })
     }
-    const { data: moved } = await supabase.rpc('withdraw_cngn_pool', {
+    const { data: moved } = await moneyDb().rpc('withdraw_cngn_pool', {
       p_user_id: userId,
       p_amount_micro: shortfall,
     })
@@ -244,7 +244,7 @@ async function maybeDebitForWithdrawal(
     }
   }
 
-  const { data: ok } = await supabase.rpc('debit_wallet', {
+  const { data: ok } = await moneyDb().rpc('debit_wallet', {
     p_user_id: userId,
     p_naira_kobo: 0,
     p_usdc_micro: cngnMicro,
@@ -268,7 +268,7 @@ async function recordPlatformFee(
   feePercent: number,
 ) {
   if (feeKobo <= 0) return
-  await supabase.rpc('record_platform_fee', {
+  await moneyDb().rpc('record_platform_fee', {
     p_user_id: userId,
     p_reference: reference,
     p_fee_type: feeType,
@@ -308,6 +308,21 @@ function adminDb() {
     { auth: { persistSession: false } },
   )
   return _adminDb
+}
+
+/**
+ * Service-role client for the balance-moving RPCs, which must never run on the caller's
+ * session. credit_wallet and friends only check that auth.uid() matches p_user_id, so a
+ * session grant lets any signed-in user credit their own wallet from the browser. The
+ * grant is being revoked, and these calls have to be off the session before that lands.
+ *
+ * Throws rather than falling back. A silent fallback here would mean the refund paths
+ * below quietly stop working the moment the grant is gone.
+ */
+function moneyDb() {
+  const db = adminDb()
+  if (!db) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required to move balances')
+  return db
 }
 
 async function commitSettlementMarker(
@@ -607,7 +622,7 @@ async function runXend(
     } catch {
       // Best-effort debit back; if this also fails the merchant wallet already has the funds
     }
-    await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: usdcMicro })
+    await moneyDb().rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: usdcMicro })
     await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
     throw new Error(xendErr.message || 'Xend withdrawal failed. Please try again.')
   }
@@ -716,7 +731,7 @@ async function runFlipeet(
     if (type === 'off') {
       // Refund the FULL debit (net + fee), not just the net — the user was debited
       // amount+fee before this API call.
-      await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
+      await moneyDb().rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
       await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
     }
     throw apiErr
@@ -793,7 +808,7 @@ async function runFlipeet(
             console.error('Flipeet off-ramp: custody cNGN shortfall', {
               reference, needed: cngnMicro.toString(), available: available.toString(),
             })
-            await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
+            await moneyDb().rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
             await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
             const e: any = new Error(`Not enough settled cNGN to cover this withdrawal (have ${(Number(available) / 1e6).toFixed(2)}, need ${(Number(cngnMicro) / 1e6).toFixed(2)}). Your balance was refunded.`)
             e.onChainFail = true
@@ -841,7 +856,7 @@ async function runFlipeet(
         // gets refunded twice and inflates the balance.
         console.error('Flipeet off-ramp on-chain transfer failed:', sendErr)
         if (!(sendErr as any)?.alreadyRefunded) {
-          await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
+          await moneyDb().rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
         }
         await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
         const reason = sendErr instanceof Error ? ((sendErr as any).shortMessage || sendErr.message) : String(sendErr)
@@ -854,7 +869,7 @@ async function runFlipeet(
       // already debited before this call — refund, mark failed, and surface an error
       // instead of leaving the transaction pending forever with funds gone.
       console.error('Flipeet off-ramp: no deposit address in response', result)
-      await supabase.rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
+      await moneyDb().rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
       await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
       throw new Error('Off-ramp failed — no settlement address returned. Your balance was refunded.')
     }

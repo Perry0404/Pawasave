@@ -1,7 +1,19 @@
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 import { deriveDepositAddress, depositWalletConfigured } from '@/lib/deposit-wallet'
+
+/**
+ * Service-role client for set_deposit_address. Its only authorization is that auth.uid()
+ * matches p_user_id, so leaving it on the session means the grant to `authenticated` has
+ * to stay, and that grant lets a user set their own deposit address to anything.
+ */
+function serviceDb() {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!key) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required to persist a deposit address')
+  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key, { auth: { persistSession: false } })
+}
 
 /**
  * GET /api/wallet/deposit-address
@@ -36,7 +48,7 @@ export async function GET() {
   let address = wallet.deposit_address as string | null
   if (!address) {
     address = await deriveDepositAddress(Number(wallet.deposit_index))
-    await supabase.rpc('set_deposit_address', { p_user_id: user.id, p_address: address })
+    await serviceDb().rpc('set_deposit_address', { p_user_id: user.id, p_address: address })
   }
 
   return NextResponse.json({ address })

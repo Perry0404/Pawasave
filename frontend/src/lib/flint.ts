@@ -56,15 +56,35 @@ export async function initiateWithdrawal(
   accountNumber: string,
   transactionPin: string,
   holderName?: string,
+  bankName?: string,
 ): Promise<RampResult> {
   const res = await fetch('/api/ramp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: 'off', amount: amountNaira, bankCode, accountNumber, transactionPin, holderName }),
+    body: JSON.stringify({ type: 'off', amount: amountNaira, bankCode, bankName, accountNumber, transactionPin, holderName }),
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error || 'Withdrawal failed')
   return data
+}
+
+/**
+ * Name enquiry — resolve the account holder name for a bank + account number
+ * (like a normal Nigerian transfer). Returns the name, or null if it can't be
+ * resolved (unconfigured, wrong details, or provider down) so the caller can
+ * fall back to manual entry.
+ */
+export async function resolveAccount(bankCode: string, accountNumber: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `/api/ramp/resolve-account?bank=${encodeURIComponent(bankCode)}&account=${encodeURIComponent(accountNumber)}`,
+    )
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.accountName || null
+  } catch {
+    return null
+  }
 }
 
 export async function getBanks(): Promise<Bank[]> {

@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase'
 import type { User } from '@supabase/supabase-js'
 import type { Profile, Wallet, Transaction, SavingsLock, SavingsGoal, PlatformSetting, AdminFeeSummary, AdminUserStats, AdminTxVolume, PlatformFee } from '@/lib/types'
 
+import { siteBaseUrl } from '@/lib/site-url'
+
 const supabase = createClient()
 
 export async function hashValue(raw: string): Promise<string> {
@@ -21,17 +23,26 @@ export function useAuth() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user)
-      setLoading(false)
-    })
+    let cancelled = false
+
+    // getUser() can reject. gotrue serialises auth calls behind a single lock, and
+    // if the holder runs past 5s it steals the lock and the queued calls throw
+    // AbortError. Without the catch, loading never cleared and the page spun forever.
+    supabase.auth.getUser()
+      .then(({ data }) => { if (!cancelled) setUser(data.user) })
+      .catch(() => { if (!cancelled) setUser(null) })
+      .finally(() => { if (!cancelled) setLoading(false) })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) return
       setUser(session?.user ?? null)
       setLoading(false)
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      cancelled = true
+      subscription.unsubscribe()
+    }
   }, [])
 
   const signUp = async (email: string, password: string, displayName: string, transactionPinHash: string) => {
@@ -41,7 +52,7 @@ export function useAuth() {
       options: {
         // Confirmation link routes through our callback so the user lands
         // signed-in on the app (not the Supabase default Site URL).
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/`,
+        emailRedirectTo: `${siteBaseUrl()}/auth/callback?next=/`,
         data: {
           display_name: displayName,
           transaction_pin_hash: transactionPinHash,
@@ -58,28 +69,53 @@ export function useAuth() {
     return data
   }
 
+  // Google OAuth — same for sign-up and sign-in. Redirects to Google, then back to
+  // /auth/callback which exchanges the code for a session. A first-time Google user
+  // gets a profile + wallet from the on_auth_user_created trigger but NO transaction
+  // PIN, so the app forces a one-time PIN setup on first entry (see AppShell). Users
+  // who signed up with email + PIN already have one and are never prompted again.
+  const signInWithGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${siteBaseUrl()}/auth/callback?next=/`,
+        queryParams: { prompt: 'select_account' },
+      },
+    })
+    if (error) throw error
+  }
+
   const signOut = async () => {
     await supabase.auth.signOut()
   }
 
   const resetPassword = async (email: string) => {
+    // Land directly on /reset-password and exchange the PKCE code there, client-side,
+    // where the code_verifier reliably lives. Routing recovery through the server
+    // /auth/callback failed the exchange (verifier not available) and dumped users on
+    // the sign-in screen instead of the set-password form.
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+      redirectTo: `${siteBaseUrl()}/reset-password`,
     })
     if (error) throw error
   }
 
-  return { user, loading, signUp, signIn, signOut, resetPassword }
+  return { user, loading, signUp, signIn, signInWithGoogle, signOut, resetPassword }
 }
 
 export function useProfile() {
   const [profile, setProfile] = useState<Profile | null>(null)
 
   const refresh = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single()
-    if (data) setProfile(data)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+      if (data) setProfile(data)
+    } catch {
+      // Same stolen-lock rejection as useAuth. Leave profile null for the next
+      // refresh instead of throwing into an unhandled rejection.
+    }
   }, [])
 
   useEffect(() => { refresh() }, [refresh])
@@ -92,11 +128,18 @@ export function useWallet() {
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    const { data } = await supabase.from('wallets').select('*').eq('user_id', user.id).single()
-    if (data) setWallet(data)
-    setLoading(false)
+    // setLoading(false) must run on every path. It used to sit after an early
+    // return, so a signed-out user or a rejected getUser() left the view loading.
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data } = await supabase.from('wallets').select('*').eq('user_id', user.id).single()
+      if (data) setWallet(data)
+    } catch {
+      // Realtime and the next refresh will retry.
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { refresh() }, [refresh])
@@ -290,40 +333,16 @@ export async function lockSavings(usdcMicro: number, kobo: number, durationDays:
 }
 
 export async function withdrawLock(lockId: string, early: boolean = false) {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-
-  // If early withdrawal, record the forfeiture
-  if (early) {
-    // Fetch lock details to calculate forfeited interest
-    const { data: lock } = await supabase
-      .from('savings_locks')
-      .select('id, amount_usdc_micro, effective_rate_at_creation, created_at')
-      .eq('id', lockId)
-      .single()
-    
-    if (lock) {
-      const daysHeld = Math.floor((Date.now() - new Date(lock.created_at).getTime()) / 86400000)
-      const rate = lock.effective_rate_at_creation || 50
-      const forfeited = Math.floor((lock.amount_usdc_micro * rate * daysHeld) / (100 * 365))
-      
-      if (forfeited > 0) {
-        await supabase.rpc('record_lock_forfeiture', {
-          p_lock_id: lockId,
-          p_user_id: user.id,
-          p_forfeited_interest_usdc_micro: forfeited,
-        })
-      }
-    }
-  }
-
-  const { data: ok, error } = await supabase.rpc('withdraw_lock', {
-    p_user_id: user.id,
-    p_lock_id: lockId,
-    p_early: early,
+  // Server route, not an RPC. The forfeited interest on an early exit has to be worked out
+  // from the stored lock, and the withdrawal has to follow it in the same request, or a
+  // caller can simply skip the forfeiture and keep the interest.
+  const res = await fetch('/api/savings/forfeit-withdraw', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind: 'lock', lockId, early }),
   })
-  if (error) throw error
-  if (!ok) throw new Error('Lock not found or already withdrawn')
+  const out = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(out?.error || 'Could not withdraw this lock')
 }
 
 export async function getPlatformSettings(): Promise<PlatformSetting[]> {
@@ -340,32 +359,42 @@ export async function getMorphoApy(): Promise<number> {
   return data ? parseFloat(data.value) : 4.0
 }
 
-// ── Admin (uses service role via API) ──
-
-export async function getAdminFeeSummary(): Promise<AdminFeeSummary | null> {
-  const { data, error } = await supabase.rpc('admin_fee_summary')
-  if (error || !data || data.length === 0) return null
-  return data[0]
+export interface ApySettings {
+  flexible: number
+  xautoUser: number
+  mmUser: number
+  cngnPool: number
 }
 
-export async function getAdminUserStats(): Promise<AdminUserStats | null> {
-  const { data, error } = await supabase.rpc('admin_user_stats')
-  if (error || !data || data.length === 0) return null
-  return data[0]
+/**
+ * Canonical APYs from platform_settings via get_apy_settings() (V2-LOW-05 /
+ * V2-FE-02). One source of truth so the UI stops hardcoding (and disagreeing on)
+ * rates. Falls back to the historical defaults if a key is unset.
+ */
+export async function getApySettings(): Promise<ApySettings> {
+  const fallback: ApySettings = { flexible: 27, xautoUser: 27, mmUser: 27, cngnPool: 27 }
+  try {
+    const { data } = await supabase.rpc('get_apy_settings')
+    const s = (data || {}) as Record<string, string>
+    const n = (v: string | undefined, d: number) => {
+      const x = v != null ? parseFloat(v) : NaN
+      return Number.isFinite(x) ? x : d
+    }
+    return {
+      flexible: n(s.flexible_apy_percent, fallback.flexible),
+      xautoUser: n(s.xauto_user_apy_percent, fallback.xautoUser),
+      mmUser: n(s.mm_user_apy_percent, fallback.mmUser),
+      cngnPool: n(s.cngn_pool_apy_percent, fallback.cngnPool),
+    }
+  } catch {
+    return fallback
+  }
 }
 
-export async function getAdminTxVolume(): Promise<AdminTxVolume | null> {
-  const { data, error } = await supabase.rpc('admin_tx_volume')
-  if (error || !data || data.length === 0) return null
-  return data[0]
-}
-
-export async function getAdminRecentFees(limit = 50): Promise<PlatformFee[]> {
-  const { data, error } = await supabase.rpc('admin_recent_fees', { p_limit: limit })
-  if (error) return []
-  return data || []
-}
-
+// ── Admin ────────────────────────────────────────────────────────────────────
+// The fee summary, user stats, tx volume and recent fees helpers used to live here and
+// called their RPCs straight from the browser. They had no callers, and those functions
+// are now service-role only. /api/admin/dashboard is the way in.
 export async function isAdmin(): Promise<boolean> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user?.email) return false
@@ -379,15 +408,9 @@ export async function isAdmin(): Promise<boolean> {
   return emails.includes(user.email.toLowerCase())
 }
 
-export async function updateTransactionPin(userId: string, pin: string) {
-  if (!/^\d{4}$/.test(pin)) throw new Error('PIN must be exactly 4 digits')
-  const pinHash = await hashValue(pin)
-  const { error } = await supabase
-    .from('profiles')
-    .update({ transaction_pin_hash: pinHash, pin_set_at: new Date().toISOString() })
-    .eq('id', userId)
-  if (error) throw error
-}
+// updateTransactionPin was removed. It wrote profiles.transaction_pin_hash directly from
+// the browser, had no callers, and migration 045's trigger rejects that write anyway.
+// Use /api/security/pin, which hashes server-side under the service role.
 
 // ── Savings Goals ────────────────────────────────────────────────────────────
 
@@ -495,34 +518,15 @@ export async function completeSavingsGoal(goalId: string): Promise<number> {
 }
 
 export async function breakSavingsGoal(goalId: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-
-  // Fetch goal details to calculate forfeited interest
-  const { data: goal } = await supabase
-    .from('savings_goals')
-    .select('id, saved_usdc_micro, started_at')
-    .eq('id', goalId)
-    .single()
-  
-  if (goal) {
-    const daysHeld = Math.floor((Date.now() - new Date(goal.started_at).getTime()) / 86400000)
-    const forfeited = Math.floor((goal.saved_usdc_micro * 50 * daysHeld) / (100 * 365))
-    
-    if (forfeited > 0) {
-      await supabase.rpc('record_goal_forfeiture', {
-        p_goal_id: goalId,
-        p_user_id: user.id,
-        p_forfeited_interest_usdc_micro: forfeited,
-      })
-    }
-  }
-
-  const { error } = await supabase.rpc('break_savings_goal', {
-    p_goal_id: goalId,
-    p_user_id: user.id,
+  // Server route for the same reason as withdrawLock: the forfeiture is computed from the
+  // stored goal and applied before the goal is broken.
+  const res = await fetch('/api/savings/forfeit-withdraw', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind: 'goal', goalId }),
   })
-  if (error) throw error
+  const out = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(out?.error || 'Could not break this goal')
 }
 
 export async function setGoalAutoContribute(goalId: string, enabled: boolean): Promise<void> {
@@ -536,55 +540,22 @@ export async function setGoalAutoContribute(goalId: string, enabled: boolean): P
 // ── Proxy Transfers ──────────────────────────────────────────────────────────
 // Admin function: Transfer funds between master wallet and proxy member wallets
 
-export async function proxyTransfer(
-  proxyMemberId: string,
-  action: 'CREDIT' | 'DEBIT',
-  amountUsdcMicro: number,
-  description?: string,
-): Promise<any> {
-  const { data, error } = await supabase.rpc('proxy_transfer', {
-    p_proxy_member_id: proxyMemberId,
-    p_action: action,
-    p_amount_usdc_micro: amountUsdcMicro,
-    p_description: description,
-  })
-  if (error) throw error
-  return data
-}
 
-export async function getProxyTransfers(limit = 50): Promise<any[]> {
-  const { data, error } = await supabase.rpc('get_proxy_transfers', {
-    p_limit: limit,
-  })
-  if (error) throw error
-  return data || []
-}
 
 // Register proxy member ID for automatic deposit routing
 export async function registerProxyMember(
   proxyMemberId: string,
   provider = 'xend',
 ): Promise<any> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-
-  const { data, error } = await supabase.rpc('register_proxy_member', {
-    p_user_id: user.id,
-    p_proxy_member_id: proxyMemberId,
-    p_provider: provider,
+  // Server route. register_proxy_member takes p_user_id, and from the browser that was the
+  // caller's to choose, so the route supplies it from the session instead.
+  const res = await fetch('/api/proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'register', proxyMemberId, provider }),
   })
-  if (error) throw error
-  return data
+  const out = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(out?.error || 'Could not register proxy member')
+  return out.result
 }
 
-// Get proxy member ID for current user
-export async function getUserProxyMember(): Promise<string | null> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-
-  const { data, error } = await supabase.rpc('get_proxy_member_for_user', {
-    p_user_id: user.id,
-  })
-  if (error) return null
-  return data as string | null
-}

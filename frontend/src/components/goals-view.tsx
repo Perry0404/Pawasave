@@ -153,6 +153,74 @@ export default function GoalsView({ wallet, refresh }: Props) {
     }
   }
 
+  // Consent modal — defined once so it renders in EVERY view. It used to live only
+  // inside the list-view JSX, but "Create Goal" is clicked from the create view,
+  // which early-returns before that JSX ever mounts — so the modal never appeared
+  // and goal creation silently did nothing.
+  const consentModal = showGoalConsent && pendingGoalData ? (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 bg-white border-b border-slate-200 p-5">
+          <h2 className="text-lg font-bold text-slate-900">Confirm Savings Goal</h2>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+            <p className="text-sm font-semibold text-emerald-900 mb-2">Goal Terms</p>
+            <p className="text-xs text-emerald-800 leading-relaxed">
+              You are creating a goal to save <strong>{formatNaira(pendingGoalData.targetKobo)}</strong> contributing <strong>{formatNaira(pendingGoalData.contribKobo)}</strong> {FREQ_LABELS[pendingGoalData.frequency].toLowerCase()} at <strong>40%</strong> interest.
+            </p>
+          </div>
+
+          <div className="bg-slate-50 rounded-xl p-4 space-y-3">
+            <p className="text-sm font-semibold text-slate-900">Terms &amp; Conditions:</p>
+            <ul className="text-xs text-slate-600 space-y-2">
+              <li>✓ <strong>Your savings are locked until you reach your target amount.</strong></li>
+              <li>✓ Each contribution is automatically locked and earns 40% APY.</li>
+              <li>✓ If you break the goal before reaching the target, you forfeit <strong>ALL interest earned</strong>.</li>
+              <li>✓ The forfeited interest becomes PawaSave platform revenue.</li>
+              <li>✓ You will only receive your principal amount if you break early.</li>
+              <li>✓ Upon reaching your target, you receive principal + all accrued interest.</li>
+            </ul>
+          </div>
+
+          <div className="flex gap-2">
+            <input
+              type="checkbox"
+              checked={goalConsented}
+              onChange={(e) => setGoalConsented(e.target.checked)}
+              className="w-4 h-4 mt-1"
+            />
+            <p className="text-xs text-slate-600">
+              I understand that my savings are locked until I reach the target amount. I also understand that breaking the goal early forfeits all accrued interest.
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 border-t border-slate-200 p-5 flex gap-3">
+          <button
+            onClick={() => {
+              setShowGoalConsent(false)
+              setGoalConsented(false)
+              setPendingGoalData(null)
+            }}
+            className="flex-1 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={confirmCreateGoal}
+            disabled={!goalConsented || busy}
+            className="flex-1 py-2.5 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+            Create Goal &amp; Confirm
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null
+
   // ── CREATE FORM ────────────────────────────────────────────────────────────
   if (view === 'create') {
     const targetNaira = parseFloat(targetAmount) || 0
@@ -160,10 +228,14 @@ export default function GoalsView({ wallet, refresh }: Props) {
     const periodsToGoal = contribNaira > 0 ? Math.ceil(targetNaira / contribNaira) : null
 
     return (
+      <>
       <div className="px-4 pt-5 pb-8">
-        <button onClick={() => setView('list')} className="flex items-center gap-1.5 text-slate-500 text-sm mb-5">
+        <button onClick={() => setView('list')} className="flex items-center gap-1.5 text-slate-200 hover:text-white text-sm mb-5">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
+        {/* White card — the page background is a dark gradient, so form labels
+            (slate-600/500/400) are invisible directly on it. Keep them on white. */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-5">
         <h2 className="text-xl font-bold text-slate-900 mb-1">New Savings Goal</h2>
         <p className="text-sm text-slate-500 mb-6">
           Your money is locked until you hit the target — earning 40% APY the whole way.
@@ -273,7 +345,10 @@ export default function GoalsView({ wallet, refresh }: Props) {
             Create Goal
           </button>
         </div>
+        </div>
       </div>
+      {consentModal}
+      </>
     )
   }
 
@@ -286,7 +361,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
 
     return (
       <div className="px-4 pt-5 pb-8">
-        <button onClick={() => { setView('list'); setSelected(null) }} className="flex items-center gap-1.5 text-slate-500 text-sm mb-5">
+        <button onClick={() => { setView('list'); setSelected(null) }} className="flex items-center gap-1.5 text-slate-200 hover:text-white text-sm mb-5">
           <ArrowLeft className="w-4 h-4" /> All Goals
         </button>
 
@@ -443,8 +518,8 @@ export default function GoalsView({ wallet, refresh }: Props) {
     <div className="px-4 pt-5 pb-8">
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Savings Goals</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Lock money, earn 40% APY, unlock at target</p>
+          <h2 className="text-xl font-bold text-white">Savings Goals</h2>
+          <p className="text-xs text-slate-300 mt-0.5">Lock money, earn 40% APY, unlock at target</p>
         </div>
         <button
           onClick={() => setView('create')}
@@ -467,8 +542,8 @@ export default function GoalsView({ wallet, refresh }: Props) {
           <div className="w-16 h-16 bg-emerald-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Target className="w-8 h-8 text-emerald-600" />
           </div>
-          <p className="font-bold text-slate-800 text-lg mb-1">No goals yet</p>
-          <p className="text-sm text-slate-500 mb-6 max-w-xs mx-auto">
+          <p className="font-bold text-white text-lg mb-1">No goals yet</p>
+          <p className="text-sm text-slate-300 mb-6 max-w-xs mx-auto">
             Set a target, contribute regularly, and watch your savings grow with 40% APY interest.
           </p>
           <button
@@ -525,7 +600,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
 
           {doneGoals.length > 0 && (
             <>
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider pt-2 pb-1">
+              <p className="text-xs font-semibold text-slate-300 uppercase tracking-wider pt-2 pb-1">
                 Completed / Broken
               </p>
               {doneGoals.map(goal => (
@@ -554,69 +629,7 @@ export default function GoalsView({ wallet, refresh }: Props) {
         </div>
       )}
 
-      {/* Goal Consent Modal */}
-      {showGoalConsent && pendingGoalData && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-slate-200 p-5">
-              <h2 className="text-lg font-bold text-slate-900">Confirm Savings Goal</h2>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                <p className="text-sm font-semibold text-emerald-900 mb-2">Goal Terms</p>
-                <p className="text-xs text-emerald-800 leading-relaxed">
-                  You are creating a goal to save <strong>{formatNaira(pendingGoalData.targetKobo)}</strong> contributing <strong>{formatNaira(pendingGoalData.contribKobo)}</strong> {FREQ_LABELS[pendingGoalData.frequency].toLowerCase()} at <strong>40%</strong> interest.
-                </p>
-              </div>
-
-              <div className="bg-slate-50 rounded-xl p-4 space-y-3">
-                <p className="text-sm font-semibold text-slate-900">Terms & Conditions:</p>
-                <ul className="text-xs text-slate-600 space-y-2">
-                  <li>✓ <strong>Your savings are locked until you reach your target amount.</strong></li>
-                  <li>✓ Each contribution is automatically locked and earns 40% APY.</li>
-                  <li>✓ If you break the goal before reaching the target, you forfeit <strong>ALL interest earned</strong>.</li>
-                  <li>✓ The forfeited interest becomes PawaSave platform revenue.</li>
-                  <li>✓ You will only receive your principal amount if you break early.</li>
-                  <li>✓ Upon reaching your target, you receive principal + all accrued interest.</li>
-                </ul>
-              </div>
-
-              <div className="flex gap-2">
-                <input
-                  type="checkbox"
-                  checked={goalConsented}
-                  onChange={(e) => setGoalConsented(e.target.checked)}
-                  className="w-4 h-4 mt-1"
-                />
-                <p className="text-xs text-slate-600">
-                  I understand that my savings are locked until I reach the target amount. I also understand that breaking the goal early forfeits all accrued interest.
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 border-t border-slate-200 p-5 flex gap-3">
-              <button
-                onClick={() => {
-                  setShowGoalConsent(false)
-                  setGoalConsented(false)
-                  setPendingGoalData(null)
-                }}
-                className="flex-1 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmCreateGoal}
-                disabled={!goalConsented}
-                className="flex-1 py-2.5 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition disabled:opacity-50"
-              >
-                Create Goal & Confirm
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {consentModal}
     </div>
   )
 }

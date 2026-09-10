@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
-import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
+import { ngnToCngnMicro, koboToCngnMicro } from '@/lib/ramp-rate'
+
+// Deposit path is DB-only now (deposits stay as spendable custody cNGN — no
+// on-chain PawasaveLend supply until a real yield source is live). maxDuration
+// kept generous for headroom.
+export const maxDuration = 60
 
 const WEBHOOK_SECRET = process.env.FLINT_WEBHOOK_SECRET || ''
 
@@ -50,7 +55,15 @@ export async function POST(request: NextRequest) {
 
   const { event, data } = body
 
-  if (!data?.reference) {
+  // Log the raw verified payload so the real field names are confirmable in logs.
+  console.info('[flint-webhook] payload:', JSON.stringify(body))
+
+  // Flint's "credit reference" is its own transactionId (trx_…) — it does NOT echo
+  // the reference we send. So reconcile against ALL candidate identifiers, matched
+  // against both our `reference` column and the provider id we stored (paychant_tx_id).
+  const candidates = [data?.reference, data?.transactionId, data?.id, data?.transaction_id]
+    .filter((v): v is string => typeof v === 'string' && v.length > 0)
+  if (candidates.length === 0) {
     return NextResponse.json({ error: 'Missing reference' }, { status: 400 })
   }
 
@@ -65,21 +78,22 @@ export async function POST(request: NextRequest) {
     { auth: { persistSession: false } },
   )
 
-  // Find the pending transaction
-  const { data: tx, error: txErr } = await supabase
-    .from('transactions')
-    .select('*')
-    .eq('reference', data.reference)
-    .eq('status', 'pending')
-    .single()
+  // Find the pending transaction by any candidate ref, on either column.
+  const findTx = async (status?: 'pending') => {
+    for (const col of ['reference', 'paychant_tx_id'] as const) {
+      let q = supabase.from('transactions').select('*').in(col, candidates)
+      if (status) q = q.eq('status', status)
+      const { data: rows } = await q.limit(1)
+      if (rows && rows.length) return rows[0]
+    }
+    return null
+  }
 
-  if (txErr || !tx) {
-    // Already processed — return 200 so the provider stops retrying
-    const { data: existingTx } = await supabase
-      .from('transactions')
-      .select('status')
-      .eq('reference', data.reference)
-      .single()
+  const tx = await findTx('pending')
+
+  if (!tx) {
+    // Already processed (any status) — return 200 so the provider stops retrying
+    const existingTx = await findTx()
     if (existingTx) return NextResponse.json({ ok: true, already_processed: true })
     return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
   }
@@ -95,34 +109,48 @@ export async function POST(request: NextRequest) {
       .eq('id', tx.id)
 
     if (tx.type === 'deposit') {
-      // On-ramp completed: credit user USDC minus platform fee
+      // On-ramp completed. Flint delivered cNGN to custody, so credit the naira
+      // value as cNGN micro 1:1 (no USD rate) — matching the Flipeet path and the
+      // rest of the cNGN-end-to-end app. (*_usdc_micro params are legacy names.)
       const amountNaira = Number(data.processedAmount || data.amount || tx.amount_kobo / 100)
-      const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
-      const grossUsdcMicro = Math.floor((amountNaira / rate) * 1_000_000)
-
-      // Deduct platform fee (stored on transaction as kobo, convert to micro-USDC)
       const feeKobo = Number(tx.platform_fee_kobo || 0)
-      const feeUsdcMicro = feeKobo > 0 ? Math.floor((feeKobo / 100 / rate) * 1_000_000) : 0
-      const userUsdcMicro = Math.max(0, grossUsdcMicro - feeUsdcMicro)
+      const userNaira = Math.max(0, amountNaira - feeKobo / 100)
+
+      const cngnMicro = Number(await ngnToCngnMicro(userNaira)) // ≈ userNaira * 1e6 (cNGN peg)
 
       await supabase.rpc('credit_wallet', {
         p_user_id: tx.user_id,
         p_naira_kobo: 0,
-        p_usdc_micro: userUsdcMicro,
+        p_usdc_micro: cngnMicro,
       })
 
-      // Update the transaction with net USDC amount
       await supabase
         .from('transactions')
-        .update({ amount_usdc_micro: userUsdcMicro })
+        .update({ amount_usdc_micro: cngnMicro })
         .eq('id', tx.id)
 
-      // Allocate 90% of deposited USDC into the cNGN yield pool (earns 27% APY via P-AUTO)
-      // This is the correct call — save_to_vault moves naira→usdc and is NOT for this purpose
-      await supabase.rpc('allocate_cngn_pool', {
-        p_user_id: tx.user_id,
-        p_usdc_micro: userUsdcMicro,
-      })
+      // Deposits land 100% spendable in custody (like crypto deposits): no 90%
+      // pool auto-allocation and no PawasaveLend supply until a real yield source
+      // exists. The pool earns 0 without borrowers, and auto-supply added the
+      // share-accounting that broke off-ramps. Withdrawals settle from raw custody
+      // cNGN. Re-enable ONE unified supply for all flexible balances when yield is real.
+
+      // Book the platform fee on ACTUAL completion so revenue reflects paid
+      // deposits only (the on-ramp initialise no longer records it). Idempotent:
+      // a retry finds the tx already non-pending and never reaches here again.
+      if (feeKobo > 0) {
+        await supabase.rpc('record_platform_fee', {
+          p_user_id: tx.user_id,
+          p_reference: tx.reference,
+          p_fee_type: 'ramp_onramp',
+          p_gross_kobo: Math.round(amountNaira * 100),
+          p_fee_kobo: feeKobo,
+          p_fee_percent: amountNaira > 0 ? Math.round((feeKobo / amountNaira) * 100) / 100 : 0,
+        })
+      }
+
+      // (PawasaveLend supply intentionally removed — see note above. Deposits stay
+      // as spendable custody cNGN; re-enable a unified supply when yield is real.)
     }
     // For withdrawal: balance was already debited upfront, nothing more needed
   } else if (isFailed) {
@@ -132,13 +160,12 @@ export async function POST(request: NextRequest) {
       .eq('id', tx.id)
 
     if (tx.type === 'withdrawal') {
-      // Refund the debited USDC
-      const rate = await getNgnUsdRateFromFlint(process.env.FLINT_API_KEY)
-      const usdcMicro = Math.floor((tx.amount_kobo / 100 / rate) * 1_000_000)
+      // Refund the debited balance as cNGN micro 1:1 (no USD rate).
+      const cngnMicro = koboToCngnMicro(Number(tx.amount_kobo))
       await supabase.rpc('credit_wallet', {
         p_user_id: tx.user_id,
         p_naira_kobo: 0,
-        p_usdc_micro: usdcMicro,
+        p_usdc_micro: cngnMicro,
       })
     }
   }

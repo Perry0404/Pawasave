@@ -1,7 +1,7 @@
 ﻿'use client'
 
 import { useState } from 'react'
-import { formatNaira, formatCngn, timeAgo } from '@/lib/format'
+import { formatNaira, formatCngn, timeAgo, cleanDescription } from '@/lib/format'
 import { ArrowDownLeft, ArrowUpRight, Shield, RefreshCw, Users, AlertTriangle, X, Copy, Check, FileText, Target } from 'lucide-react'
 import type { Transaction, Wallet, Profile } from '@/lib/types'
 
@@ -49,7 +49,7 @@ function generateStatement(transactions: Transaction[], wallet: Wallet | null | 
       <tr>
         <td>${formatDate(tx.created_at)}</td>
         <td>${txLabels[tx.type] || tx.type}</td>
-        <td>${tx.description || '-'}</td>
+        <td>${cleanDescription(tx.description) || '-'}</td>
         <td style="color:${isCredit ? '#16a34a' : '#dc2626'};font-weight:600;text-align:right">${isCredit ? '+' : '-'}${naira(tx.amount_kobo)}</td>
         <td style="text-align:right">${tx.amount_usdc_micro ? usdc(tx.amount_usdc_micro) : '-'}</td>
         <td style="text-align:center"><span class="badge badge-${tx.status}">${tx.status}</span></td>
@@ -275,7 +275,7 @@ function TransactionModal({ tx, onClose }: { tx: Transaction; onClose: () => voi
         {/* Details */}
         <div className="bg-slate-50 rounded-xl px-4 py-1">
           <DetailRow label="Date & Time" value={fullDate} />
-          {tx.description && <DetailRow label="Description" value={tx.description} />}
+          {cleanDescription(tx.description) && <DetailRow label="Description" value={cleanDescription(tx.description)} />}
           {tx.reference && (
             <DetailRow label="PawaSave Ref" value={tx.reference} mono copyable />
           )}

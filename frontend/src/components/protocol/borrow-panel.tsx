@@ -4,6 +4,7 @@ import { ArrowDownCircle, Loader2, Info, ChevronDown } from "lucide-react"
 import type { PoolStats, UserPosition, CollateralEntry } from "@/hooks/use-lend-pool"
 import { COLLATERAL_TOKENS } from "@/lib/contracts"
 import { fmtCngn, fmtUnits, fmtToken, fmtPct, parseUnits } from "@/lib/format"
+import { BridgeCollateral } from "./bridge-collateral"
 
 interface Props {
   stats:    PoolStats | null
@@ -17,7 +18,7 @@ interface Props {
   onBorrow: (amount: bigint, tenorDays: number) => Promise<void>
 }
 
-const TENORS = [30, 90, 180] as const
+const TENORS = [30, 90, 180, 365] as const
 
 /** A row for the selector: every known collateral, enriched with live data. */
 type DisplayToken = CollateralEntry & { live: boolean }
@@ -134,6 +135,11 @@ export function BorrowPanel({ stats, position, collateralStatus, connected, txPe
               </button>
             ))}
           </div>
+
+          {/* Cross-chain helper: only meaningful for the USDC collateral path. */}
+          {token?.key === "usdc" && (
+            <BridgeCollateral direction={action === "withdraw" ? "out" : "in"} />
+          )}
 
           <div className="bg-gray-800/50 rounded-xl p-3 mb-4 text-sm text-gray-400 space-y-1">
             <div className="flex justify-between">

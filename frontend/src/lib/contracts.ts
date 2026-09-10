@@ -13,7 +13,7 @@ export const CONTRACTS = {
   /** PawasaveAutoVault — P-AUTO fixed savings vault (Base mainnet) */
   PAUTO_VAULT: (
     process.env.NEXT_PUBLIC_PAUTO_VAULT_ADDRESS ||
-    "0x000B9C8d90B211DB22cbD99c18cA9C41E814b9E2"
+    "0xcBA4ED7CfaE2CCa6f0940bAf6fD5cD8d91b3c37b" // v3
   ) as `0x${string}`,
 
   /** cNGN stablecoin on Base (6 decimals) */
@@ -26,11 +26,16 @@ export const CONTRACTS = {
   USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as `0x${string}`,
 } as const
 
-/** Minimal ERC-20 ABI for approvals and balance checks */
+/** Minimal ERC-20 ABI for approvals, balance checks, and transfers */
 export const ERC20_ABI = [
   "function approve(address spender, uint256 amount) external returns (bool)",
   "function allowance(address owner, address spender) external view returns (uint256)",
   "function balanceOf(address account) external view returns (uint256)",
+  // transfer/transferFrom are REQUIRED for custody off-ramp sends. Their absence
+  // is why sendCngn() threw "transfer is not a function" and stranded withdrawals
+  // in custody — the redeem succeeded but the send to the provider could not run.
+  "function transfer(address to, uint256 amount) external returns (bool)",
+  "function transferFrom(address from, address to, uint256 amount) external returns (bool)",
   "function decimals() external view returns (uint8)",
   "function symbol() external view returns (string)",
 ] as const
@@ -42,11 +47,11 @@ export const USDT_ADDRESS =
 
 /** ADDRESSES alias for protocol components (same values as CONTRACTS) */
 export const ADDRESSES = {
-  LEND:   (process.env.NEXT_PUBLIC_LEND_ADDRESS || "0x14c524Eb4b77c706D1eb786603F9885377442B93") as `0x${string}`,
+  LEND:   (process.env.NEXT_PUBLIC_LEND_ADDRESS || "0x5583802FB2215d550f80DC42CD44C40E0EF8B7cF") as `0x${string}`, // v3
   CNGN:   CONTRACTS.CNGN,
   USDC:   CONTRACTS.USDC,
   USDT:   USDT_ADDRESS,
-  ORACLE: (process.env.NEXT_PUBLIC_ORACLE_ADDRESS || "0x58a16675C1E898a73c9D3B975b0deEE680B73BdF") as `0x${string}`,
+  ORACLE: (process.env.NEXT_PUBLIC_ORACLE_ADDRESS || "0x6385B4026F6A705696843b4022129555114A183c") as `0x${string}`, // v3
 }
 
 /**

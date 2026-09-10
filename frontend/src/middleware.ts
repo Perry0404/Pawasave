@@ -65,60 +65,30 @@ if (typeof globalThis !== 'undefined') {
   }, 60_000)
 }
 
+// Runs on /api/* ONLY (see matcher). Security headers moved to next.config `headers()`
+// so they apply to every route without a per-request middleware invocation — the
+// matcher below keeps middleware off pages/assets, which is the main cost saver.
 export async function middleware(request: NextRequest) {
-  const response = NextResponse.next()
-
-  // Security headers
-  response.headers.set('X-Frame-Options', 'DENY')
-  response.headers.set('X-Content-Type-Options', 'nosniff')
-  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
-  response.headers.set('X-XSS-Protection', '1; mode=block')
-  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
-  response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
-
-  // Content-Security-Policy (FIND-INFRA-02). Pragmatic policy that hardens the app
-  // without breaking Next.js hydration, Tailwind inline styles, Supabase (https +
-  // realtime wss), the Base RPCs, and the external "Featured on Orynth" badge.
-  // script-src keeps 'unsafe-inline'/'unsafe-eval' because App Router hydration
-  // and dev mode require them without per-request nonces.
-  response.headers.set(
-    'Content-Security-Policy',
-    [
-      "default-src 'self'",
-      "base-uri 'self'",
-      "object-src 'none'",
-      "frame-ancestors 'none'",
-      "form-action 'self'",
-      "img-src 'self' data: https:",
-      "font-src 'self' data:",
-      "style-src 'self' 'unsafe-inline'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "connect-src 'self' https: wss:",
-    ].join('; '),
-  )
-
   // Rate limit API routes
-  if (request.nextUrl.pathname.startsWith('/api/')) {
-    const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-      || request.headers.get('x-real-ip')
-      || 'unknown'
-    const { max, bucket } = limitFor(request.nextUrl.pathname)
-    const key = `rl:${bucket}:${ip}`
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    || request.headers.get('x-real-ip')
+    || 'unknown'
+  const { max, bucket } = limitFor(request.nextUrl.pathname)
+  const key = `rl:${bucket}:${ip}`
 
-    const count = await upstashIncr(key)
-    const allowed = count === null ? checkRateLimitMemory(key, max) : count <= max
+  const count = await upstashIncr(key)
+  const allowed = count === null ? checkRateLimitMemory(key, max) : count <= max
 
-    if (!allowed) {
-      return NextResponse.json(
-        { error: 'Too many requests. Please try again later.' },
-        { status: 429 },
-      )
-    }
+  if (!allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      { status: 429 },
+    )
   }
 
-  return response
+  return NextResponse.next()
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  matcher: ['/api/:path*'],
 }

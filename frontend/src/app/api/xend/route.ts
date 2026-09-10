@@ -8,6 +8,14 @@ import {
   validatePosInvoice,
   processPosInvoice,
 } from '@/lib/xend'
+import { createClient } from '@supabase/supabase-js'
+
+/** Service-role client for the balance-moving RPCs, which must not run on the session. */
+function serviceDb() {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!key) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required to move balances')
+  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key, { auth: { persistSession: false } })
+}
 
 async function getSupabaseUser() {
   const cookieStore = await cookies()
@@ -158,8 +166,10 @@ export async function POST(request: NextRequest) {
           description: 'PawaSave yield pool withdrawal',
         })
 
-        // Credit user's local vault from pool
-        await supabase.rpc('withdraw_cngn_pool', {
+        // Credit user's local vault from pool. Service role, not the caller's session:
+        // withdraw_cngn_pool only checks auth.uid() against p_user_id, so a session grant
+        // would let a user move their own pool balance directly from the browser.
+        await serviceDb().rpc('withdraw_cngn_pool', {
           p_user_id: user.id,
           p_usdc_micro: withdrawMicro,
         })

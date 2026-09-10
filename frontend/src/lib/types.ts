@@ -6,6 +6,10 @@ export interface Profile {
   kyc_type: 'bvn' | 'nin' | null
   kyc_submitted_at: string | null
   kyc_verified_at: string | null
+  // Strails BVN onboarding = the basic identity verification (it's required to get a NUBAN).
+  // A completed onboarding means BVN-verified — enough to invest; Sense only lifts caps.
+  strails_onboard_status: string | null
+  strails_va_account_number: string | null
   xend_member_id: string | null
   transaction_pin_hash: string | null
   pin_set_at: string | null
@@ -51,6 +55,9 @@ export interface Transaction {
   platform_fee_kobo: number | null
   status: 'pending' | 'completed' | 'failed'
   created_at: string
+  /** Structured who/where details (migration 055): withdrawals store bank_name /
+   *  account_name / account_number; Strails deposits store sender_name / sender_account. */
+  metadata?: Record<string, any> | null
 }
 
 export interface SplitRule {
@@ -155,6 +162,8 @@ export interface AdminFeeSummary {
   total_onramp_fees: number
   total_offramp_fees: number
   total_penalty_fees: number
+  total_loan_fees: number
+  total_investment_fees: number
   fee_count: number
   today_fees_kobo: number
   this_month_fees_kobo: number
@@ -193,6 +202,9 @@ export interface AdminTxVolume {
   total_deposits_kobo: number
   total_withdrawals_kobo: number
   total_vault_saves_kobo: number
+  total_loans_disbursed_kobo: number
+  total_loans_repaid_kobo: number
+  total_investments_kobo: number
   total_tx_count: number
   pending_count: number
 }

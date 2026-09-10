@@ -1,0 +1,14 @@
+{
+  "name": "strails-relay",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fixed-IP relay between PawaSave and the Strails API",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

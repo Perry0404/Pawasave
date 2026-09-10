@@ -31,10 +31,13 @@ export default function WhitepaperPage() {
         <section>
           <h2 className="text-2xl font-bold text-emerald-400 mb-4">Abstract</h2>
           <p className="text-slate-300 leading-relaxed mb-3">
-            PawaSave Protocol is the first on-chain lending and borrowing market for cNGN (Compliant Naira), the Central Bank of Nigeria-compliant stablecoin deployed on Base L2. The protocol enables cNGN holders to supply liquidity and earn yield from borrower interest, while Nigerian individuals and businesses can borrow cNGN against collateral (USDC and cNGN itself) without selling their assets.
+            PawaSave Protocol is an on-chain lending market for cNGN (Compliant Naira), the Central Bank of Nigeria-compliant stablecoin deployed on Base L2. By design it enables cNGN holders to supply liquidity and earn yield from borrower interest, while Nigerian individuals and businesses can borrow cNGN against collateral without selling their assets. See <span className="text-emerald-400">Current Status</span> below for which components are live today.
+          </p>
+          <p className="text-slate-300 leading-relaxed mb-3">
+            Built on Base L2 (Coinbase's Ethereum L2), PawaSave Protocol addresses the absence of native DeFi infrastructure for Nigeria's on-chain naira. All contracts are open-source and deployed at deterministic addresses on Base mainnet.
           </p>
           <p className="text-slate-300 leading-relaxed">
-            Built on Base L2 (Coinbase's Ethereum L2), PawaSave Protocol addresses the absence of native DeFi infrastructure for Nigeria's on-chain naira. All contracts are open-source and deployed at deterministic addresses on Base mainnet.
+            <span className="text-emerald-400 font-semibold">Current status (September 2026):</span> the PawasaveLend pool operates as a custodial holding layer for PawaSave balances. Open pool borrowing is currently disabled, and pool supply yield from borrower interest is therefore not active. Consumer borrowing is provided instead through PawaSave&apos;s asset-backed lending product (cNGN loans against a user&apos;s own savings locks and eligible held assets), and savings yield is being routed to licensed money-market partners. This paper describes the protocol&apos;s full design; features are enabled progressively.
           </p>
         </section>
 

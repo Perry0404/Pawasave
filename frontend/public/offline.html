@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>PawaSave — Offline</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin:0; min-height:100dvh; display:grid; place-items:center; text-align:center;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background:#F2F5F1; color:#131A15; padding:24px; }
+  @media (prefers-color-scheme: dark){ body{ background:#0D1411; color:#EAF0EC; } }
+  .dot{ width:54px;height:54px;border-radius:50%;border:3px solid #0A6B42;margin:0 auto 18px;position:relative }
+  .dot::after{content:"";position:absolute;width:14px;height:14px;border-radius:50%;background:#0A6B42;top:-3px;left:50%;transform:translateX(-50%)}
+  h1{ font-size:19px; margin:0 0 6px }
+  p{ font-size:14px; opacity:.7; margin:0 0 20px; max-width:32ch }
+  button{ font:inherit; font-size:14px; font-weight:600; color:#fff; background:#0A6B42; border:0; border-radius:12px; padding:12px 22px; cursor:pointer }
+</style>
+</head>
+<body>
+  <div>
+    <div class="dot"></div>
+    <h1>You’re offline</h1>
+    <p>PawaSave needs a connection to show your balance and move money safely. Reconnect and try again.</p>
+    <button onclick="location.reload()">Retry</button>
+  </div>
+</body>
+</html>

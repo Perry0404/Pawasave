@@ -3,11 +3,12 @@ import { createClient } from '@supabase/supabase-js'
 import { ethers } from 'ethers'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { getSecret } from '@/lib/secrets'
+import { getBaseProvider } from '@/lib/rpc-provider'
 
 /**
  * GET /api/cron/harvest-vault
  *
- * Called every 6 hours by Vercel Cron.
+ * Called daily at 02:00 UTC by the host crontab.
  * Calls harvestYield() on the P-AUTO vault contract, collects the 6%
  * platform fee into the treasury, and records the yield event in Supabase
  * so the accrue-yield cron can distribute it to users proportionally.
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const provider  = new ethers.JsonRpcProvider(rpcUrl)
+    const provider  = getBaseProvider()
     const harvester = new ethers.Wallet(privateKey, provider)
     const vault     = new ethers.Contract(vaultAddr, VAULT_ABI, harvester)
 

@@ -27,8 +27,15 @@ contract PawasaveLendStrategy is IStrategy, Ownable {
     address public vault;
     uint256 public principal; // cNGN principal supplied (excludes accrued yield)
 
+    // V2-SC-02/04: pause stops NEW deposits into the underlying lend pool (e.g.
+    // if the pool is suspected compromised or being wound down) while leaving
+    // withdraw()/harvest() open so the vault can always pull funds back out and
+    // migrate to a replacement strategy via its own timelock.
+    bool public paused;
+
     event VaultSet(address vault);
     event Harvested(uint256 yield);
+    event PausedSet(bool paused);
 
     constructor(address _cngn, address _lend) Ownable() {
         require(_cngn != address(0) && _lend != address(0), "Zero address");
@@ -53,7 +60,14 @@ contract PawasaveLendStrategy is IStrategy, Ownable {
         return address(cngn);
     }
 
+    /// @notice Pause/unpause new deposits (owner). Withdraw/harvest stay open.
+    function setPaused(bool _paused) external onlyOwner {
+        paused = _paused;
+        emit PausedSet(_paused);
+    }
+
     function deposit(uint256 assets) external onlyVault {
+        require(!paused, "Strategy paused");
         require(assets > 0, "Zero");
         cngn.safeTransferFrom(msg.sender, address(this), assets);
         cngn.forceApprove(address(lend), assets);

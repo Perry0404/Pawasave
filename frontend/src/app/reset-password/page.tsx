@@ -40,11 +40,49 @@ export default function ResetPasswordPage() {
       }
     })
 
-    // Also check for session already set by callback route (PKCE / token_hash flow)
-    supabase.auth.getSession().then(({ data }) => {
+    const init = async () => {
+      const params = new URLSearchParams(window.location.search)
+
+      // PREFERRED — token-hash (OTP) flow: the link lands here with
+      // ?token_hash=...&type=recovery. verifyOtp is self-contained (no per-browser
+      // code_verifier needed), so it works even when the email is opened in the
+      // Gmail in-app browser or on a different device than the one that requested it.
+      const token_hash = params.get('token_hash')
+      const type = params.get('type')
+      if (token_hash && type) {
+        const { data, error } = await supabase.auth.verifyOtp({
+          type: type as 'recovery',
+          token_hash,
+        })
+        if (!error && data.session) {
+          setSessionReady(true)
+          setCheckingSession(false)
+          window.history.replaceState({}, '', '/reset-password')
+          return
+        }
+        if (error) setLinkError(error.message)
+      }
+
+      // FALLBACK — PKCE flow: link lands with ?code=... Only works in the same
+      // browser that requested the reset (code_verifier lives here).
+      const code = params.get('code')
+      if (code) {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+        if (!error && data.session) {
+          setSessionReady(true)
+          setCheckingSession(false)
+          window.history.replaceState({}, '', '/reset-password')
+          return
+        }
+      }
+
+      // FALLBACK — session already established (hash flow via detectSessionInUrl,
+      // or an already-exchanged code).
+      const { data } = await supabase.auth.getSession()
       if (data.session) setSessionReady(true)
       setCheckingSession(false)
-    })
+    }
+    init()
 
     return () => subscription.unsubscribe()
   // eslint-disable-next-line react-hooks/exhaustive-deps

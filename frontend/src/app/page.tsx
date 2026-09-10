@@ -8,20 +8,21 @@ import AppShell from '@/components/app-shell'
 import Logo from '@/components/logo'
 import { Loader2 } from 'lucide-react'
 
-/** Reads ?join=groupId and redirects after auth. Must be inside <Suspense>. */
+/**
+ * Reads ?join=groupId and redirects. Must be inside <Suspense>.
+ * Only rendered once Page has a signed-in user, so it does not call useAuth itself.
+ * Every extra useAuth means another getUser() competing for the same gotrue lock.
+ */
 function JoinRedirectHandler() {
-  const { user, loading } = useAuth()
   const router = useRouter()
   const searchParams = useSearchParams()
 
   useEffect(() => {
-    if (user && !loading) {
-      const joinId = searchParams.get('join')
-      if (joinId) {
-        router.replace(`/join/${joinId}`)
-      }
+    const joinId = searchParams.get('join')
+    if (joinId) {
+      router.replace(`/join/${joinId}`)
     }
-  }, [user, loading, searchParams, router])
+  }, [searchParams, router])
 
   return null
 }

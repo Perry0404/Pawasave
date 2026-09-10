@@ -50,4 +50,10 @@ contract MockStrategy is IStrategy {
         token.safeTransferFrom(msg.sender, address(this), amount);
         pendingYield += amount;
     }
+
+    /// @dev test helper — simulate strategy losing/locking funds so withdraw()
+    /// returns less than requested (used to exercise V2-MED-01 shortfall guard).
+    function drain(address to) external {
+        token.safeTransfer(to, token.balanceOf(address(this)));
+    }
 }

@@ -11,14 +11,25 @@
  *
  * NEVER import this into a client component — it reads the master seed.
  */
-import { HDNodeWallet, JsonRpcProvider } from "ethers"
+import { HDNodeWallet, type Provider } from "ethers"
 import { getSecret } from "./secrets"
 
 let cachedMnemonic: string | null = null
 
 async function mnemonic(): Promise<string> {
   if (cachedMnemonic !== null) return cachedMnemonic
-  cachedMnemonic = (await getSecret("DEPOSIT_WALLET_MNEMONIC")) || ""
+  // Resolve via getSecret (AWS Secrets Manager bundle first, then process.env),
+  // accepting either name. DEPOSIT_WALLET_MNEMONIC is canonical, but the live
+  // value is stored in Vercel under DEPOSIT_MNEMONIC_KEY — a "Sensitive" var whose
+  // value is write-only (it can't be revealed or copied to a new name), yet is
+  // still injected into the runtime env. Reading it by its real name is the only
+  // fix that requires no plaintext handling. (Without this, getSecret returned
+  // undefined → depositWalletConfigured() was false → /wallet/deposit-address 503'd
+  // → the deposit address spun on "generating…" forever.)
+  cachedMnemonic =
+    (await getSecret("DEPOSIT_WALLET_MNEMONIC")) ||
+    (await getSecret("DEPOSIT_MNEMONIC_KEY")) ||
+    ""
   return cachedMnemonic
 }
 
@@ -43,7 +54,7 @@ export async function deriveDepositAddress(index: number): Promise<string> {
 }
 
 /** Derive a signer for a deposit address (for sweeping to custody). */
-export async function deriveDepositSigner(index: number, provider: JsonRpcProvider) {
+export async function deriveDepositSigner(index: number, provider: Provider) {
   const m = await mnemonic()
   if (!isConfigured(m)) throw new Error("DEPOSIT_WALLET_MNEMONIC not configured")
   return HDNodeWallet.fromPhrase(m, undefined, pathFor(index)).connect(provider)

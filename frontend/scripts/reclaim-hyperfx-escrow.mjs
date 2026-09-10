@@ -1,0 +1,217 @@
+/**
+ * Reclaims inputs from HyperFX intent orders that escrowed and never filled.
+ *
+ * Cancellation needs the exact Order struct and we never persisted it, so each order is
+ * decoded back out of its own placeOrder calldata. Dry run by default: it decodes, checks
+ * the order is past its deadline, and quotes the cancel. Pass --execute to actually cancel.
+ *
+ *   node scripts/reclaim-hyperfx-escrow.mjs                      # open rows in custody_divergence
+ *   node scripts/reclaim-hyperfx-escrow.mjs 0xplaceOrderTxHash   # a specific order
+ *   node scripts/reclaim-hyperfx-escrow.mjs --execute
+ *
+ * Needs BASE_WRITE_RPC_URL, HYPERFX_BUNDLER_URL and CUSTODY_PRIVATE_KEY in the environment.
+ * Custody needs ETH for gas plus the relayer fee, so check the quote before executing.
+ */
+import { ethers } from 'ethers'
+
+/**
+ * Which placeOrder transactions to reclaim. Pass them as arguments, or let it read the open
+ * rows from custody_divergence, which is where record_custody_divergence puts them.
+ *
+ * The six orders stranded on 7 Sep 2026 are deliberately NOT hardcoded here. They were
+ * cancelled at 09:40 UTC on 8 Sep and 6.505402 USDC came back, so a baked-in list would only
+ * go stale and mislead the next person.
+ */
+async function ordersToReclaim() {
+  const fromArgs = process.argv.slice(2).filter((a) => /^0x[0-9a-f]{64}$/i.test(a))
+  if (fromArgs.length) return fromArgs
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) return []
+  const { createClient } = await import('@supabase/supabase-js')
+  const db = createClient(url, key, { auth: { persistSession: false } })
+  const { data } = await db
+    .from('custody_divergence')
+    .select('place_tx')
+    .eq('status', 'open')
+    .not('place_tx', 'is', null)
+  return (data ?? []).map((r) => r.place_tx)
+}
+
+const EXECUTE = process.argv.includes('--execute')
+const RPC = process.env.BASE_WRITE_RPC_URL || process.env.BASE_MAINNET_RPC_URL
+const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+const CNGN = '0x46c85152bfe9f96829aa94755d9f915f9b10ef5f'
+const NAMES = { [USDC]: 'USDC', [CNGN]: 'cNGN' }
+
+const fmt6 = (v) => (Number(v) / 1e6).toFixed(4)
+const asAddress = (bytes32) => ethers.getAddress('0x' + bytes32.slice(-40))
+
+async function main() {
+  if (!RPC) throw new Error('set BASE_WRITE_RPC_URL')
+
+  const sdk = await import('@hyperbridge/sdk')
+  const viem = await import('viem')
+  const { privateKeyToAccount } = await import('viem/accounts')
+  const { base } = await import('viem/chains')
+  const { EvmChain, IntentGateway, IntentsCoprocessor, createQueryClient, IntentGatewayABI } = sdk
+
+  const provider = new ethers.JsonRpcProvider(RPC, 8453)
+  const iface = new ethers.Interface(Array.isArray(IntentGatewayABI) ? IntentGatewayABI : IntentGatewayABI.abi)
+
+  console.log(`mode: ${EXECUTE ? 'EXECUTE, this will send transactions' : 'dry run'}\n`)
+
+  // Decode first. This needs nothing but an RPC, so a decode problem shows up before we
+  // touch the coprocessor or ask for a key.
+  const targets = await ordersToReclaim()
+  if (!targets.length) {
+    console.log('Nothing to reclaim. Pass placeOrder tx hashes as arguments, or set')
+    console.log('NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to read the open')
+    console.log('rows from custody_divergence.')
+    return
+  }
+  console.log(`${targets.length} order(s) to look at\n`)
+
+  const orders = []
+  for (const hash of targets) {
+    const tx = await provider.getTransaction(hash)
+    if (!tx) { console.log(`${hash}  not found`); continue }
+    const parsed = iface.parseTransaction({ data: tx.data, value: tx.value })
+    if (!parsed) { console.log(`${hash}  could not parse`); continue }
+
+    const o = parsed.args[0]
+    const order = {
+      user: o.user,
+      source: o.source,
+      destination: o.destination,
+      deadline: BigInt(o.deadline),
+      nonce: BigInt(o.nonce),
+      fees: BigInt(o.fees),
+      session: o.session,
+      predispatch: { assets: o.predispatch.assets.map(mapAsset), call: o.predispatch.call },
+      inputs: o.inputs.map(mapAsset),
+      output: {
+        beneficiary: o.output.beneficiary,
+        assets: o.output.assets.map(mapAsset),
+        call: o.output.call,
+      },
+    }
+    orders.push({ hash, block: tx.blockNumber, fn: parsed.name, order })
+  }
+
+  function mapAsset(a) {
+    return { token: a.token, amount: BigInt(a.amount) }
+  }
+
+  const head = await provider.getBlockNumber()
+  console.log(`Base head block ${head}\n`)
+
+  let totalIn = 0n
+  for (const { hash, block, fn, order } of orders) {
+    const input = order.inputs[0]
+    const token = NAMES[asAddress(input.token).toLowerCase()] ?? asAddress(input.token)
+    const out = order.output.assets[0]
+    const outToken = NAMES[asAddress(out.token).toLowerCase()] ?? asAddress(out.token)
+    const expired = Number(order.deadline) < head
+    if (token === 'USDC') totalIn += input.amount
+
+    console.log(`${hash}`)
+    console.log(`  ${fn} at block ${block}, deadline block ${order.deadline}, ${expired ? 'EXPIRED' : `still live for ${Number(order.deadline) - head} blocks`}`)
+    console.log(`  in  ${fmt6(input.amount)} ${token}   out ${fmt6(out.amount)} ${outToken}`)
+    console.log(`  nonce ${order.nonce}  fees ${fmt6(order.fees)}  session ${order.session}`)
+  }
+  console.log(`\n${orders.length} orders, ${fmt6(totalIn)} USDC of escrowed input if all are still open`)
+  console.log('Note: the calldata cannot tell an already cancelled order from a live one, both')
+  console.log('read as EXPIRED. The cancel quote below is what confirms an order is reclaimable.\n')
+
+  const live = orders.filter((o) => Number(o.order.deadline) >= head)
+  if (live.length) {
+    console.log(`${live.length} order(s) have not passed their deadline yet. Cancelling those may be refused, they can still fill.\n`)
+  }
+
+  // Quoting and cancelling both need the gateway wired to the coprocessor and bundler.
+  if (!process.env.HYPERFX_BUNDLER_URL) {
+    console.log('HYPERFX_BUNDLER_URL not set, stopping before the cancel quote.')
+    return
+  }
+  const key = process.env.CUSTODY_PRIVATE_KEY
+  if (!key) {
+    console.log('CUSTODY_PRIVATE_KEY not set, stopping before the cancel quote.')
+    return
+  }
+
+  const chain = await EvmChain.create(RPC, process.env.HYPERFX_BUNDLER_URL)
+  const coprocessor = await IntentsCoprocessor.connect(
+    process.env.HYPERFX_COPROCESSOR_WS || 'wss://nexus.rpc.polytope.technology',
+  )
+  const queryClient = createQueryClient({
+    url: process.env.HYPERFX_INDEXER_URL || 'https://nexus.indexer.polytope.technology',
+  })
+  const gateway = (await IntentGateway.create(chain, chain, coprocessor)).withQueryClient(queryClient)
+
+  const account = privateKeyToAccount(key.startsWith('0x') ? key : `0x${key}`)
+  const wallet = viem.createWalletClient({ account, chain: base, transport: viem.http(RPC) })
+  console.log(`custody ${account.address}`)
+  console.log(`ETH ${ethers.formatEther(await provider.getBalance(account.address))}\n`)
+
+  let quotedFees = 0n
+  let quotedNative = 0n
+  for (const { hash, order } of orders) {
+    try {
+      const q = await gateway.quoteCancelOrder(order, { from: 'source' })
+      quotedFees += BigInt(q.relayerFee ?? 0n)
+      quotedNative += BigInt(q.nativeValue ?? 0n)
+      console.log(`${hash.slice(0, 18)}  relayerFee ${fmt6(BigInt(q.relayerFee ?? 0n))}  nativeValue ${ethers.formatEther(BigInt(q.nativeValue ?? 0n))} ETH`)
+    } catch (e) {
+      console.log(`${hash.slice(0, 18)}  quote failed: ${e instanceof Error ? e.message : e}`)
+    }
+  }
+  console.log(`\ntotal to cancel all: ${fmt6(quotedFees)} relayer fee, ${ethers.formatEther(quotedNative)} ETH`)
+  console.log(`reclaimable:         ${fmt6(totalIn)} USDC`)
+  if (quotedFees >= totalIn) {
+    console.log('\nThe relayer fee is not below what we would recover. Cancelling loses money.')
+  }
+
+  if (!EXECUTE) {
+    console.log('\nDry run, nothing sent. Re-run with --execute to cancel.')
+    return
+  }
+
+  // Close the matching custody_divergence row so the open shortfall drops as funds come
+  // back, rather than needing a separate manual edit.
+  const resolve = async (placeTx, amountMicro) => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!url || !key) { console.log('    (no service role key, divergence row left open)'); return }
+    const { createClient } = await import('@supabase/supabase-js')
+    const db = createClient(url, key, { auth: { persistSession: false } })
+    const { data: rows } = await db.from('custody_divergence').select('id').eq('place_tx', placeTx).eq('status', 'open')
+    if (!rows?.length) { console.log('    (no open divergence row for this tx)'); return }
+    const { data: ok } = await db.rpc('resolve_custody_divergence', {
+      p_id: rows[0].id,
+      p_status: 'recovered',
+      p_recovered_amount_micro: amountMicro.toString(),
+      p_recovered_tx: placeTx,
+      p_detail: 'reclaimed by cancelling the expired intent order',
+    })
+    console.log(ok ? `    divergence ${rows[0].id} marked recovered` : '    could not resolve divergence row')
+  }
+
+  for (const { hash, order } of orders) {
+    console.log(`\ncancelling ${hash}`)
+    try {
+      for await (const ev of gateway.cancelOrder(order, queryClient, { from: 'source' })) {
+        console.log(`  ${ev.status ?? ev.kind ?? JSON.stringify(ev).slice(0, 200)}`)
+      }
+      console.log('  done')
+      await resolve(hash, order.inputs[0].amount)
+    } catch (e) {
+      console.log(`  failed: ${e instanceof Error ? e.message : e}`)
+    }
+  }
+
+  console.log(`\ncustody USDC now ${fmt6(await new ethers.Contract(ethers.getAddress(USDC), ['function balanceOf(address) view returns (uint256)'], provider).balanceOf(account.address))}`)
+}
+
+main().catch((e) => { console.error(e); process.exit(1) })

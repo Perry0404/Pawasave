@@ -13,11 +13,14 @@
  *   2. transfer its full cNGN balance → DEPOSIT_SWEEP_DESTINATION
  *
  * Required env:
- *   DEPOSIT_SWEEP_DESTINATION       — address to receive funds. Use a COLD address
- *                                     (hardware wallet / Safe) for best security.
  *   DEPOSIT_WALLET_MNEMONIC, BASE_MAINNET_RPC_URL, SUPABASE_SERVICE_ROLE_KEY,
  *   NEXT_PUBLIC_SUPABASE_URL
  * Optional env:
+ *   DEPOSIT_SWEEP_DESTINATION       — address to receive funds. DEFAULTS to the
+ *                                     custody wallet (custodyAddress()) so swept
+ *                                     deposits fund off-ramps. Override with a COLD
+ *                                     address (hardware wallet / Safe) for extra
+ *                                     security — but then top up custody separately.
  *   DEPOSIT_GAS_FUNDER_PRIVATE_KEY  — hot key paying gas top-ups (defaults to
  *                                     CUSTODY_PRIVATE_KEY)
  *   DEPOSIT_SWEEP_MIN_CNGN          — micro-cNGN floor to bother sweeping (default 100 cNGN)
@@ -27,12 +30,9 @@ import { ethers } from "ethers"
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { CONTRACTS } from "./contracts"
 import { deriveDepositSigner, depositWalletConfigured } from "./deposit-wallet"
+import { custodyAddress } from "./custody"
 import { getSecret } from "./secrets"
-
-const RPC =
-  process.env.BASE_MAINNET_RPC_URL ||
-  process.env.NEXT_PUBLIC_BASE_RPC_URL ||
-  "https://mainnet.base.org"
+import { getWriteProvider } from "./rpc-provider"
 
 const ERC20_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -66,9 +66,13 @@ export async function sweepDeposits(): Promise<{
   if (!(await depositWalletConfigured())) throw new Error("DEPOSIT_WALLET_MNEMONIC not configured")
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY not configured")
 
-  const destination = process.env.DEPOSIT_SWEEP_DESTINATION
+  // Default to the custody wallet — where Flint on-ramps are delivered and where
+  // off-ramps draw cNGN from — so crypto deposits actually fund withdrawals.
+  // Sweeping still empties the hot HD deposit addresses (CRIT-03) regardless of
+  // destination; override with a cold address only if you top custody up elsewhere.
+  const destination = process.env.DEPOSIT_SWEEP_DESTINATION || (await custodyAddress())
   if (!destination || !ethers.isAddress(destination)) {
-    throw new Error("DEPOSIT_SWEEP_DESTINATION not set or invalid")
+    throw new Error("Sweep destination unresolved — set DEPOSIT_SWEEP_DESTINATION or CUSTODY_PRIVATE_KEY")
   }
   const funderKey = (await getSecret("DEPOSIT_GAS_FUNDER_PRIVATE_KEY")) || (await getSecret("CUSTODY_PRIVATE_KEY"))
   if (!funderKey || funderKey === "0x") {
@@ -79,7 +83,11 @@ export async function sweepDeposits(): Promise<{
   const maxSweeps = Number(process.env.DEPOSIT_SWEEP_MAX || 10)
 
   const supabase = admin()
-  const provider = new ethers.JsonRpcProvider(RPC)
+  // Sign/send through a SINGLE RPC (not the FallbackProvider): the gas top-up and
+  // the cNGN transfer MUST hit the same node, or the transfer lands on a node that
+  // hasn't seen the top-up yet and reverts with "insufficient funds for gas" (the
+  // same public-RPC read-after-write race that broke custody txs — see custody.ts).
+  const provider = getWriteProvider()
   const funder   = new ethers.Wallet(funderKey, provider)
   const cngnRead = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, provider)
 
@@ -111,18 +119,22 @@ export async function sweepDeposits(): Promise<{
       const signer = await deriveDepositSigner(Number(w.deposit_index), provider)
       const cngn   = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, signer)
 
-      // Ensure the address can pay gas for one ERC-20 transfer.
-      const gasLimit = await cngn.transfer.estimateGas(destination, bal).catch(() => 80_000n)
-      const fee      = await provider.getFeeData()
-      const gasPrice = fee.maxFeePerGas ?? fee.gasPrice ?? 1_000_000n
-      const needed   = (gasLimit * gasPrice * 13n) / 10n // +30% buffer
-      const have     = await provider.getBalance(w.deposit_address)
+      // Fixed gas limit for one ERC-20 transfer — do NOT run estimateGas: on public
+      // RPCs the preflight reverts when the node still lags the top-up we just sent.
+      // Base gas is fractions of a cent, so generous headroom is free.
+      const GAS_LIMIT = 120_000n
+      const fee       = await provider.getFeeData()
+      const gasPrice  = fee.maxFeePerGas ?? fee.gasPrice ?? 1_000_000n
+      const needed    = (GAS_LIMIT * gasPrice * 13n) / 10n // +30% buffer
+      const have      = await provider.getBalance(w.deposit_address)
       if (have < needed) {
         const top = await funder.sendTransaction({ to: w.deposit_address, value: needed - have })
         await top.wait()
       }
 
-      const tx = await cngn.transfer(destination, bal)
+      // Pass the gas limit explicitly so the transfer skips its own estimateGas
+      // preflight (which would revert against the same lagging node).
+      const tx = await cngn.transfer(destination, bal, { gasLimit: GAS_LIMIT })
       await tx.wait()
       swept.push({
         userId: w.user_id,

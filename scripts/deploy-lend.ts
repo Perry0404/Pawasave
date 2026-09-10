@@ -94,10 +94,10 @@ async function main() {
   await (await oracle.setPrice(cngnAddress, 1_000_000n)).wait()
   console.log("✓ cNGN price set (peg 1:1)")
 
-  // Per-user borrow cap — ₦50M (FIND-SC-17). 0 = no cap.
+  // Per-user borrow cap — ₦200M (FIND-SC-17). 0 = no cap.
   const maxBorrow = process.env.MAX_BORROW_PER_USER_CNGN
     ? ethers.parseUnits(process.env.MAX_BORROW_PER_USER_CNGN, 6)
-    : ethers.parseUnits("50000000", 6) // ₦50,000,000
+    : ethers.parseUnits("200000000", 6) // ₦200,000,000
   await (await lend.setMaxBorrowPerUser(maxBorrow)).wait()
   console.log("✓ maxBorrowPerUser set:", maxBorrow.toString(), "(micro-cNGN)")
 

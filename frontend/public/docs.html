@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pawasave — Platform Documentation</title>
+<meta name="description" content="Pawasave platform + developer documentation: products, architecture, security, compliance, fees, partners, and the partner API preview.">
+<link rel="icon" href="/favicon-48.png">
+<style>
+  :root{
+    --page:#F5F7FA; --slide:#FFFFFF; --ink:#0B1220; --slate:#48515D; --muted:#78828E;
+    --green:#0A6B42; --green-2:#0E7A50; --green-soft:#E7F3EC;
+    --blue:#2563EB; --blue-soft:#E8EFFE;
+    --teal:#22D3C7; --navy:#0A0E1A;
+    --line:#E4E8EE; --line-2:#EEF1F5; --card:#FFFFFF; --card-2:#FAFBFC;
+    --red:#E5484D; --amber:#B7791F; --amber-soft:#FBF3E4; --green-badge:#E7F3EC;
+    --code-bg:#0E1420; --code-ink:#D7E0EC; --code-line:#1E2837;
+    --sans:'Segoe UI',system-ui,-apple-system,Roboto,'Helvetica Neue',Arial,sans-serif;
+    --mono:'SFMono-Regular',ui-monospace,'Cascadia Code','Consolas','Liberation Mono',monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --page:#0B0E13; --slide:#12161D; --ink:#EAEEF3; --slate:#AEB6C0; --muted:#7E8794;
+    --green:#4EC08A; --green-2:#3FB37C; --green-soft:#12291F;
+    --blue:#7CA7FF; --blue-soft:#152136;
+    --line:#232A34; --line-2:#1B212A; --card:#12161D; --card-2:#151A22;
+    --amber:#E0B45B; --amber-soft:#2A2113; --green-badge:#12291F;
+    --code-bg:#080B11; --code-line:#1B2431;
+  }}
+  :root[data-theme="dark"]{
+    --page:#0B0E13; --slide:#12161D; --ink:#EAEEF3; --slate:#AEB6C0; --muted:#7E8794;
+    --green:#4EC08A; --green-2:#3FB37C; --green-soft:#12291F;
+    --blue:#7CA7FF; --blue-soft:#152136;
+    --line:#232A34; --line-2:#1B212A; --card:#12161D; --card-2:#151A22;
+    --amber:#E0B45B; --amber-soft:#2A2113; --green-badge:#12291F;
+    --code-bg:#080B11; --code-line:#1B2431;
+  }
+  :root[data-theme="light"]{
+    --page:#F5F7FA; --slide:#FFFFFF; --ink:#0B1220; --slate:#48515D; --muted:#78828E;
+    --green:#0A6B42; --green-2:#0E7A50; --green-soft:#E7F3EC;
+    --blue:#2563EB; --blue-soft:#E8EFFE;
+    --line:#E4E8EE; --line-2:#EEF1F5; --card:#FFFFFF; --card-2:#FAFBFC;
+    --amber:#B7791F; --amber-soft:#FBF3E4; --green-badge:#E7F3EC;
+    --code-bg:#0E1420; --code-line:#1E2837;
+  }
+  @media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  .psdoc{background:var(--page);color:var(--ink);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;line-height:1.6;min-height:100vh}
+  .psdoc a{color:var(--green);text-decoration:none}
+  .psdoc a:hover{text-decoration:underline}
+
+  .doc-top{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--page) 88%,transparent);
+    backdrop-filter:saturate(1.1) blur(8px);border-bottom:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:12px clamp(16px,3vw,32px)}
+  .doc-brand{display:flex;align-items:center;gap:11px;font-weight:800;letter-spacing:-.01em;font-size:17px}
+  .doc-brand .mk{width:30px;height:30px;border-radius:9px;background:var(--navy);display:grid;place-items:center;flex:none}
+  .doc-brand .mk svg{width:64%;height:64%}
+  .doc-brand .sub{font-weight:600;color:var(--muted);font-size:13px;border-left:1px solid var(--line);padding-left:11px;margin-left:2px}
+  .doc-top .actions{display:flex;gap:8px;align-items:center}
+  .doc-top a.ghost,.doc-top button{font-family:var(--sans);font-size:13px;font-weight:650;cursor:pointer;
+    border:1px solid var(--line);background:var(--slide);color:var(--ink);padding:8px 14px;border-radius:10px}
+  .doc-top a.ghost:hover,.doc-top button:hover{border-color:var(--green);text-decoration:none}
+
+  .doc-shell{display:grid;grid-template-columns:250px minmax(0,1fr);gap:0;max-width:1180px;margin:0 auto}
+  .doc-nav{position:sticky;top:61px;align-self:start;height:calc(100vh - 61px);overflow-y:auto;
+    padding:26px 14px 40px 0;border-right:1px solid var(--line)}
+  .doc-nav .grp{font-size:11px;font-weight:750;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--muted);margin:20px 14px 8px}
+  .doc-nav .grp:first-child{margin-top:0}
+  .doc-nav a{display:block;color:var(--slate);font-size:13.5px;font-weight:550;
+    padding:6px 14px;border-radius:8px;border-left:2px solid transparent}
+  .doc-nav a:hover{background:var(--card-2);color:var(--ink);text-decoration:none}
+
+  .doc-main{padding:34px clamp(16px,3.4vw,52px) 90px;min-width:0}
+  .doc-hero{margin-bottom:30px}
+  .doc-hero .eyebrow{font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--green)}
+  .doc-hero h1{font-size:clamp(30px,4.6vw,44px);font-weight:800;letter-spacing:-.03em;line-height:1.05;
+    margin:10px 0 12px;text-wrap:balance}
+  .doc-hero p{color:var(--slate);font-size:clamp(15px,1.7vw,18px);max-width:66ch;margin:0}
+
+  section.doc-sec{padding-top:34px;margin-top:6px;scroll-margin-top:74px;border-top:1px solid var(--line-2)}
+  section.doc-sec:first-of-type{border-top:0}
+  .doc-sec h2{font-size:clamp(21px,2.6vw,29px);font-weight:800;letter-spacing:-.02em;margin:0 0 6px}
+  .doc-sec h3{font-size:clamp(16px,1.8vw,19px);font-weight:750;letter-spacing:-.01em;margin:26px 0 8px}
+  .doc-sec p{color:var(--slate);margin:0 0 12px;max-width:72ch}
+  .doc-sec ul,.doc-sec ol{color:var(--slate);margin:0 0 12px;padding-left:20px;max-width:72ch}
+  .doc-sec li{margin:5px 0}
+  .doc-sec strong{color:var(--ink)}
+
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;letter-spacing:.02em;
+    padding:3px 10px;border-radius:999px}
+  .badge b{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block}
+  .badge.live{background:var(--green-badge);color:var(--green)}
+  .badge.prog{background:var(--amber-soft);color:var(--amber)}
+  .badge.blue{background:var(--blue-soft);color:var(--blue)}
+
+  .cards{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:16px 0}
+  .cards.c4{grid-template-columns:repeat(4,1fr)}
+  .cards.c3{grid-template-columns:repeat(3,1fr)}
+  .dcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:7px}
+  .dcard h4{margin:0;font-size:15.5px;font-weight:750;letter-spacing:-.01em;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .dcard p{margin:0;font-size:13.5px;color:var(--slate);line-height:1.5}
+
+  .facts{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  .facts td{border-top:1px solid var(--line-2);padding:10px 12px;vertical-align:top}
+  .facts td:first-child{color:var(--muted);width:34%;font-weight:600}
+  .facts td:last-child{color:var(--ink)}
+  .facts tr:first-child td{border-top:0}
+
+  .tablewrap{overflow-x:auto;margin:14px 0;border:1px solid var(--line);border-radius:12px}
+  table.api{width:100%;border-collapse:collapse;font-size:13.5px;min-width:520px}
+  table.api th,table.api td{text-align:left;padding:10px 14px;border-top:1px solid var(--line-2)}
+  table.api thead th{border-top:0;background:var(--card-2);font-size:11.5px;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--muted);font-weight:700}
+  table.api td code,table.api th code{font-size:12.5px}
+  .meth{font-family:var(--mono);font-weight:700;font-size:12px;padding:2px 7px;border-radius:6px}
+  .meth.get{background:var(--green-badge);color:var(--green)}
+  .meth.post{background:var(--blue-soft);color:var(--blue)}
+
+  pre{background:var(--code-bg);color:var(--code-ink);border:1px solid var(--code-line);border-radius:12px;
+    padding:15px 16px;overflow-x:auto;margin:14px 0;font-family:var(--mono);font-size:12.8px;line-height:1.6}
+  pre code{font-family:inherit}
+  code{font-family:var(--mono);font-size:.88em;background:var(--card-2);border:1px solid var(--line-2);
+    border-radius:6px;padding:1px 5px;color:var(--ink)}
+  pre code{background:none;border:0;padding:0;color:inherit}
+  .tok-k{color:#7DD3A8}.tok-s{color:#E4B781}.tok-c{color:#6B7787}
+
+  .callout{border:1px solid var(--line);border-left:4px solid var(--blue);background:var(--blue-soft);
+    border-radius:10px;padding:14px 16px;margin:16px 0;color:var(--slate);font-size:14px}
+  .callout.warn{border-left-color:var(--amber);background:var(--amber-soft)}
+  .callout.ok{border-left-color:var(--green);background:var(--green-badge)}
+  .callout strong{color:var(--ink)}
+
+  .diagram{display:flex;flex-direction:column;gap:10px;margin:16px 0;border:1px solid var(--line);
+    border-radius:14px;padding:20px;background:var(--card-2)}
+  .drow{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap}
+  .dbox{flex:1;min-width:150px;background:var(--slide);border:1px solid var(--line);border-radius:11px;padding:12px 14px}
+  .dbox .l{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--green)}
+  .dbox .t{font-size:14px;font-weight:700;margin-top:3px}
+  .dbox .d{font-size:12.5px;color:var(--slate);margin-top:3px;line-height:1.45}
+  .darrow{text-align:center;color:var(--muted);font-size:18px;line-height:1}
+
+  .doc-foot{border-top:1px solid var(--line);margin-top:40px;padding-top:22px;color:var(--muted);font-size:13px;
+    display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+
+  @media (max-width:860px){
+    .doc-shell{grid-template-columns:1fr}
+    .doc-nav{display:none}
+    .cards,.cards.c3,.cards.c4{grid-template-columns:1fr}
+    .doc-brand .sub{display:none}
+  }
+  @media print{
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .doc-top,.doc-nav{display:none}
+    .doc-shell{display:block;max-width:none}
+    .psdoc{background:#fff}
+    pre{background:#0E1420}
+    section.doc-sec{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="psdoc">
+  <header class="doc-top">
+    <div class="doc-brand">
+      <span class="mk" aria-hidden="true"><svg viewBox="0 0 512 512"><defs><linearGradient id="dl" x1="150" y1="120" x2="360" y2="392" gradientUnits="userSpaceOnUse"><stop stop-color="#2DD4C4"/><stop offset="1" stop-color="#12B981"/></linearGradient></defs><g fill="url(#dl)"><rect x="132" y="120" width="78" height="272" rx="12"/><rect x="150" y="120" width="176" height="132" rx="66"/><rect x="150" y="246" width="198" height="146" rx="73"/></g><g fill="#0A0E1A"><rect x="208" y="150" width="82" height="72" rx="36"/><rect x="208" y="278" width="100" height="88" rx="44"/></g></svg></span>
+      Pawasave <span class="sub">Platform Documentation</span>
+    </div>
+    <div class="actions">
+      <a class="ghost" href="https://pawasave.xyz">Open app</a>
+      <button type="button" onclick="window.print()">Save as PDF</button>
+    </div>
+  </header>
+
+  <div class="doc-shell">
+    <nav class="doc-nav" aria-label="Documentation">
+      <div class="grp">Platform</div>
+      <a href="#overview">Overview</a>
+      <a href="#products">Products</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#security">Security</a>
+      <a href="#compliance">Compliance &amp; KYC</a>
+      <a href="#fees">Fees &amp; Revenue</a>
+      <a href="#partners">Partners &amp; Integrations</a>
+      <a href="#roadmap">Roadmap</a>
+      <div class="grp">Developers</div>
+      <a href="#dev-intro">Getting Started</a>
+      <a href="#dev-auth">Authentication</a>
+      <a href="#dev-endpoints">Endpoints</a>
+      <a href="#dev-webhooks">Webhooks &amp; Events</a>
+      <a href="#dev-models">Data Models</a>
+      <a href="#dev-errors">Errors &amp; Rate Limits</a>
+      <a href="#dev-access">Sandbox &amp; Access</a>
+    </nav>
+
+    <main class="doc-main">
+      <div class="doc-hero">
+        <div class="eyebrow">Platform Documentation</div>
+        <h1>The cNGN savings &amp; lending ecosystem on Base</h1>
+        <p>Pawasave lets Nigerians save in Naira, earn on-chain yield in cNGN, run Ajo circles, invest, and borrow against their assets — from a single mobile app. This documentation covers how the platform works and how partners integrate with it.</p>
+      </div>
+
+      <section class="doc-sec" id="overview">
+        <h2>Overview</h2>
+        <p>Pawasave is a consumer money app backed by an on-chain lending protocol, <strong>PawasaveLend</strong>. Users experience a familiar Naira wallet; behind the scenes, balances settle in <strong>cNGN</strong> (the regulated Naira stablecoin) on <strong>Base</strong>, Coinbase's Ethereum Layer-2. A closed-loop design means the consumer app continuously supplies liquidity to the lending pools that fund borrowing.</p>
+        <table class="facts">
+          <tr><td>Network</td><td>Base mainnet (Ethereum L2, chain ID 8453)</td></tr>
+          <tr><td>Unit of account</td><td>cNGN — Naira-pegged stablecoin (₦1 = 1 cNGN)</td></tr>
+          <tr><td>Custody</td><td>Institutional multi-signature custody</td></tr>
+          <tr><td>Consumer status</td><td><span class="badge live"><b></b>Live at pawasave.xyz</span></td></tr>
+          <tr><td>Partner API</td><td><span class="badge prog"><b></b>Early-access preview</span></td></tr>
+        </table>
+        <h3>Who it's for</h3>
+        <ul>
+          <li><strong>Everyday savers &amp; traders</strong> — save, run Ajo, invest and borrow in one place.</li>
+          <li><strong>SMEs &amp; merchants</strong> — working-capital credit at rates far below the informal 40–80%.</li>
+          <li><strong>Fintech partners</strong> — tap PawasaveLend liquidity and cNGN rails through the partner API (preview).</li>
+        </ul>
+      </section>
+
+      <section class="doc-sec" id="products">
+        <h2>Products</h2>
+        <p>Four consumer products sit on one balance, so money moves between saving, investing and borrowing without friction.</p>
+        <div class="cards c4">
+          <div class="dcard"><h4>Save <span class="badge live"><b></b>Live</span></h4><p>cNGN savings with automatic yield. P-AUTO routes locked balances to vetted yield and compounds continuously — users just see “Earn up to X%”.</p></div>
+          <div class="dcard"><h4>Ajo <span class="badge live"><b></b>Live</span></h4><p>Digitised Esusu savings circles with automated contributions, scheduled payouts, and full transparency for every member.</p></div>
+          <div class="dcard"><h4>Invest <span class="badge live"><b></b>Live</span></h4><p>Market exposure alongside savings, managed from the same wallet balance.</p></div>
+          <div class="dcard"><h4>Borrow <span class="badge live"><b></b>Live</span></h4><p>Asset-backed cNGN loans against locked savings and holdings, with transparent interest and instant disbursement.</p></div>
+        </div>
+        <h3>How value flows</h3>
+        <ol>
+          <li>User funds the wallet with Naira (bank transfer / NUBAN) or crypto; it settles as cNGN.</li>
+          <li>Locking savings supplies the P-AUTO vault and PawasaveLend liquidity pools.</li>
+          <li>Borrowers post collateral and draw cNGN credit lines from those pools.</li>
+          <li>Interest and reserve fees flow back to suppliers and platform revenue.</li>
+        </ol>
+      </section>
+
+      <section class="doc-sec" id="architecture">
+        <h2>Architecture</h2>
+        <p>Pawasave pairs a consumer application with an on-chain settlement layer on Base. A secure backend handles accounts and money movement; value settles natively in cNGN.</p>
+        <div class="diagram" aria-label="Architecture diagram">
+          <div class="drow">
+            <div class="dbox"><div class="l">Client</div><div class="t">Mobile app / PWA</div><div class="d">Installable web app with device-level security.</div></div>
+            <div class="dbox"><div class="l">Backend</div><div class="t">Secure services</div><div class="d">Accounts, money movement and ramp orchestration.</div></div>
+            <div class="dbox"><div class="l">Settlement</div><div class="t">cNGN on Base</div><div class="d">Native cNGN settlement under multi-signature custody.</div></div>
+          </div>
+          <div class="darrow">↓</div>
+          <div class="drow">
+            <div class="dbox"><div class="l">Yield</div><div class="t">P-AUTO allocator</div><div class="d">Routes locked balances to vetted yield, and compounds returns.</div></div>
+            <div class="dbox"><div class="l">Protocol</div><div class="t">PawasaveLend</div><div class="d">Supply/borrow pools with a specialised Kink rate model.</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-sec" id="security">
+        <h2>Security</h2>
+        <p>Security is foundational. Pawasave completed an independent security review and remediated its findings, and applies defence-in-depth across its application, data and custody layers.</p>
+        <div class="cards">
+          <div class="dcard"><h4>Independent audit</h4><p>Reviewed by an external security team, with findings remediated ahead of launch.</p></div>
+          <div class="dcard"><h4>Protected transactions</h4><p>Money-moving actions require a private transaction PIN, with an optional biometric device lock.</p></div>
+          <div class="dcard"><h4>Least-privilege data</h4><p>Strict per-user data isolation, so a customer can only ever access their own records.</p></div>
+          <div class="dcard"><h4>Multi-signature custody</h4><p>On-chain assets are secured under multi-signature control; signing keys are never exposed to the application.</p></div>
+        </div>
+      </section>
+
+      <section class="doc-sec" id="compliance">
+        <h2>Compliance &amp; KYC</h2>
+        <p>Identity verification uses <strong>Sense</strong> biometric liveness. Sensitive identifiers are never stored in plain text, and only the minimum data needed for verification is retained.</p>
+        <ul>
+          <li><strong>Tiered access</strong> — verification is required before withdrawals; limits scale with KYC level.</li>
+          <li><strong>Data minimisation</strong> — only what's needed for verification is retained; biometric checks are delegated to the provider.</li>
+          <li><strong>Auditability</strong> — every balance-changing action is recorded and reconcilable on-chain.</li>
+        </ul>
+        <div class="callout"><strong>Regulatory posture:</strong> Pawasave settles in the regulated cNGN stablecoin and is pursuing compliant institutional fiat-gateway integrations as part of its partnership roadmap.</div>
+      </section>
+
+      <section class="doc-sec" id="fees">
+        <h2>Fees &amp; Revenue</h2>
+        <p>Revenue is protocol-native and transparent. The lending engine applies a reserve fee on interest; the consumer app applies clearly-disclosed product fees.</p>
+        <div class="tablewrap">
+          <table class="api">
+            <thead><tr><th>Source</th><th>What it is</th></tr></thead>
+            <tbody>
+              <tr><td>Reserve fee</td><td>A 10% share of borrow interest, retained by the protocol to build reserves and fund platform revenue.</td></tr>
+              <tr><td>Loan interest</td><td>Interest accrued on outstanding cNGN loans, shared with liquidity suppliers.</td></tr>
+              <tr><td>Origination fee</td><td>A one-off fee applied when a loan is disbursed.</td></tr>
+              <tr><td>Yield spread</td><td>A spread on returns from savings routed through the P-AUTO allocator.</td></tr>
+              <tr><td>Early-exit penalty</td><td>Applied when a user breaks a fixed savings goal ahead of term.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>A specialised <strong>Kink interest-rate model</strong> raises borrow rates during hyper-utilisation, protecting liquidity and rewarding suppliers when demand is high.</p>
+      </section>
+
+      <section class="doc-sec" id="partners">
+        <h2>Partners &amp; Integrations</h2>
+        <div class="cards">
+          <div class="dcard"><h4>cNGN <span class="badge blue"><b></b>Built on</span></h4><p>The regulated Naira stablecoin — Pawasave's native unit of account for saving, lending and borrowing.</p></div>
+          <div class="dcard"><h4>Base (Coinbase L2) <span class="badge blue"><b></b>Deployed on</span></h4><p>Fast, low-cost Ethereum L2 settlement for every on-chain transaction.</p></div>
+          <div class="dcard"><h4>Sense <span class="badge prog"><b></b>Integrating</span></h4><p>Biometric liveness identity &amp; KYC for compliant, fraud-resistant onboarding.</p></div>
+          <div class="dcard"><h4>Strails <span class="badge prog"><b></b>Integrating</span></h4><p>Per-user NUBAN bank rails for instant Naira → cNGN deposits at scale.</p></div>
+        </div>
+      </section>
+
+      <section class="doc-sec" id="roadmap">
+        <h2>Roadmap</h2>
+        <div class="cards c4">
+          <div class="dcard"><h4><span class="badge live"><b></b>Done</span></h4><p><strong>App live</strong> — fiat gateway, P-AUTO yield, Save · Ajo · Invest in production.</p></div>
+          <div class="dcard"><h4><span class="badge live"><b></b>Done</span></h4><p><strong>Lending live</strong> — asset-backed cNGN loans in-app, audit remediated, on Base mainnet.</p></div>
+          <div class="dcard"><h4><span class="badge prog"><b></b>Now</span></h4><p><strong>Scale rails</strong> — NUBAN deposits, biometric KYC rollout, Play &amp; App Store launch.</p></div>
+          <div class="dcard"><h4><span class="badge blue"><b></b>Next</span></h4><p><strong>Protocol expansion</strong> — open liquidity pools, tokenized T-bills/RWAs, credit scoring, insurance fund.</p></div>
+        </div>
+      </section>
+
+      <section class="doc-sec" id="dev-intro">
+        <h2>Developers — Getting Started</h2>
+        <div class="callout warn"><strong>Status: Early-access preview.</strong> The partner API is in active development. The endpoints, payloads and events below describe the <em>target</em> interface for fintechs integrating PawasaveLend liquidity and cNGN rails. They are not yet generally available — <a href="mailto:support@pawasave.xyz">request sandbox access</a> to build against them.</div>
+        <p>The partner API lets a fintech offer Pawasave-powered savings, deposits and cNGN credit to its own users — a backend liquidity layer for Nigerian stable finance.</p>
+        <table class="facts">
+          <tr><td>Base URL (sandbox)</td><td><code>https://sandbox.api.pawasave.xyz/v1</code></td></tr>
+          <tr><td>Base URL (production)</td><td><code>https://api.pawasave.xyz/v1</code></td></tr>
+          <tr><td>Format</td><td>JSON over HTTPS; UTF-8; amounts in <strong>kobo</strong> (integer, ₦1 = 100)</td></tr>
+          <tr><td>Versioning</td><td>Path-based (<code>/v1</code>); breaking changes ship under a new version</td></tr>
+        </table>
+      </section>
+
+      <section class="doc-sec" id="dev-auth">
+        <h2>Authentication</h2>
+        <p>Requests are authenticated with a secret API key sent as a bearer token. Keys are issued per environment; never expose a secret key in client-side code.</p>
+        <pre><code><span class="tok-c"># Every request carries your secret key</span>
+curl https://sandbox.api.pawasave.xyz/v1/balances \
+  -H <span class="tok-s">"Authorization: Bearer sk_sandbox_..."</span></code></pre>
+        <div class="callout"><strong>Webhook signing:</strong> outbound webhooks are signed with an <code>X-Pawasave-Signature</code> header (HMAC-SHA256 of the raw body using your webhook secret). Verify it before trusting a payload.</div>
+      </section>
+
+      <section class="doc-sec" id="dev-endpoints">
+        <h2>Endpoints</h2>
+        <p>Representative resources for the partner integration. All amounts are integer kobo.</p>
+        <div class="tablewrap">
+          <table class="api">
+            <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><span class="meth post">POST</span></td><td><code>/customers</code></td><td>Create a customer (KYC reference, contact).</td></tr>
+              <tr><td><span class="meth post">POST</span></td><td><code>/deposits/nuban</code></td><td>Issue a per-customer NUBAN; funds settle as cNGN.</td></tr>
+              <tr><td><span class="meth get">GET</span></td><td><code>/balances/:customerId</code></td><td>Fetch cNGN + savings balances.</td></tr>
+              <tr><td><span class="meth post">POST</span></td><td><code>/savings/lock</code></td><td>Lock a balance into the P-AUTO yield vault.</td></tr>
+              <tr><td><span class="meth post">POST</span></td><td><code>/loans</code></td><td>Open a collateral-backed cNGN loan.</td></tr>
+              <tr><td><span class="meth get">GET</span></td><td><code>/loans/:loanId</code></td><td>Loan status, balance, and repayment schedule.</td></tr>
+              <tr><td><span class="meth post">POST</span></td><td><code>/withdrawals</code></td><td>Withdraw cNGN to a bank account (off-ramp).</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>Example — open a loan</h3>
+        <pre><code><span class="tok-k">POST</span> /v1/loans
+{
+  <span class="tok-s">"customer_id"</span>: <span class="tok-s">"cus_8fk21a"</span>,
+  <span class="tok-s">"principal_kobo"</span>: <span class="tok-k">5000000</span>,        <span class="tok-c">// ₦50,000</span>
+  <span class="tok-s">"collateral"</span>: { <span class="tok-s">"type"</span>: <span class="tok-s">"locked_savings"</span>, <span class="tok-s">"ref"</span>: <span class="tok-s">"lock_2231"</span> },
+  <span class="tok-s">"term_days"</span>: <span class="tok-k">30</span>
+}</code></pre>
+      </section>
+
+      <section class="doc-sec" id="dev-webhooks">
+        <h2>Webhooks &amp; Events</h2>
+        <p>Pawasave delivers signed events to your endpoint as state changes. Respond <code>2xx</code> within 5s; deliveries retry with backoff.</p>
+        <div class="tablewrap">
+          <table class="api">
+            <thead><tr><th>Event</th><th>Fires when</th></tr></thead>
+            <tbody>
+              <tr><td><code>deposit.credited</code></td><td>An inbound deposit settles to a customer's cNGN balance.</td></tr>
+              <tr><td><code>withdrawal.settled</code></td><td>An off-ramp withdrawal completes.</td></tr>
+              <tr><td><code>loan.disbursed</code></td><td>A loan is opened and cNGN is disbursed.</td></tr>
+              <tr><td><code>loan.repaid</code></td><td>A loan is fully repaid and collateral released.</td></tr>
+              <tr><td><code>loan.liquidated</code></td><td>Collateral is liquidated to cover an at-risk loan.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <pre><code>{
+  <span class="tok-s">"event"</span>: <span class="tok-s">"deposit.credited"</span>,
+  <span class="tok-s">"data"</span>: {
+    <span class="tok-s">"customer_id"</span>: <span class="tok-s">"cus_8fk21a"</span>,
+    <span class="tok-s">"amount_kobo"</span>: <span class="tok-k">2500000</span>,
+    <span class="tok-s">"reference"</span>: <span class="tok-s">"dep_a1b2c3"</span>,
+    <span class="tok-s">"settled_at"</span>: <span class="tok-s">"2026-07-27T10:15:00Z"</span>
+  }
+}</code></pre>
+      </section>
+
+      <section class="doc-sec" id="dev-models">
+        <h2>Data Models</h2>
+        <p>Core objects returned by the API.</p>
+        <div class="tablewrap">
+          <table class="api">
+            <thead><tr><th>Object</th><th>Key fields</th></tr></thead>
+            <tbody>
+              <tr><td><code>Customer</code></td><td><code>id</code>, <code>kyc_status</code>, <code>created_at</code></td></tr>
+              <tr><td><code>Balance</code></td><td><code>available_kobo</code>, <code>savings_kobo</code>, <code>yield_earned_kobo</code></td></tr>
+              <tr><td><code>Transaction</code></td><td><code>id</code>, <code>type</code>, <code>direction</code>, <code>amount_kobo</code>, <code>status</code>, <code>reference</code>, <code>created_at</code></td></tr>
+              <tr><td><code>Loan</code></td><td><code>id</code>, <code>principal_kobo</code>, <code>outstanding_kobo</code>, <code>rate_bps</code>, <code>status</code>, <code>due_at</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="doc-sec" id="dev-errors">
+        <h2>Errors &amp; Rate Limits</h2>
+        <p>Errors use standard HTTP status codes with a machine-readable body. Rate-limited requests return <code>429</code>; back off and retry.</p>
+        <pre><code>{
+  <span class="tok-s">"error"</span>: {
+    <span class="tok-s">"code"</span>: <span class="tok-s">"insufficient_collateral"</span>,
+    <span class="tok-s">"message"</span>: <span class="tok-s">"Collateral value is below the required threshold."</span>
+  }
+}</code></pre>
+        <div class="tablewrap">
+          <table class="api">
+            <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td><code>400</code></td><td>Invalid request — see <code>error.message</code>.</td></tr>
+              <tr><td><code>401</code></td><td>Missing or invalid API key.</td></tr>
+              <tr><td><code>402</code></td><td>Insufficient balance / collateral.</td></tr>
+              <tr><td><code>429</code></td><td>Rate limit exceeded — retry with backoff.</td></tr>
+              <tr><td><code>5xx</code></td><td>Transient server error — safe to retry idempotently.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="doc-sec" id="dev-access">
+        <h2>Sandbox &amp; Access</h2>
+        <p>The sandbox mirrors production with test credentials and simulated settlement, so you can build and certify an integration end-to-end before going live.</p>
+        <ol>
+          <li>Email <a href="mailto:support@pawasave.xyz">support@pawasave.xyz</a> with your company and use case.</li>
+          <li>Receive sandbox API keys and a webhook secret.</li>
+          <li>Build against the sandbox base URL; verify webhook signatures.</li>
+          <li>Complete integration review, then request production keys.</li>
+        </ol>
+        <div class="callout ok"><strong>Building something?</strong> We prioritise partners who bring borrow demand or distribution. Tell us what you're building and we'll fast-track sandbox access.</div>
+      </section>
+
+      <div class="doc-foot">
+        <span>© 2026 Pawasave · Built for Nigeria</span>
+        <span><a href="mailto:support@pawasave.xyz">support@pawasave.xyz</a> · <a href="https://pawasave.xyz">pawasave.xyz</a></span>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

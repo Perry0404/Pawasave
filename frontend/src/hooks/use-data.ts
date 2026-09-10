@@ -333,40 +333,16 @@ export async function lockSavings(usdcMicro: number, kobo: number, durationDays:
 }
 
 export async function withdrawLock(lockId: string, early: boolean = false) {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-
-  // If early withdrawal, record the forfeiture
-  if (early) {
-    // Fetch lock details to calculate forfeited interest
-    const { data: lock } = await supabase
-      .from('savings_locks')
-      .select('id, amount_usdc_micro, effective_rate_at_creation, created_at')
-      .eq('id', lockId)
-      .single()
-    
-    if (lock) {
-      const daysHeld = Math.floor((Date.now() - new Date(lock.created_at).getTime()) / 86400000)
-      const rate = lock.effective_rate_at_creation || 50
-      const forfeited = Math.floor((lock.amount_usdc_micro * rate * daysHeld) / (100 * 365))
-      
-      if (forfeited > 0) {
-        await supabase.rpc('record_lock_forfeiture', {
-          p_lock_id: lockId,
-          p_user_id: user.id,
-          p_forfeited_interest_usdc_micro: forfeited,
-        })
-      }
-    }
-  }
-
-  const { data: ok, error } = await supabase.rpc('withdraw_lock', {
-    p_user_id: user.id,
-    p_lock_id: lockId,
-    p_early: early,
+  // Server route, not an RPC. The forfeited interest on an early exit has to be worked out
+  // from the stored lock, and the withdrawal has to follow it in the same request, or a
+  // caller can simply skip the forfeiture and keep the interest.
+  const res = await fetch('/api/savings/forfeit-withdraw', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind: 'lock', lockId, early }),
   })
-  if (error) throw error
-  if (!ok) throw new Error('Lock not found or already withdrawn')
+  const out = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(out?.error || 'Could not withdraw this lock')
 }
 
 export async function getPlatformSettings(): Promise<PlatformSetting[]> {
@@ -542,34 +518,15 @@ export async function completeSavingsGoal(goalId: string): Promise<number> {
 }
 
 export async function breakSavingsGoal(goalId: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-
-  // Fetch goal details to calculate forfeited interest
-  const { data: goal } = await supabase
-    .from('savings_goals')
-    .select('id, saved_usdc_micro, started_at')
-    .eq('id', goalId)
-    .single()
-  
-  if (goal) {
-    const daysHeld = Math.floor((Date.now() - new Date(goal.started_at).getTime()) / 86400000)
-    const forfeited = Math.floor((goal.saved_usdc_micro * 50 * daysHeld) / (100 * 365))
-    
-    if (forfeited > 0) {
-      await supabase.rpc('record_goal_forfeiture', {
-        p_goal_id: goalId,
-        p_user_id: user.id,
-        p_forfeited_interest_usdc_micro: forfeited,
-      })
-    }
-  }
-
-  const { error } = await supabase.rpc('break_savings_goal', {
-    p_goal_id: goalId,
-    p_user_id: user.id,
+  // Server route for the same reason as withdrawLock: the forfeiture is computed from the
+  // stored goal and applied before the goal is broken.
+  const res = await fetch('/api/savings/forfeit-withdraw', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind: 'goal', goalId }),
   })
-  if (error) throw error
+  const out = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(out?.error || 'Could not break this goal')
 }
 
 export async function setGoalAutoContribute(goalId: string, enabled: boolean): Promise<void> {

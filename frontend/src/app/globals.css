@@ -78,7 +78,11 @@ input[type='number'] {
   --t-2xs:11px; --t-xs:12px; --t-sm:13px; --t-md:14px;
   --t-lg:16px;  --t-xl:20px; --t-2xl:28px; --t-3xl:36px;
 
-  /* ── weight: steps the loaded variable font actually provides ── */
+  /* ── weight: steps the loaded variable font actually provides ──
+     Rule: at 12px and below, 500 is the floor. Above 12px, prose is 400 and
+     labels or controls are 500. Small low-contrast text needs the extra stroke
+     to hold the same optical density as body copy, so bump weight rather than
+     darkening the colour, which would flatten the hierarchy. */
   --w-normal:400; --w-medium:500; --w-semi:600; --w-bold:700;
 
   /* ── space: 4px base ── */
@@ -142,7 +146,7 @@ input[type='number'] {
 
 /* greet header */
 .ps .greet{display:flex;justify-content:space-between;align-items:center;margin:6px 2px 14px}
-.ps .greet .hi{font-size:13px;color:var(--muted)}
+.ps .greet .hi{font-size:13px;font-weight:var(--w-medium);color:var(--muted)}
 .ps .greet .nm{font-size:15px;font-weight:var(--w-semi);margin-top:1px;color:var(--ink)}
 .ps .av{width:38px;height:38px;border-radius:50%;background:var(--green-soft);color:var(--green);display:grid;place-items:center;font-weight:var(--w-bold);font-size:13px;border:1px solid var(--line);cursor:pointer}
 
@@ -151,13 +155,16 @@ input[type='number'] {
   box-shadow:0 14px 34px -14px color-mix(in srgb,var(--card-b) 70%,transparent),var(--shadow);position:relative;overflow:hidden}
 .ps .acct::after{content:"";position:absolute;width:170px;height:170px;border-radius:50%;right:-60px;top:-70px;background:rgba(255,255,255,.06)}
 .ps .acct-top{display:flex;justify-content:space-between;align-items:center;position:relative}
-.ps .acct-lab{font-size:12.5px;opacity:.85}
+.ps .acct-lab{font-size:12.5px;font-weight:var(--w-medium);opacity:.85}
 .ps .acct-chip{font-size:10px;font-weight:var(--w-bold);letter-spacing:.08em;border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:3px 8px}
 .ps .acct-bal{font-size:39px;font-weight:var(--w-bold);margin-top:14px;position:relative;line-height:1.05}
-.ps .acct-bal .k{opacity:.72;font-size:22px}
+/* Explicit weight, not inherited: a bare `span` used to be caught by the old global
+   `p,span,label{600}`, so dropping that rule silently promoted the kobo digits to the
+   parent's 700. They're meant to sit back from the naira figure, not match it. */
+.ps .acct-bal .k{opacity:.72;font-size:22px;font-weight:var(--w-semi)}
 .ps .acct-earn{font-size:12.5px;font-weight:var(--w-semi);margin-top:7px;opacity:.92;position:relative}
 .ps .acct-sub{display:flex;gap:22px;margin-top:14px;position:relative}
-.ps .acct-sub .l{font-size:10.5px;opacity:.72}.ps .acct-sub .v{font-size:13.5px;font-weight:var(--w-semi);margin-top:1px}
+.ps .acct-sub .l{font-size:10.5px;font-weight:var(--w-medium);opacity:.72}.ps .acct-sub .v{font-size:13.5px;font-weight:var(--w-semi);margin-top:1px}
 .ps .acct-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px;position:relative}
 .ps .ab{display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border-radius:13px;border:0;font:inherit;font-size:13.5px;font-weight:var(--w-semi);cursor:pointer;background:rgba(255,255,255,.16);color:#fff;transition:transform .1s}
 .ps .ab:active{transform:scale(.98)}
@@ -191,11 +198,11 @@ input[type='number'] {
 .ps .tx.inn .ic{background:var(--green-soft);border-color:transparent;color:var(--green)}
 .ps .tx .mid{flex:1;min-width:0}
 .ps .tx .nm{font-size:13.5px;font-weight:var(--w-semi);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ps .tx .sub{font-size:11.5px;color:var(--muted);margin-top:1px}
+.ps .tx .sub{font-size:11.5px;font-weight:var(--w-medium);color:var(--muted);margin-top:1px}
 .ps .tx .rt{text-align:right;flex:none}.ps .tx .amt{font-size:13.5px;font-weight:var(--w-semi);color:var(--ink)}.ps .tx .amt.pos{color:var(--pos)}
-.ps .tx .st{font-size:10.5px;color:var(--faint);margin-top:1px}.ps .tx .st.pend{color:var(--amber)}
+.ps .tx .st{font-size:10.5px;font-weight:var(--w-medium);color:var(--faint);margin-top:1px}.ps .tx .st.pend{color:var(--amber)}
 .ps .empty{background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:34px 18px;text-align:center;color:var(--muted)}
-.ps .empty .eh{font-size:13.5px;font-weight:var(--w-semi);color:var(--ink)}.ps .empty .es{font-size:12px;margin-top:3px}
+.ps .empty .eh{font-size:13.5px;font-weight:var(--w-semi);color:var(--ink)}.ps .empty .es{font-size:12px;font-weight:var(--w-medium);margin-top:3px}
 
 /* bottom nav */
 .ps .nav{position:fixed;bottom:0;left:0;right:0;max-width:32rem;margin:0 auto;display:flex;justify-content:space-around;padding:11px 2px calc(14px + var(--safe-bottom));border-top:1px solid var(--line);background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:blur(10px);z-index:50}
@@ -209,7 +216,7 @@ input[type='number'] {
 
 /* pool card (save) */
 .ps .pool{background:linear-gradient(158deg,var(--card-a),var(--card-b));color:#fff;border-radius:18px;padding:16px 17px}
-.ps .pool .l{font-size:12px;opacity:.85}.ps .pool .v{font-size:28px;font-weight:var(--w-bold);margin-top:4px}
+.ps .pool .l{font-size:12px;font-weight:var(--w-medium);opacity:.85}.ps .pool .v{font-size:28px;font-weight:var(--w-bold);margin-top:4px}
 .ps .pool .apy{display:inline-block;margin-top:10px;font-size:11.5px;font-weight:var(--w-semi);background:rgba(255,255,255,.16);padding:5px 11px;border-radius:999px}
 .ps .opt{display:flex;align-items:center;gap:13px;padding:14px 15px;width:100%;text-align:left;background:none;border:0;font-family:inherit;cursor:pointer}
 .ps .opt + .opt{border-top:1px solid var(--line)}
@@ -222,7 +229,7 @@ input[type='number'] {
 
 /* borrow */
 .ps .bignum{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:var(--shadow)}
-.ps .bignum .l{font-size:12px;color:var(--muted)}.ps .bignum .v{font-size:33px;font-weight:var(--w-bold);color:var(--green);margin-top:5px}
+.ps .bignum .l{font-size:12px;font-weight:var(--w-medium);color:var(--muted)}.ps .bignum .v{font-size:33px;font-weight:var(--w-bold);color:var(--green);margin-top:5px}
 .ps .coll{display:flex;align-items:center;gap:12px;padding:13px 15px}.ps .coll + .coll{border-top:1px solid var(--line)}
 .ps .coll .dot{width:36px;height:36px;border-radius:11px;flex:none;display:grid;place-items:center;background:var(--green-soft);color:var(--green)}.ps .coll .dot svg{width:16px}
 .ps .coll .mid{flex:1}.ps .coll .nm{font-size:14px;font-weight:var(--w-semi);color:var(--ink)}.ps .coll .sub{font-size:11px;color:var(--muted);margin-top:2px}.ps .coll .v{font-size:14px;font-weight:var(--w-semi);color:var(--ink)}
@@ -240,14 +247,14 @@ input[type='number'] {
 .ps .flash{margin-top:12px;padding:11px 14px;border-radius:13px;font-size:12.5px;font-weight:var(--w-semi)}
 .ps .flash.err{background:color-mix(in srgb,var(--neg) 12%,transparent);color:var(--neg)}
 .ps .flash.ok{background:var(--green-soft);color:var(--green)}
-.ps .back{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--muted);background:none;border:0;font-family:inherit;cursor:pointer;margin:4px 2px 12px}
-.ps .note{background:color-mix(in srgb,var(--amber) 12%,transparent);border:1px solid color-mix(in srgb,var(--amber) 30%,transparent);border-radius:13px;padding:11px 14px;font-size:11.5px;color:var(--amber);margin-top:14px;line-height:1.5}
+.ps .back{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:var(--w-medium);color:var(--muted);background:none;border:0;font-family:inherit;cursor:pointer;margin:4px 2px 12px}
+.ps .note{background:color-mix(in srgb,var(--amber) 12%,transparent);border:1px solid color-mix(in srgb,var(--amber) 30%,transparent);border-radius:13px;padding:11px 14px;font-size:11.5px;font-weight:var(--w-medium);color:var(--amber);margin-top:14px;line-height:1.5}
 .ps .info{background:var(--green-soft);border:1px solid transparent;border-radius:16px;padding:16px}
 .ps .info .l{font-size:11px;color:var(--green);font-weight:var(--w-semi)}
 .ps .info .code{font-size:12px;font-weight:var(--w-bold);color:var(--ink);word-break:break-all}
 .ps .kyc{margin:0 2px 14px;background:color-mix(in srgb,var(--amber) 12%,transparent);border:1px solid color-mix(in srgb,var(--amber) 30%,transparent);border-radius:16px;padding:13px 15px}
 .ps .kyc .t{font-size:13px;font-weight:var(--w-semi);color:var(--amber);display:flex;align-items:center;gap:6px}
-.ps .kyc .d{font-size:11.5px;color:var(--muted);margin-top:3px}
+.ps .kyc .d{font-size:11.5px;font-weight:var(--w-medium);color:var(--muted);margin-top:3px}
 .ps .kyc button{margin-top:9px;font-size:12px;font-weight:var(--w-semi);background:var(--amber);color:#fff;border:0;border-radius:9px;padding:7px 13px;cursor:pointer;font-family:inherit}
 
 /* AJO circle */
@@ -262,13 +269,13 @@ input[type='number'] {
 .ps .node.paid{color:var(--green);border-color:color-mix(in srgb,var(--green) 45%,transparent)}
 .ps .node.now{color:#fff;background:var(--green);border-color:var(--green);transform:translate(-50%,-50%) scale(1.14);box-shadow:0 0 0 5px color-mix(in srgb,var(--green) 22%,transparent),var(--shadow);z-index:3}
 .ps .pot{position:absolute;inset:0;display:grid;place-items:center;text-align:center;pointer-events:none}
-.ps .pot .l{font-size:10.5px;color:var(--muted);letter-spacing:.04em}.ps .pot .v{font-size:29px;font-weight:var(--w-bold);margin-top:1px;color:var(--ink)}.ps .pot .who{font-size:11px;color:var(--green);font-weight:var(--w-semi);margin-top:3px}
+.ps .pot .l{font-size:10.5px;font-weight:var(--w-medium);color:var(--muted);letter-spacing:.04em}.ps .pot .v{font-size:29px;font-weight:var(--w-bold);margin-top:1px;color:var(--ink)}.ps .pot .who{font-size:11px;color:var(--green);font-weight:var(--w-semi);margin-top:3px}
 
 /* profile */
 .ps .prof{text-align:center;padding:16px 0 6px}
 .ps .prof .pav{width:66px;height:66px;border-radius:50%;background:var(--green-soft);color:var(--green);display:grid;place-items:center;font-weight:var(--w-bold);font-size:22px;margin:0 auto;border:1px solid var(--line)}
 .ps .prof .pn{font-size:16px;font-weight:var(--w-bold);margin-top:10px;color:var(--ink)}
-.ps .prof .pe{font-size:12px;color:var(--muted);margin-top:2px}
+.ps .prof .pe{font-size:12px;font-weight:var(--w-medium);color:var(--muted);margin-top:2px}
 .ps .badge{display:inline-flex;align-items:center;gap:5px;margin-top:10px;font-size:11px;font-weight:var(--w-semi);padding:5px 11px;border-radius:999px}
 .ps .badge.ok{color:var(--green);background:var(--green-soft)}
 .ps .badge.warn{color:var(--amber);background:color-mix(in srgb,var(--amber) 14%,transparent)}

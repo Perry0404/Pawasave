@@ -540,55 +540,22 @@ export async function setGoalAutoContribute(goalId: string, enabled: boolean): P
 // ── Proxy Transfers ──────────────────────────────────────────────────────────
 // Admin function: Transfer funds between master wallet and proxy member wallets
 
-export async function proxyTransfer(
-  proxyMemberId: string,
-  action: 'CREDIT' | 'DEBIT',
-  amountUsdcMicro: number,
-  description?: string,
-): Promise<any> {
-  const { data, error } = await supabase.rpc('proxy_transfer', {
-    p_proxy_member_id: proxyMemberId,
-    p_action: action,
-    p_amount_usdc_micro: amountUsdcMicro,
-    p_description: description,
-  })
-  if (error) throw error
-  return data
-}
 
-export async function getProxyTransfers(limit = 50): Promise<any[]> {
-  const { data, error } = await supabase.rpc('get_proxy_transfers', {
-    p_limit: limit,
-  })
-  if (error) throw error
-  return data || []
-}
 
 // Register proxy member ID for automatic deposit routing
 export async function registerProxyMember(
   proxyMemberId: string,
   provider = 'xend',
 ): Promise<any> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-
-  const { data, error } = await supabase.rpc('register_proxy_member', {
-    p_user_id: user.id,
-    p_proxy_member_id: proxyMemberId,
-    p_provider: provider,
+  // Server route. register_proxy_member takes p_user_id, and from the browser that was the
+  // caller's to choose, so the route supplies it from the session instead.
+  const res = await fetch('/api/proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'register', proxyMemberId, provider }),
   })
-  if (error) throw error
-  return data
+  const out = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(out?.error || 'Could not register proxy member')
+  return out.result
 }
 
-// Get proxy member ID for current user
-export async function getUserProxyMember(): Promise<string | null> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-
-  const { data, error } = await supabase.rpc('get_proxy_member_for_user', {
-    p_user_id: user.id,
-  })
-  if (error) return null
-  return data as string | null
-}

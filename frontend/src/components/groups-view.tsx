@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { formatNaira, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
 import { siteBaseUrl } from '@/lib/site-url'
-import { CircleNotch, Copy, Check } from '@phosphor-icons/react'
+import { CircleNotch, Copy, Check, Crown } from '@phosphor-icons/react'
 import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -243,11 +243,15 @@ export default function GroupsView({ user, wallet }: Props) {
         {selected.owner_id === user?.id && (
           <div style={{ margin: '0 0 14px' }}>
             {inviteCode ? (
-              <div style={{ background: 'var(--card, #12140f)', border: '1px solid var(--line, #20261f)', borderRadius: 12, padding: '12px 14px' }}>
-                <div style={{ fontSize: 11, color: 'var(--sub, #8a9a90)' }}>Member code (no smartphone)</div>
-                <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '.04em', margin: '2px 0 6px' }}>{inviteCode}</div>
-                <div style={{ fontSize: 11, color: 'var(--sub, #8a9a90)', lineHeight: 1.4 }}>
-                  Give this code to the member. They dial <b style={{ color: 'var(--ink, #fff)' }}>*111*{inviteCode}#</b>, enter their BVN, and are onboarded &amp; added to this circle.
+              /* Was styled with var(--card) and var(--sub), neither of which exists, so the
+                 fallbacks painted a near-black panel while --ink resolved to near-black text
+                 — the code was invisible in light mode. This is `.info`, which is exactly
+                 this component. */
+              <div className="info">
+                <div className="l">Member code (no smartphone)</div>
+                <div className="num" style={{ fontSize: 'var(--t-xl)', fontWeight: 'var(--w-bold)', letterSpacing: '.04em', margin: '2px 0 6px', color: 'var(--ink)' }}>{inviteCode}</div>
+                <div style={{ fontSize: 'var(--t-2xs)', fontWeight: 'var(--w-medium)', color: 'var(--muted)', lineHeight: 1.4 }}>
+                  Give this code to the member. They dial <b style={{ color: 'var(--ink)' }}>*111*{inviteCode}#</b>, enter their BVN, and are onboarded &amp; added to this circle.
                 </div>
                 <button className="cyclechip" style={{ border: 0, cursor: 'pointer', marginTop: 8 }}
                   onClick={() => { navigator.clipboard?.writeText(inviteCode); setInviteCode(inviteCode) }}>Copy code</button>
@@ -286,7 +290,18 @@ export default function GroupsView({ user, wallet }: Props) {
         </div>
 
         {selected.owner_id === user?.id && selected.creator_incentive_percent > 0 && (
-          <div className="turnbar"><span className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 20h20L12 4z" /></svg></span><div className="mid"><div className="nm">You&apos;re the circle manager</div><div className="sub">Earning {selected.creator_incentive_percent}% of every payout</div></div></div>
+          /* Was className="turnbar", which no rule defines — and with no `.turnbar .ic svg`
+             size rule either, the inline SVG rendered at full intrinsic width. Rebuilt on
+             `.rows`/`.row`, same shape and it sizes its own icon. */
+          <div className="rows" style={{ marginBottom: 'var(--s-3)' }}>
+            <div className="row" style={{ cursor: 'default' }}>
+              <span className="dot"><Crown /></span>
+              <div className="mid">
+                <div className="nm">You&apos;re the circle manager</div>
+                <div className="sub">Earning {selected.creator_incentive_percent}% of every payout</div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Payment method */}

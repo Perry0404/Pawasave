@@ -36,8 +36,8 @@ const COLOUR = [
   '--bg', '--surface', '--surface-2',
   '--ink', '--muted', '--faint',
   '--line', '--line-2',
-  '--green', '--green-soft', '--pos', '--neg', '--amber',
-  '--card-a', '--card-b',
+  '--green', '--green-soft', '--neg', '--amber',
+  '--hero', '--on-hero', '--on-hero-muted', '--on-hero-fill', '--on-hero-line',
 ] as const
 
 const RADIUS = [['--r-sm', 8], ['--r-md', 12], ['--r-lg', 16], ['--r-xl', 22]] as const
@@ -281,7 +281,7 @@ export default function DesignSystemPage() {
           </div>
         </Section>
 
-        <Section title="Live primitives" note="Real .ps classes. The hero card below is still the OLD gradient — task 8 replaces it with a solid neutral.">
+        <Section title="Live primitives" note="Real .ps classes. Hero card is now a solid neutral: green is reserved for earnings and the primary action, and the gloss overlay is gone.">
           <div className="acct">
             <div className="acct-top">
               <span className="acct-lab">Total balance</span>

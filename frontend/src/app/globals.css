@@ -71,7 +71,12 @@ input[type='number'] {
   --bg:#F2F5F1; --surface:#FFFFFF; --surface-2:#F8FAF7;
   --ink:#131A15; --muted:#69726C; --faint:#9AA39C; --line:#E7EBE5; --line-2:#EEF1EC;
   --green:#0A6B42; --green-soft:#E8F3ED; --pos:#0A6B42; --neg:#C0483C; --amber:#C77C1E;
-  --card-a:#0E7A50; --card-b:#0A5537;
+  /* Hero surfaces. Solid and neutral, not the accent: when green filled the biggest
+     surface on a screen there was no accent left, which is why those cards leaned on
+     translucent white chrome to create any hierarchy. Green now means one thing —
+     positive movement and primary action. */
+  --hero:#131A15; --on-hero:#FFFFFF; --on-hero-muted:#A8B0AA;
+  --on-hero-fill:#232C26; --on-hero-line:#2F382F;
 
   /* ── type: 8 steps, no fractional values, 11px floor ── */
   --t-2xs:11px; --t-xs:12px; --t-sm:13px; --t-md:14px;
@@ -122,7 +127,10 @@ input[type='number'] {
   --bg:#0D1411; --surface:#141C17; --surface-2:#101713;
   --ink:#EAF0EC; --muted:#8A938D; --faint:#5E6862; --line:#222B25; --line-2:#1B231E;
   --green:#3EC088; --green-soft:#15241C; --pos:#3EC088; --neg:#E06A5C; --amber:#D9973A;
-  --card-a:#127A52; --card-b:#0A4E35;
+  /* Dark theme separates the hero by elevation and border, not hue — a near-black
+     card on a near-black page would just disappear. */
+  --hero:#101713; --on-hero:#EAF0EC; --on-hero-muted:#8A938D;
+  --on-hero-fill:#1B231E; --on-hero-line:#222B25;
   --e-1:0 1px 2px rgba(0,0,0,.3);
   --e-2:0 1px 2px rgba(0,0,0,.3),0 12px 30px -16px rgba(0,0,0,.55);
   --e-3:0 2px 4px rgba(0,0,0,.4),0 22px 52px -20px rgba(0,0,0,.7);
@@ -132,7 +140,8 @@ input[type='number'] {
     --bg:#0D1411; --surface:#141C17; --surface-2:#101713;
     --ink:#EAF0EC; --muted:#8A938D; --faint:#5E6862; --line:#222B25; --line-2:#1B231E;
     --green:#3EC088; --green-soft:#15241C; --pos:#3EC088; --neg:#E06A5C; --amber:#D9973A;
-    --card-a:#127A52; --card-b:#0A4E35;
+    --hero:#101713; --on-hero:#EAF0EC; --on-hero-muted:#8A938D;
+    --on-hero-fill:#1B231E; --on-hero-line:#222B25;
     --e-1:0 1px 2px rgba(0,0,0,.3);
     --e-2:0 1px 2px rgba(0,0,0,.3),0 12px 30px -16px rgba(0,0,0,.55);
     --e-3:0 2px 4px rgba(0,0,0,.4),0 22px 52px -20px rgba(0,0,0,.7);
@@ -148,25 +157,26 @@ input[type='number'] {
 .ps .av{width:38px;height:38px;border-radius:50%;background:var(--green-soft);color:var(--green);display:grid;place-items:center;font-weight:var(--w-bold);font-size:var(--t-sm);border:1px solid var(--line);cursor:pointer}
 
 /* account card (home hero) */
-.ps .acct{background:linear-gradient(158deg,var(--card-a),var(--card-b));color:#fff;border-radius:var(--r-xl);padding:20px 20px 18px;
-  box-shadow:0 14px 34px -14px color-mix(in srgb,var(--card-b) 70%,transparent),var(--e-2);position:relative;overflow:hidden}
-.ps .acct::after{content:"";position:absolute;width:170px;height:170px;border-radius:50%;right:-60px;top:-70px;background:rgba(255,255,255,.06)}
+.ps .acct{background:var(--hero);color:var(--on-hero);border:1px solid var(--on-hero-line);border-radius:var(--r-xl);padding:20px 20px 18px;
+  box-shadow:var(--e-2);position:relative;overflow:hidden}
 .ps .acct-top{display:flex;justify-content:space-between;align-items:center;position:relative}
-.ps .acct-lab{font-size:var(--t-sm);font-weight:var(--w-medium);opacity:.85}
-.ps .acct-chip{font-size:var(--t-2xs);font-weight:var(--w-bold);letter-spacing:.08em;border:1px solid rgba(255,255,255,.4);border-radius:var(--r-sm);padding:3px 8px}
+.ps .acct-lab{font-size:var(--t-sm);font-weight:var(--w-medium);color:var(--on-hero-muted)}
+.ps .acct-chip{font-size:var(--t-2xs);font-weight:var(--w-bold);letter-spacing:.08em;color:var(--on-hero-muted);border:1px solid var(--on-hero-line);border-radius:var(--r-sm);padding:3px 8px}
 .ps .acct-bal{font-size:var(--t-3xl);font-weight:var(--w-bold);margin-top:14px;position:relative;line-height:1.05}
 /* Explicit weight, not inherited: a bare `span` used to be caught by the old global
    `p,span,label{600}`, so dropping that rule silently promoted the kobo digits to the
    parent's 700. They're meant to sit back from the naira figure, not match it. */
-.ps .acct-bal .k{opacity:.72;font-size:var(--t-xl);font-weight:var(--w-semi)}
-.ps .acct-earn{font-size:var(--t-sm);font-weight:var(--w-semi);margin-top:7px;opacity:.92;position:relative}
+.ps .acct-bal .k{color:var(--on-hero-muted);font-size:var(--t-xl);font-weight:var(--w-semi)}
+/* Earnings are the one thing on this card that gets the accent. */
+.ps .acct-earn{font-size:var(--t-sm);font-weight:var(--w-semi);margin-top:7px;color:var(--green);position:relative}
 .ps .acct-sub{display:flex;gap:22px;margin-top:14px;position:relative}
-.ps .acct-sub .l{font-size:var(--t-2xs);font-weight:var(--w-medium);opacity:.72}.ps .acct-sub .v{font-size:var(--t-md);font-weight:var(--w-semi);margin-top:1px}
+.ps .acct-sub .l{font-size:var(--t-2xs);font-weight:var(--w-medium);color:var(--on-hero-muted)}.ps .acct-sub .v{font-size:var(--t-md);font-weight:var(--w-semi);margin-top:1px}
 .ps .acct-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px;position:relative}
-.ps .ab{display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border-radius:var(--r-md);border:0;font:inherit;font-size:var(--t-md);font-weight:var(--w-semi);cursor:pointer;background:rgba(255,255,255,.16);color:#fff;transition:transform var(--dur-fast) var(--ease-out)}
+.ps .ab{display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border-radius:var(--r-md);border:0;font:inherit;font-size:var(--t-md);font-weight:var(--w-semi);cursor:pointer;background:var(--on-hero-fill);color:var(--on-hero);transition:transform var(--dur-fast) var(--ease-out)}
 .ps .ab:active{transform:scale(.98)}
 .ps .ab svg{width:16px;height:16px}
-.ps .ab.solid{background:#fff;color:var(--card-b)}
+/* Receive is the primary action, so it gets the accent. Send is the quiet one. */
+.ps .ab.solid{background:var(--green);color:#fff}
 
 /* section header */
 .ps .sect{display:flex;justify-content:space-between;align-items:baseline;margin:20px 4px 9px}
@@ -212,9 +222,9 @@ input[type='number'] {
 .ps .p{font-size:var(--t-sm);color:var(--muted);margin:0 3px 14px}
 
 /* pool card (save) */
-.ps .pool{background:linear-gradient(158deg,var(--card-a),var(--card-b));color:#fff;border-radius:var(--r-lg);padding:16px 17px}
-.ps .pool .l{font-size:var(--t-xs);font-weight:var(--w-medium);opacity:.85}.ps .pool .v{font-size:var(--t-2xl);font-weight:var(--w-bold);margin-top:4px}
-.ps .pool .apy{display:inline-block;margin-top:10px;font-size:var(--t-xs);font-weight:var(--w-semi);background:rgba(255,255,255,.16);padding:5px 11px;border-radius:var(--r-full)}
+.ps .pool{background:var(--hero);color:var(--on-hero);border:1px solid var(--on-hero-line);border-radius:var(--r-lg);padding:16px 17px}
+.ps .pool .l{font-size:var(--t-xs);font-weight:var(--w-medium);color:var(--on-hero-muted)}.ps .pool .v{font-size:var(--t-2xl);font-weight:var(--w-bold);margin-top:4px}
+.ps .pool .apy{display:inline-block;margin-top:10px;font-size:var(--t-xs);font-weight:var(--w-semi);color:var(--green);background:var(--on-hero-fill);padding:5px 11px;border-radius:var(--r-full)}
 .ps .opt{display:flex;align-items:center;gap:13px;padding:14px 15px;width:100%;text-align:left;background:none;border:0;font-family:inherit;cursor:pointer}
 .ps .opt + .opt{border-top:1px solid var(--line)}
 .ps .opt .ic{width:38px;height:38px;border-radius:var(--r-md);flex:none;display:grid;place-items:center;background:var(--green-soft);color:var(--green)}.ps .opt .ic svg{width:17px}

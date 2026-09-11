@@ -482,7 +482,10 @@ async function ensureXendMemberId(supabase: any, userId: string): Promise<string
   const result = await registerProxyMember(userId)
   const memberId = result.data.memberId
 
-  await supabase
+  // Service role: migration 080 removed the client UPDATE policy on profiles, because that
+  // policy also let a user set their own kyc_status and lift their withdrawal cap. The
+  // read above is still fine on the session.
+  await moneyDb()
     .from('profiles')
     .update({ xend_member_id: memberId })
     .eq('id', userId)

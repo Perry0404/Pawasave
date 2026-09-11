@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { hashValue, useAuth } from '@/hooks/use-data'
 import Logo from '@/components/logo'
 import Link from 'next/link'
-import { Mail, Lock, User, ArrowRight, Loader2, Eye, EyeOff, ArrowLeft } from 'lucide-react'
+import { Envelope, Lock, User, ArrowRight, CircleNotch, Eye, EyeSlash, ArrowLeft } from '@phosphor-icons/react'
 
 export default function AuthScreen() {
   const { signUp, signIn, signInWithGoogle, resetPassword } = useAuth()
@@ -100,7 +100,7 @@ export default function AuthScreen() {
         {signupEmailSent ? (
           <div className="text-center py-4">
             <div className="w-14 h-14 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Mail className="w-7 h-7 text-emerald-600" />
+              <Envelope className="w-7 h-7 text-emerald-600" />
             </div>
             <h2 className="text-lg font-bold text-slate-900 mb-2">Check Your Email</h2>
             <p className="text-sm text-slate-500 mb-4 max-w-xs mx-auto">
@@ -133,7 +133,7 @@ export default function AuthScreen() {
                 <div>
                   <label className="text-xs font-medium text-slate-500 mb-1.5 block">Email</label>
                   <div className="relative">
-                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Envelope className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
                       type="email"
                       value={email}
@@ -150,7 +150,7 @@ export default function AuthScreen() {
                   disabled={busy}
                   className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98]"
                 >
-                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send Reset Link'}
+                  {busy ? <CircleNotch className="w-4 h-4 animate-spin" /> : 'Send Reset Link'}
                 </button>
               </form>
             )}
@@ -202,7 +202,7 @@ export default function AuthScreen() {
               <div>
                 <label className="text-xs font-medium text-slate-500 mb-1.5 block">Email</label>
                 <div className="relative">
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Envelope className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input
                     type="email"
                     value={email}
@@ -243,7 +243,7 @@ export default function AuthScreen() {
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition p-0.5"
                     tabIndex={-1}
                   >
-                    {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showPw ? <EyeSlash className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
@@ -309,7 +309,7 @@ export default function AuthScreen() {
                 disabled={busy}
                 className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98]"
               >
-                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : (
+                {busy ? <CircleNotch className="w-4 h-4 animate-spin" /> : (
                   <>
                     {mode === 'register' ? 'Get Started' : 'Sign In'}
                     <ArrowRight className="w-4 h-4" />

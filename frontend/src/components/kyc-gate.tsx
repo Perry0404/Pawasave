@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import Logo from './logo'
-import { Shield, Loader2, AlertCircle, CreditCard, CheckCircle2, UserRound, Calendar } from 'lucide-react'
+import { ShieldCheck, CircleNotch, WarningCircle, CreditCard, CheckCircle, User, Calendar } from '@phosphor-icons/react'
 import type { VerificationCaptureEngineProps } from '@usesense/web-sdk'
 
 // Sense's biometric capture widget — camera + liveness. Client-only (uses
@@ -14,7 +14,7 @@ const VerificationCaptureEngine = dynamic<VerificationCaptureEngineProps>(
     ssr: false,
     loading: () => (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+        <CircleNotch className="w-6 h-6 animate-spin text-emerald-600" />
       </div>
     ),
   },
@@ -78,7 +78,7 @@ export default function KycGate({ userId, kycStatus, onRefresh }: Props) {
   if (kycStatus === 'rejected' && step === 'form') {
     return (
       <Shell>
-        <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
+        <WarningCircle className="w-12 h-12 text-red-500 mb-4" />
         <h1 className="text-xl font-bold text-slate-900 mb-2">Verification Failed</h1>
         <p className="text-slate-500 text-sm text-center max-w-xs mb-6">
           We couldn’t confirm your identity. Please try again in good lighting, with your face clearly visible.
@@ -97,12 +97,12 @@ export default function KycGate({ userId, kycStatus, onRefresh }: Props) {
   if (step === 'processing' || kycStatus === 'submitted') {
     return (
       <Shell>
-        <CheckCircle2 className="w-12 h-12 text-emerald-500 mb-4" />
+        <CheckCircle className="w-12 h-12 text-emerald-500 mb-4" />
         <h1 className="text-xl font-bold text-slate-900 mb-2">Verification Submitted</h1>
         <p className="text-slate-500 text-sm text-center max-w-xs mb-6">
           We’re confirming your identity — this usually takes a few seconds. You can continue; we’ll unlock withdrawals as soon as it’s approved.
         </p>
-        <div className="flex items-center gap-2 text-emerald-600 mb-6"><Loader2 className="w-4 h-4 animate-spin" /><span className="text-sm font-medium">Checking status…</span></div>
+        <div className="flex items-center gap-2 text-emerald-600 mb-6"><CircleNotch className="w-4 h-4 animate-spin" /><span className="text-sm font-medium">Checking status…</span></div>
         <button onClick={onRefresh} className="text-sm font-semibold text-white bg-emerald-600 px-5 py-2.5 rounded-xl hover:bg-emerald-700 transition">
           Continue
         </button>
@@ -139,7 +139,7 @@ export default function KycGate({ userId, kycStatus, onRefresh }: Props) {
     <div className="min-h-dvh bg-slate-50 flex flex-col safe-top safe-bottom">
       <div className="flex-1 flex flex-col items-center justify-center px-6 pt-10 pb-8">
         <Logo size={44} className="mb-3" />
-        <Shield className="w-9 h-9 text-emerald-600 mb-3" />
+        <ShieldCheck className="w-9 h-9 text-emerald-600 mb-3" />
         <h1 className="text-xl font-bold text-slate-900 mb-1">Verify Your Identity</h1>
         <p className="text-slate-500 text-sm text-center max-w-xs mb-7">
           Confirm your details, then a quick face check. Required before withdrawals.
@@ -150,7 +150,7 @@ export default function KycGate({ userId, kycStatus, onRefresh }: Props) {
             <div>
               <label className="text-xs font-medium text-slate-500 mb-1.5 block">First name</label>
               <div className="relative">
-                <UserRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Ada"
                   className="w-full pl-9 pr-3 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
               </div>
@@ -201,7 +201,7 @@ export default function KycGate({ userId, kycStatus, onRefresh }: Props) {
 
           <button type="submit" disabled={busy}
             className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98]">
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Shield className="w-4 h-4" /> Continue to face check</>}
+            {busy ? <CircleNotch className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4" /> Continue to face check</>}
           </button>
         </form>
 

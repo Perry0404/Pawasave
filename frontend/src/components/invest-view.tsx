@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { CircleNotch } from '@phosphor-icons/react'
 import type { Wallet } from '@/lib/types'
 import { useStockQuotes, MarketCards, StockQuotePanel, ChangeBadge, Sparkline, StockLogo } from './stock-chart'
 

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { formatNaira } from '@/lib/format'
-import { Users, Loader2, CheckCircle2, XCircle, ArrowLeft } from 'lucide-react'
+import { Users, CircleNotch, CheckCircle, XCircle, ArrowLeft } from '@phosphor-icons/react'
 import Logo from '@/components/logo'
 
 const supabase = createClient()
@@ -96,7 +96,7 @@ export default function JoinPage({ params }: { params: { groupId: string } }) {
           {/* Loading */}
           {!group && !loadErr && (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+              <CircleNotch className="w-6 h-6 animate-spin text-slate-400" />
             </div>
           )}
 
@@ -117,7 +117,7 @@ export default function JoinPage({ params }: { params: { groupId: string } }) {
           {/* Success */}
           {joined && (
             <div className="p-6 text-center">
-              <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+              <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
               <p className="text-base font-bold text-slate-900 mb-1">You&apos;re in!</p>
               <p className="text-sm text-slate-500">Redirecting to your circles…</p>
             </div>
@@ -175,7 +175,7 @@ export default function JoinPage({ params }: { params: { groupId: string } }) {
                     className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3.5 rounded-xl transition flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-60"
                   >
                     {busy ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <CircleNotch className="w-4 h-4 animate-spin" />
                     ) : (
                       <Users className="w-4 h-4" />
                     )}

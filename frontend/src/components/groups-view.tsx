@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { formatNaira, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
 import { siteBaseUrl } from '@/lib/site-url'
-import { Loader2, Copy, Check } from 'lucide-react'
+import { CircleNotch, Copy, Check } from '@phosphor-icons/react'
 import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -425,7 +425,7 @@ export default function GroupsView({ user, wallet }: Props) {
       </div>
 
       {loading ? (
-        <div style={{ display: 'grid', placeItems: 'center', padding: '48px 0' }}><Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--muted)' }} /></div>
+        <div style={{ display: 'grid', placeItems: 'center', padding: '48px 0' }}><CircleNotch className="w-6 h-6 animate-spin" style={{ color: 'var(--muted)' }} /></div>
       ) : groups.length === 0 ? (
         <div className="empty" style={{ marginTop: 14 }}>
           <div className="eh">No circles yet</div>

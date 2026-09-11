@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react'
 import { formatNaira, microUsdcToKobo, getRate, timeAgo, cleanDescription } from '@/lib/format'
 import { initiateDeposit, initiateWithdrawal, getBanks, resolveAccount, type RampResult, type Bank } from '@/lib/flint'
 import { talkback } from '@/lib/voice'
-import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard, Loader2, ArrowLeft, Copy, Check, ChevronDown, Building2 } from 'lucide-react'
+// Bank aliased: `Bank` is already the bank-list type from @/lib/flint.
+import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard, CircleNotch, ArrowLeft, Copy, Check, CaretDown, Bank as BankIcon } from '@phosphor-icons/react'
 import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -143,7 +144,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  if (!wallet) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
+  if (!wallet) return <div className="flex items-center justify-center py-20"><CircleNotch className="w-6 h-6 animate-spin text-slate-400" /></div>
 
   const rate = liveRate
   const savingsKobo = microUsdcToKobo(wallet.usdc_balance_micro, rate)
@@ -281,7 +282,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 mb-3 flex items-start gap-3 transition active:scale-[0.99]"
         >
           <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
-            <Building2 className="w-5 h-5 text-emerald-600" />
+            <BankIcon className="w-5 h-5 text-emerald-600" />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-slate-900">Naira bank transfer</p>
@@ -368,7 +369,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           </>
         ) : pending ? (
           <div className="mt-6 text-center">
-            <Loader2 className="w-6 h-6 animate-spin text-emerald-600 mx-auto mb-3" />
+            <CircleNotch className="w-6 h-6 animate-spin text-emerald-600 mx-auto mb-3" />
             <p className="text-sm font-medium text-slate-700">Creating your account…</p>
             <p className="text-xs text-slate-400 mt-1">This usually takes about 2 minutes.</p>
             <button
@@ -404,7 +405,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
               disabled={busy || bvn.length !== 11}
               className="w-full mt-5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-60"
             >
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Building2 className="w-4 h-4" />}
+              {busy ? <CircleNotch className="w-4 h-4 animate-spin" /> : <BankIcon className="w-4 h-4" />}
               Create my account
             </button>
           </>
@@ -443,7 +444,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           </div>
         ) : (
           <div className="flex items-center gap-2 text-sm text-slate-400 py-6">
-            <Loader2 className="w-4 h-4 animate-spin" /> Generating your address…
+            <CircleNotch className="w-4 h-4 animate-spin" /> Generating your address…
           </div>
         )}
 
@@ -499,7 +500,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           disabled={busy || !amount}
           className="w-full mt-6 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-60"
         >
-          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+          {busy ? <CircleNotch className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
           Continue
         </button>
       </div>
@@ -672,7 +673,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           <div>
             <label className="text-xs text-slate-500 block mb-1.5">Bank</label>
             {banksLoading ? (
-              <div className="flex items-center gap-2 py-3 text-sm text-slate-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading banks...</div>
+              <div className="flex items-center gap-2 py-3 text-sm text-slate-400"><CircleNotch className="w-4 h-4 animate-spin" /> Loading banks...</div>
             ) : banksError ? (
               <div className="text-xs text-red-500 py-2">Could not load banks. Please retry.</div>
             ) : (
@@ -708,7 +709,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
                 )}
                 {!bankSearch && (
                   <div className="relative">
-                    <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                    <BankIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                     <select
                       value={bankCode}
                       onChange={e => { setBankCode(e.target.value); setBankSearch(banks.find(b => b.code === e.target.value)?.name || '') }}
@@ -717,7 +718,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
                       <option value="">— or select from list —</option>
                       {banks.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
                     </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                    <CaretDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                   </div>
                 )}
               </div>
@@ -749,7 +750,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
                 autoComplete="name"
                 className={`w-full px-4 py-3 pr-10 bg-slate-50 border rounded-xl text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${nameResolved ? 'border-emerald-300' : 'border-slate-200'}`}
               />
-              {resolvingName && <Loader2 className="w-4 h-4 animate-spin text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />}
+              {resolvingName && <CircleNotch className="w-4 h-4 animate-spin text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />}
               {nameResolved && !resolvingName && <Check className="w-4 h-4 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2" />}
             </div>
             {resolveError && <p className="text-xs text-amber-600 mt-1.5">{resolveError}</p>}
@@ -791,7 +792,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           disabled={busy || !amount || !bankCode || accountNumber.length < 10 || !accountHolderName.trim() || transactionPin.length < 4}
           className="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-60"
         >
-          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUpRight className="w-4 h-4" />}
+          {busy ? <CircleNotch className="w-4 h-4 animate-spin" /> : <ArrowUpRight className="w-4 h-4" />}
           Send Money
         </button>
       </div>
@@ -987,7 +988,7 @@ function StatementSheet({ email, onClose, flash }: { email?: string; onClose: ()
             disabled={!!busy}
             style={{ flex: 1, padding: '13px', borderRadius: 13, fontWeight: 650, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit', border: '1.5px solid var(--green)', background: 'var(--surface)', color: 'var(--green)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, opacity: busy ? 0.7 : 1 }}
           >
-            {busy === 'view' ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Print / PDF
+            {busy === 'view' ? <CircleNotch className="w-4 h-4 animate-spin" /> : null} Print / PDF
           </button>
           <button
             onClick={() => run('email')}
@@ -995,7 +996,7 @@ function StatementSheet({ email, onClose, flash }: { email?: string; onClose: ()
             className="cta"
             style={{ flex: 1, margin: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, opacity: busy ? 0.7 : 1 }}
           >
-            {busy === 'email' ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Email to me
+            {busy === 'email' ? <CircleNotch className="w-4 h-4 animate-spin" /> : null} Email to me
           </button>
         </div>
       </div>

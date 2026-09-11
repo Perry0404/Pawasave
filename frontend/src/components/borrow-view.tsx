@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Loader2, X } from 'lucide-react'
+import { CircleNotch, X } from '@phosphor-icons/react'
 
 type Limit = {
   fixed_savings_micro: number
@@ -112,7 +112,7 @@ export default function BorrowView({ wallet, refresh }: { wallet: any; refresh: 
     }
   }
 
-  if (loading) return <div className="b" style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}><Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--muted)' }} /></div>
+  if (loading) return <div className="b" style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}><CircleNotch className="w-6 h-6 animate-spin" style={{ color: 'var(--muted)' }} /></div>
 
   const noAssets = !limit || (limit.fixed_savings_micro === 0 && limit.equity_micro === 0 && (limit.rwa_micro || 0) === 0)
 

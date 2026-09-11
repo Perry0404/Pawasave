@@ -23,6 +23,8 @@ jobs:
         run: npx tsc --noEmit
       - name: Lint
         run: npm run lint --if-present
+      - name: Design tokens (no undefined CSS variables)
+        run: npm run check:tokens
       - name: Dependency audit (high+)
         run: npm audit --audit-level=high
 

@@ -259,6 +259,21 @@ input[type='number'] {
 .ps .info{background:var(--green-soft);border:1px solid transparent;border-radius:var(--r-lg);padding:16px}
 .ps .info .l{font-size:var(--t-2xs);color:var(--green);font-weight:var(--w-semi)}
 .ps .info .code{font-size:var(--t-xs);font-weight:var(--w-bold);color:var(--ink);word-break:break-all}
+.ps .info .v{font-size:var(--t-sm);font-weight:var(--w-semi);color:var(--ink);margin-top:1px}
+.ps .info .big{font-size:var(--t-xl);font-weight:var(--w-bold);color:var(--ink);letter-spacing:.04em}
+.ps .info .hint{font-size:var(--t-2xs);font-weight:var(--w-medium);color:var(--muted);margin-top:3px}
+.ps .info + .info,.ps .info.spaced{margin-top:var(--s-3)}
+
+/* fee / amount breakdown, as on the send review */
+.ps .breakdown{margin-top:var(--s-4);background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px}
+.ps .breakdown .r{display:flex;justify-content:space-between;font-size:var(--t-sm);color:var(--muted);font-weight:var(--w-medium)}
+.ps .breakdown .r + .r{margin-top:4px}
+.ps .breakdown .r b{color:var(--ink);font-weight:var(--w-semi)}
+.ps .breakdown .tot{display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:var(--t-sm);font-weight:var(--w-semi);color:var(--ink)}
+
+/* muted helper line under a field or card */
+.ps .hint{font-size:var(--t-xs);font-weight:var(--w-medium);color:var(--muted);margin-top:6px}
+.ps .hint.tight{margin-top:3px}
 .ps .kyc{margin:0 2px 14px;background:color-mix(in srgb,var(--amber) 12%,transparent);border:1px solid color-mix(in srgb,var(--amber) 30%,transparent);border-radius:var(--r-lg);padding:13px 15px}
 .ps .kyc .t{font-size:var(--t-sm);font-weight:var(--w-semi);color:var(--amber);display:flex;align-items:center;gap:6px}
 .ps .kyc .d{font-size:var(--t-xs);font-weight:var(--w-medium);color:var(--muted);margin-top:3px}

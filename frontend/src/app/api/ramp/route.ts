@@ -214,8 +214,10 @@ async function maybeDebitForWithdrawal(
   amountNaira: number,
   reference: string,
 ): Promise<NextResponse | null> {
-  // cNGN balance: 1 NGN = 1 cNGN. Debit the naira value as cNGN micro (no rate).
-  const cngnMicro = Math.floor(amountNaira * 1_000_000)
+  // cNGN balance: 1 NGN = 1 cNGN. Derive from integer kobo, not from the naira float: the
+  // ledger row rounds and this used to floor, so the two could disagree by a kobo on the same
+  // withdrawal. 100 kobo = 1 NGN = 1e6 micro, so 1 kobo = 1e4 micro exactly.
+  const cngnMicro = Math.round(amountNaira * 100) * 10_000
 
   // Deposits auto-allocate 90% into the savings pool (cngn_pool_micro), leaving
   // only ~10% spendable. A withdrawal must be able to reach the pooled savings, so
@@ -913,8 +915,39 @@ async function runFlipeet(
 // full (Sense) KYC. "Full" is exactly kyc_status='verified' (see migration 058), so we
 // key off kyc_status and never read the new kyc_tier column — safe to deploy in any
 // order relative to the migration.
-const LITE_KYC_CAP_NGN  = Number(process.env.LITE_KYC_CAP_NGN)  || 20000      // no BVN yet — per withdrawal
-const BVN_DAILY_CAP_NGN = Number(process.env.BVN_DAILY_CAP_NGN) || 3_000_000  // BVN-verified (tier 1) — per rolling 24h; above this needs full (Sense) KYC
+const LITE_KYC_CAP_NGN  = Number(process.env.LITE_KYC_CAP_NGN)  || 20000      // no BVN yet, per withdrawal
+const BVN_DAILY_CAP_NGN = Number(process.env.BVN_DAILY_CAP_NGN) || 3_000_000  // BVN tier, per rolling 24h
+
+/**
+ * Absolute per-withdrawal maximum, applied to everyone including fully verified accounts.
+ *
+ * The tier caps read customer-writable data. enforceWithdrawalKycCap sums amount_kobo from
+ * transactions, and that table still carries an INSERT policy for the browser, so a negative
+ * row made the daily total negative and the cap unreachable. Migration 081 blocks negative
+ * amounts, and this is the second layer: it reads only env, so bypassing the cap now needs both
+ * the constraint and this to fail.
+ *
+ * Set above BVN_DAILY_CAP_NGN so the existing tiers behave unchanged for real customers.
+ * Tunable without a deploy.
+ */
+const HARD_WITHDRAWAL_CEILING_NGN = Number(process.env.HARD_WITHDRAWAL_CEILING_NGN) || 5_000_000
+
+/** Rejects anything above the absolute ceiling, before any tier logic runs. */
+function enforceHardCeiling(userId: string, amountNaira: number): NextResponse | null {
+  if (!(amountNaira > HARD_WITHDRAWAL_CEILING_NGN)) return null
+  // Log the active value, otherwise a misconfigured ceiling is invisible until someone hits it.
+  console.warn('[ramp] withdrawal above the hard ceiling, rejected', {
+    userId, amountNaira, ceiling: HARD_WITHDRAWAL_CEILING_NGN,
+  })
+  return NextResponse.json(
+    {
+      error: `Withdrawals above ₦${HARD_WITHDRAWAL_CEILING_NGN.toLocaleString()} need to be arranged with support.`,
+      code: 'ABOVE_CEILING',
+      cap: HARD_WITHDRAWAL_CEILING_NGN,
+    },
+    { status: 403 },
+  )
+}
 
 async function enforceWithdrawalKycCap(
   supabase: any,
@@ -999,6 +1032,22 @@ export async function POST(request: NextRequest) {
     }
 
     if (type === 'off') {
+      // One integer kobo value for the whole request. Rejecting sub-kobo precision here means
+      // the ledger row and the on-chain send are both derived from the same integer and cannot
+      // round in opposite directions.
+      const amountKobo = Math.round(amount * 100)
+      if (!Number.isSafeInteger(amountKobo) || Math.abs(amount * 100 - amountKobo) > 1e-6) {
+        return NextResponse.json(
+          { error: 'Amount must be a whole number of kobo, so at most two decimal places.' },
+          { status: 400 },
+        )
+      }
+
+      // Absolute ceiling first, reading only env. Everything below it consults data the
+      // customer can influence.
+      const ceilingError = enforceHardCeiling(user.id, amountKobo / 100)
+      if (ceilingError) return ceilingError
+
       const pinError = await ensureWithdrawalPin(supabase, user.id, transactionPin || '')
       if (pinError) return pinError
       // Tiered KYC: deposits are uncapped; only withdrawals are capped for un-verified

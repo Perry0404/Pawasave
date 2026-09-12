@@ -5,7 +5,7 @@ import { formatNaira, microUsdcToKobo, getRate, timeAgo, cleanDescription } from
 import { initiateDeposit, initiateWithdrawal, getBanks, resolveAccount, type RampResult, type Bank } from '@/lib/flint'
 import { talkback } from '@/lib/voice'
 // Bank aliased: `Bank` is already the bank-list type from @/lib/flint.
-import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard, CircleNotch, ArrowLeft, Copy, Check, CaretDown, Bank as BankIcon } from '@phosphor-icons/react'
+import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard, CircleNotch, ArrowLeft, Copy, Check, CaretDown, FileText, Bank as BankIcon } from '@phosphor-icons/react'
 import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -873,7 +873,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           onClick={() => setShowStatement(true)}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 0, fontFamily: 'inherit', cursor: 'pointer', color: 'inherit' }}
         >
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+          <FileText size={14} />
           Statement
         </button>
       </div>

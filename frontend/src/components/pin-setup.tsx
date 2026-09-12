@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { Lock } from '@phosphor-icons/react'
 
 /**
  * Mandatory transaction-PIN setup. Shown once, full-screen, to any logged-in user
@@ -39,7 +40,7 @@ export default function PinSetup({ email, onDone }: { email?: string | null; onD
     <div className="ps" style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', padding: 24 }}>
       <div style={{ width: '100%', maxWidth: 360 }}>
         <div style={{ width: 56, height: 56, borderRadius: 16, margin: '0 auto 16px', display: 'grid', placeItems: 'center', background: 'var(--green-soft)', color: 'var(--green)' }}>
-          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+          <Lock size={26} />
         </div>
         <div className="h2" style={{ textAlign: 'center', margin: '0 0 4px' }}>Create your transaction PIN</div>
         <p className="p" style={{ textAlign: 'center' }}>

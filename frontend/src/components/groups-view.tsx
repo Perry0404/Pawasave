@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { formatNaira, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
 import { siteBaseUrl } from '@/lib/site-url'
-import { CircleNotch, Copy, Check, Crown } from '@phosphor-icons/react'
+import { CircleNotch, Copy, Check, Crown, ArrowUp, Users, CaretRight } from '@phosphor-icons/react'
 import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -384,7 +384,7 @@ export default function GroupsView({ user, wallet }: Props) {
           <div className="feedcard">
             {contributions.map((c) => (
               <div key={c.id} className="tx">
-                <span className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg></span>
+                <span className="ic"><ArrowUp /></span>
                 <div className="mid"><div className="nm">Cycle {c.cycle_number}</div><div className="sub">{timeAgo(c.paid_at)}</div></div>
                 <div className="rt"><div className="amt pos num">{formatNaira(c.amount_kobo)}</div></div>
               </div>
@@ -451,9 +451,9 @@ export default function GroupsView({ user, wallet }: Props) {
         <div className="rows" style={{ marginTop: 8 }}>
           {groups.map((g) => (
             <button key={g.id} className="opt" onClick={() => openGroup(g)}>
-              <span className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg></span>
+              <span className="ic"><Users /></span>
               <div className="mid"><div className="nm">{g.name}</div><div className="sub">{formatNaira(g.contribution_amount_kobo)} / {g.cycle_period} · {g.member_count}/{g.max_members} members</div></div>
-              <span className="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></span>
+              <span className="chev"><CaretRight /></span>
             </button>
           ))}
         </div>

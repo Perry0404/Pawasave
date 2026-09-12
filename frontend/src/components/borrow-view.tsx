@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { CircleNotch, X } from '@phosphor-icons/react'
+import { CircleNotch, X, TrendUp, Lock, Check } from '@phosphor-icons/react'
 
 type Limit = {
   fixed_savings_micro: number
@@ -31,9 +31,9 @@ const naira = (micro: number) =>
 
 const TERMS = [30, 90, 180] as const
 
-const IconStock = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l6-6 4 4 8-8" /><path d="M17 7h4v4" /></svg>
-const IconLock = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="9" width="16" height="12" rx="2" /><path d="M8 9V7a4 4 0 0 1 8 0v2" /></svg>
-const IconCheck = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+const IconStock = () => <TrendUp />
+const IconLock = () => <Lock />
+const IconCheck = () => <Check />
 
 export default function BorrowView({ wallet, refresh }: { wallet: any; refresh: () => Promise<void> }) {
   const [data, setData] = useState<{ limit: Limit | null; activeLoan: Loan | null; collateral: Collateral[]; agreementVersion: string } | null>(null)

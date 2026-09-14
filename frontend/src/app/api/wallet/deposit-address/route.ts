@@ -2,11 +2,13 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import { deriveDepositAddress, depositWalletConfigured } from '@/lib/deposit-wallet'
+import { enabledChains } from '@/lib/deposit-chains'
 
 /**
  * GET /api/wallet/deposit-address
- * Returns the signed-in user's real Base cNGN deposit address, deriving and
- * persisting it from their deposit_index on first call.
+ * Returns the signed-in user's real Base cNGN deposit address (deriving + persisting it from
+ * their deposit_index on first call), plus which cross-chain stablecoin deposits are live —
+ * the SAME address also accepts USDC/USDT on every enabled chain (auto-converted to cNGN).
  */
 export async function GET() {
   const cookieStore = await cookies()
@@ -39,5 +41,8 @@ export async function GET() {
     await supabase.rpc('set_deposit_address', { p_user_id: user.id, p_address: address })
   }
 
-  return NextResponse.json({ address })
+  // Same address, every enabled chain. Empty when cross-chain deposits are off.
+  const crosschain = enabledChains().map((c) => ({ key: c.key, name: c.name }))
+
+  return NextResponse.json({ address, crosschain, crosschainTokens: crosschain.length ? ['USDC', 'USDT'] : [] })
 }

@@ -37,6 +37,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   const [acctCopied, setAcctCopied] = useState(false)
   const [liveRate, setLiveRate] = useState<number>(getRate())
   const [depositAddr, setDepositAddr] = useState<string | null>(wallet?.deposit_address ?? null)
+  const [ccChains, setCcChains] = useState<{ key: string; name: string }[]>([])
   const [rampStatus, setRampStatus] = useState<RampStatus | null>(null)
 
   // Withdraw state
@@ -133,7 +134,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   useEffect(() => {
     fetch('/api/wallet/deposit-address')
       .then((res) => res.ok ? res.json() : null)
-      .then((data) => { if (data?.address) setDepositAddr(data.address) })
+      .then((data) => { if (data?.address) setDepositAddr(data.address); if (Array.isArray(data?.crosschain)) setCcChains(data.crosschain) })
       .catch(() => undefined)
 
     fetch('/api/wallet/sync-deposits', { method: 'POST' })
@@ -421,7 +422,11 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <h2 className="text-lg font-bold text-slate-900 mb-1">Crypto Deposit</h2>
-        <p className="text-sm text-slate-400 mb-5">Send cNGN on the Base network to the address below. Your balance is credited automatically once it confirms.</p>
+        <p className="text-sm text-slate-400 mb-5">
+          {ccChains.length > 0
+            ? 'Send cNGN on Base — or USDC/USDT on any supported chain — to the address below. It’s converted to cNGN and credited automatically.'
+            : 'Send cNGN on the Base network to the address below. Your balance is credited automatically once it confirms.'}
+        </p>
 
         {depositAddr ? (
           <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5">
@@ -447,9 +452,22 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           </div>
         )}
 
+        {ccChains.length > 0 && (
+          <div className="mt-4 bg-emerald-50/60 border border-emerald-200 rounded-xl px-4 py-3">
+            <p className="text-[11px] font-semibold text-emerald-700 mb-1">Also accepted at this address</p>
+            <p className="text-xs text-emerald-700 leading-relaxed">
+              <strong>USDC or USDT</strong> on {ccChains.map((c) => c.name).join(', ')} — auto-converted to cNGN at the live rate and credited to your balance (usually within a few minutes).
+            </p>
+          </div>
+        )}
+
         <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
           <p className="text-xs text-amber-700 leading-relaxed">
-            Only send <strong>cNGN on Base</strong> to this address. Any other token or network will be lost.
+            {ccChains.length > 0 ? (
+              <>Send only <strong>cNGN on Base</strong> or <strong>USDC/USDT</strong> on the chains listed above. Any other token or network will be lost.</>
+            ) : (
+              <>Only send <strong>cNGN on Base</strong> to this address. Any other token or network will be lost.</>
+            )}
           </p>
         </div>
       </div>

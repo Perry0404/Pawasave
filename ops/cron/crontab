@@ -28,6 +28,10 @@ CRON_TZ=UTC
 # Finish stock sells stuck between legs (stock→USDC done, USDC→cNGN awaiting a solver).
 */10 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/equity-sell-reconcile "$HC_EQUITY_SELL_RECONCILE"
 
+# Cross-chain stablecoin deposits: scan USDC/USDT on every enabled chain → cNGN on Base.
+# (No-op unless CROSSCHAIN_DEPOSIT_ENABLED=true; each fill can take minutes, hence the 5-min slot.)
+*/5 * * * *   . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/scan-crosschain-deposits "$HC_SCAN_CROSSCHAIN_DEPOSITS"
+
 # ── every 15 min ─────────────────────────────────────────────────────────────
 */15 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/reconcile-withdrawals "$HC_RECONCILE_WITHDRAWALS"
 

@@ -241,3 +241,144 @@ export function convertCngnToUsdc(cngnMicro: bigint): Promise<bigint> {
 export function convertUsdcToCngn(usdcMicro: bigint): Promise<bigint> {
   return convert('usdc->cngn', usdcMicro)
 }
+
+// ── Cross-chain deposit: USDC/USDT on any source chain → cNGN on Base ──────────
+
+/** Minimal shape of a source chain we need here (matches lib/deposit-chains.ts SourceChain). */
+export interface CrossChainSource {
+  key: string
+  chainId: number
+  stateMachineId: string
+  rpc: string
+  bundler: string
+}
+
+/** Pick the viem chain object for a given EVM chain id (for local tx signing on that chain). */
+function viemChainById(viemChains: any, chainId: number): any {
+  for (const c of Object.values(viemChains) as any[]) {
+    if (c && typeof c === 'object' && c.id === chainId) return c
+  }
+  throw new Error(`HyperFX: no viem chain for id ${chainId}`)
+}
+
+/**
+ * Place a HyperFX cross-chain intent that escrows `amountIn` of `tokenInAddr` (USDC/USDT on
+ * the SOURCE chain, in that token's own decimals) from custody and has a solver deliver cNGN
+ * to custody on BASE. Returns the cNGN (micro) actually received on Base (on-chain delta).
+ *
+ * Custody (CUSTODY_PRIVATE_KEY — same address on every EVM chain) must hold native gas AND a
+ * small fee-token (USDC) buffer on the SOURCE chain to place the order; the cNGN lands on Base
+ * where the app credits the user. Throws on no-solver / expiry / any failure so the caller can
+ * mark the deposit for retry (the escrow is reclaimable via ops/cancel-stuck-orders.mjs). For a
+ * Base source this degenerates to the same-chain path (source === destination === Base).
+ */
+export async function depositCrossChainToCngn(params: {
+  source: CrossChainSource
+  tokenInAddr: string
+  amountIn: bigint
+  beneficiaryBase: string
+}): Promise<bigint> {
+  if (!HYPERFX_ENABLED) throw new Error('HyperFX is disabled (HYPERFX_ENABLED not set)')
+  if (params.amountIn <= 0n) throw new Error('HyperFX: zero amount')
+
+  const { sdk, viem, viemAccounts } = await loadDeps()
+  const viemChains: any = await import('viem/chains')
+  const { EvmChain, IntentGateway, IntentsCoprocessor, createQueryClient, IntentOrderStatus } = sdk
+
+  const baseRpc = rpcUrl()
+  const srcChain = await EvmChain.create(params.source.rpc, params.source.bundler)
+  const dstChain = await EvmChain.create(baseRpc, bundlerUrl())
+  const coprocessor = await IntentsCoprocessor.connect(COPROCESSOR_WS)
+  const queryClient = createQueryClient({ url: INDEXER_URL })
+  const gateway = (await IntentGateway.create(srcChain, dstChain, coprocessor)).withQueryClient(queryClient)
+
+  const account = await custodyAccount(viemAccounts)
+  const srcViem = viemChainById(viemChains, params.source.chainId)
+  const walletClient = viem.createWalletClient({ account, chain: srcViem, transport: viem.http(params.source.rpc) })
+
+  const srcId = srcChain.config.stateMachineId
+  const dstId = dstChain.config.stateMachineId
+  const cngn = dstChain.configService.getCNgnAsset(dstId)
+  if (!cngn) throw new Error(`HyperFX: cNGN is not configured on ${dstId}`)
+  const tokenIn = params.tokenInAddr
+
+  const quote = await gateway.quoteIntent({ tokenIn, tokenOut: cngn, amountIn: params.amountIn })
+
+  const order: any = {
+    user: viem.zeroHash,
+    source: srcId,
+    destination: dstId,
+    deadline: (await srcChain.client.getBlockNumber()) + 200n,
+    nonce: 0n,
+    fees: 0n,
+    session: viem.zeroAddress,
+    predispatch: { assets: [], call: '0x' },
+    inputs: [{ token: tokenIn, amount: quote.amountIn }],
+    output: { beneficiary: params.beneficiaryBase, assets: [{ token: cngn, amount: quote.amountOut }], call: '0x' },
+  }
+
+  const { fees, feeToken } = await gateway.quoteOrderFees(order)
+  order.fees = fees
+  const gatewayAddr = srcChain.configService.getIntentGatewayAddress(srcId)
+
+  // Nonces + approvals are on the SOURCE chain (where custody escrows + pays the fee token).
+  let nonce = Number(await srcChain.client.getTransactionCount({ address: account.address, blockTag: 'pending' }))
+  const MAX = (1n << 256n) - 1n
+  const allowance = (token: string) => srcChain.client.readContract({
+    address: token, abi: viem.erc20Abi, functionName: 'allowance', args: [account.address, gatewayAddr],
+  }).then((v: any) => BigInt(v))
+
+  if (await allowance(tokenIn) < MAX) {
+    await walletClient.writeContract({ address: tokenIn, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, MAX], nonce: nonce++ })
+      .then((h: string) => srcChain.client.waitForTransactionReceipt({ hash: h }))
+  }
+  if (fees > 0n && feeToken && feeToken.toLowerCase() !== tokenIn.toLowerCase() && await allowance(feeToken) < MAX) {
+    await walletClient.writeContract({ address: feeToken, abi: viem.erc20Abi, functionName: 'approve', args: [gatewayAddr, MAX], nonce: nonce++ })
+      .then((h: string) => srcChain.client.waitForTransactionReceipt({ hash: h }))
+  }
+
+  // Output (cNGN) lands on BASE — measure the delta on custody's Base cNGN balance.
+  const before = await cngnBalanceOf(params.beneficiaryBase)
+
+  const run = gateway.executeBest(order, viem.padHex(viem.stringToHex(process.env.HYPERFX_GRAFFITI || 'pawasave'), { size: 32, dir: 'right' }), {
+    auctionTimeMs: AUCTION_MS, pollIntervalMs: 5_000,
+  })
+  const firstStep = await run.next()
+  if (firstStep.done || firstStep.value.status !== IntentOrderStatus.AWAITING_PLACE_ORDER) {
+    throw new Error('HyperFX: expected placement transaction')
+  }
+  const { to, data, value } = firstStep.value
+  const prepared = await walletClient.prepareTransactionRequest({
+    account, chain: srcViem, to, data, value: BigInt(value ?? 0n), nonce: nonce++,
+  })
+  const signed = await walletClient.signTransaction(prepared)
+  const placed = await run.next(signed)
+  if (placed.done || placed.value.status !== IntentOrderStatus.ORDER_PLACED) {
+    throw new Error('HyperFX: order was not placed')
+  }
+
+  let expired = false
+  let statusFilled = false
+  ;(async () => {
+    try {
+      for await (const update of run) {
+        if (update.status === IntentOrderStatus.FILLED) { statusFilled = true; break }
+        if (update.status === IntentOrderStatus.EXPIRED) { expired = true; break }
+      }
+    } catch { /* stream torn down after settle — the balance poll decides the outcome */ }
+  })()
+
+  const threshold = quote.amountOut > 1n ? quote.amountOut / 2n : 1n
+  // Cross-chain fills take longer than same-chain (source finality + relay), so allow more time.
+  const deadline = Date.now() + AUCTION_MS + 300_000
+  let received = 0n
+  while (Date.now() < deadline) {
+    received = (await cngnBalanceOf(params.beneficiaryBase)) - before
+    if (statusFilled || received >= threshold) break
+    if (expired) throw new Error('HyperFX: cross-chain order expired (no solver filled)')
+    await new Promise((r) => setTimeout(r, 6_000))
+  }
+  received = (await cngnBalanceOf(params.beneficiaryBase)) - before
+  if (received <= 0n) throw new Error('HyperFX: cross-chain order did not fill (no cNGN received on Base)')
+  return received
+}

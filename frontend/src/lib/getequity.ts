@@ -42,6 +42,13 @@ export const GETEQUITY_ENABLED =
 
 const MARKET_ADDRESS = (process.env.GETEQUITY_MARKET_ADDRESS || '') as string
 
+// GetEquity's Market enforces a minimum lot size per buy. Default 10 units (their
+// current floor). Override with GETEQUITY_MIN_UNITS if it changes per asset/listing.
+export const GETEQUITY_MIN_UNITS: bigint = (() => {
+  const n = Number(process.env.GETEQUITY_MIN_UNITS)
+  return Number.isFinite(n) && n >= 1 ? BigInt(Math.floor(n)) : 10n
+})()
+
 // GetEquity's chain is distinct from PawaSave custody's mainnet write RPC while
 // they're on testnet, so this client carries its OWN provider. Once GetEquity is
 // on Base mainnet, point GETEQUITY_RPC_URL at the same paid RPC as BASE_WRITE_RPC_URL.
@@ -259,6 +266,11 @@ export async function buyWithCngn(
   // Units (18-dp base) the budget affords, floored so cost never exceeds budget.
   const unitsBase = (cngnMicroBudget * ONE) / per.totalCost
   if (unitsBase <= 0n) throw new Error('Amount too small for this asset')
+  // GetEquity enforces a minimum lot size (default 10 units) — a smaller buy reverts
+  // on-chain. Guard here so we never send a doomed tx (configurable via env).
+  if (unitsBase < GETEQUITY_MIN_UNITS * ONE) {
+    throw new Error(`Minimum purchase is ${GETEQUITY_MIN_UNITS} units`)
+  }
 
   // Approve the payout token to the Market once (MAX), then buy with the budget cap.
   const rwaRead = new ethers.Contract(token, RWA_ABI, signer)

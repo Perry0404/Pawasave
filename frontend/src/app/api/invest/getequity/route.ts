@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
-import { GETEQUITY_ENABLED, listAssets, buyWithCngn, type GetEquityAsset } from '@/lib/getequity'
+import { GETEQUITY_ENABLED, GETEQUITY_MIN_UNITS, listAssets, buyWithCngn, quoteBuy, type GetEquityAsset } from '@/lib/getequity'
 
 /**
  * GET  /api/invest/getequity  → regulated Nigerian RWA products (T-bills, funds,
@@ -192,8 +192,24 @@ export async function POST(request: NextRequest) {
     // the asset on-chain. The wallet is debited net+fee; the fee is booked to revenue
     // only when the buy fills, and fully refunded with the net if it fails.
     const { fee, net } = splitFee(amount)
-    if (net < MIN_CNGN_MICRO / 2n) {
-      return NextResponse.json({ error: 'Amount too small after fees' }, { status: 400 })
+
+    // Enforce GetEquity's minimum lot (default 10 units) BEFORE any debit — the NET
+    // (what actually buys) must cover the cost of the minimum units at the live price.
+    // Quoting also confirms the asset is priceable right now.
+    try {
+      const minCost = (await quoteBuy(token, GETEQUITY_MIN_UNITS * 10n ** 18n)).totalCost
+      if (net < minCost) {
+        // Gross the user must commit so NET (= gross − our fee) still covers the minimum.
+        const minGross = (minCost * 10_000n) / BigInt(10_000 - FEE_BPS)
+        const minNaira = Math.ceil(Number(minGross) / 1e6)
+        return NextResponse.json(
+          { error: `Minimum purchase is ${GETEQUITY_MIN_UNITS} units — about ₦${minNaira.toLocaleString('en-NG')}.` },
+          { status: 400 },
+        )
+      }
+    } catch (e) {
+      console.error('[invest/getequity] min-units quote failed:', e instanceof Error ? e.message : e)
+      return NextResponse.json({ error: 'Could not price this investment right now — please try again.' }, { status: 502 })
     }
 
     // Atomic cNGN debit (net + fee) + pending order (via the user's session → auth.uid()).

@@ -55,6 +55,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
   const [rate, setRate] = useState(1600)
   const [nairaAssets, setNairaAssets] = useState<Asset[]>([])
   const [nairaLive, setNairaLive] = useState(false)
+  const [nairaFeeBps, setNairaFeeBps] = useState(100) // PawaSave fee on GetEquity buys
   const [selected, setSelected] = useState<Asset | null>(null)
   const [selectedHolding, setSelectedHolding] = useState<Holding | null>(null)
   const [sellBusy, setSellBusy] = useState(false)
@@ -79,6 +80,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
           symbol: a.symbol, name: a.name, blurb: a.blurb, kind: a.kind, token: a.token, naira: true,
         })))
         setNairaLive(!!d.live)
+        if (Number.isFinite(Number(d.feeBps))) setNairaFeeBps(Number(d.feeBps))
       })
       .catch(() => undefined)
 
@@ -88,6 +90,12 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
   // A tokenized stock is buyable only if the broker verified an on-chain route for it.
   // Everything else in the catalog is shown as "coming soon — verification pending".
   const stockLive = (sym: string) => brokerLive && supported.includes(String(sym || '').toUpperCase())
+  // Label an on-chain RWA holding by its catalog kind so an IPO reads as an IPO
+  // (not a generic "Naira asset"): DPRI → Pre-IPO, NTBS5 → Fixed income, funds → Fund.
+  const rwaLabel = (sym: string) => {
+    const k = nairaAssets.find(a => a.symbol === String(sym || '').toUpperCase())?.kind
+    return k === 'equity' ? 'Pre-IPO' : k === 'term' ? 'Fixed income' : k === 'fund' ? 'Fund' : 'Naira asset'
+  }
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 6000) }
   const isErr = (m: string) => /minimum|verify|could not|wrong|went|didn’t|refund/i.test(m)
 
@@ -244,7 +252,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
       <div className="b">
         <button className="back" onClick={() => setSelectedHolding(null)}>← Back</button>
         <div className="h2">{h.symbol}</div>
-        <p className="p">{h.asset_type === 'pre_ipo' ? 'Pre-IPO holding' : h.asset_type === 'rwa' ? 'Naira asset' : 'Tokenized stock'} · {Number(h.shares).toFixed(4)} {h.asset_type === 'rwa' ? 'units' : 'shares'}</p>
+        <p className="p">{h.asset_type === 'pre_ipo' ? 'Pre-IPO holding' : h.asset_type === 'rwa' ? rwaLabel(h.symbol) : 'Tokenized stock'} · {Number(h.shares).toFixed(4)} {h.asset_type === 'rwa' ? 'units' : 'shares'}</p>
 
         <div className="pool rise" style={{ marginTop: 12 }}>
           <div className="l">Current value</div>
@@ -331,6 +339,22 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
         <input className="field" type="number" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))} placeholder="0" autoFocus />
         <p className="p" style={{ margin: '6px 3px 0' }}>Minimum ₦1,000 · Available ₦{((wallet?.usdc_balance_micro || 0) / 1_000_000).toLocaleString()}</p>
 
+        {/* Fee breakdown — the user sees exactly what PawaSave keeps and what gets invested. */}
+        {selected.naira && live && parseFloat(amount) >= 1000 && (() => {
+          const gross = parseFloat(amount)
+          const fee = Math.floor(gross * nairaFeeBps) / 10000
+          const net = gross - fee
+          const money = (n: number) => `₦${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+          return (
+            <div className="note" style={{ marginTop: 12, display: 'grid', gap: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>You pay</span><b>{money(gross)}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)' }}><span>PawaSave fee ({(nairaFeeBps / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%)</span><span>−{money(fee)}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Invested in {selected.symbol}</span><b>{money(net)}</b></div>
+              <div style={{ color: 'var(--muted)', fontSize: 12 }}>A small GetEquity network fee (~0.5–1%) also applies on-chain.</div>
+            </div>
+          )
+        })()}
+
         {!live && (
           <div className="note">
             {!selected.naira && (cat === 'tokenized_stock' || cat === 'pre_ipo') && brokerLive
@@ -379,7 +403,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
                 <button key={`${h.symbol}-${h.provider}`} className="coll" onClick={() => { setSelectedHolding(h); setSellAmount(''); setMsg('') }}
                   style={{ width: '100%', background: 'none', border: 0, borderTop: '1px solid var(--line)', cursor: 'pointer', textAlign: 'left' }}>
                   <StockLogo symbol={h.symbol} />
-                  <div className="mid"><div className="nm">{h.symbol}</div><div className="sub">{h.asset_type === 'pre_ipo' ? 'Pre-IPO' : h.asset_type === 'rwa' ? 'Naira asset' : 'Stock'} · {Number(h.shares).toFixed(4)} {h.asset_type === 'rwa' ? 'units' : 'shares'}</div></div>
+                  <div className="mid"><div className="nm">{h.symbol}</div><div className="sub">{h.asset_type === 'pre_ipo' ? 'Pre-IPO' : h.asset_type === 'rwa' ? rwaLabel(h.symbol) : 'Stock'} · {Number(h.shares).toFixed(4)} {h.asset_type === 'rwa' ? 'units' : 'shares'}</div></div>
                   <div style={{ textAlign: 'right', flex: 'none' }}>
                     <div className="v num">₦{(val ?? cost).toLocaleString(undefined, { maximumFractionDigits: val != null ? 2 : 0 })}</div>
                     {gain != null && <div style={{ fontSize: 11, fontWeight: 600, color: gain >= 0 ? 'var(--green)' : '#e5484d' }}>{gain >= 0 ? '+' : '−'}₦{Math.abs(gain).toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>}

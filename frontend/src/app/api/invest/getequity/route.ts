@@ -106,17 +106,17 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   if (!GETEQUITY_ENABLED) {
-    return NextResponse.json({ live: false, assets: previewCards() })
+    return NextResponse.json({ live: false, assets: previewCards(), feeBps: FEE_BPS })
   }
   try {
     const allow = marketplaceAllowlist()
     const assets = await listAssets()
     const cards = assets.map(toCard).filter((c) => isAllowed(c.symbol, allow))
-    return NextResponse.json({ live: true, assets: cards })
+    return NextResponse.json({ live: true, assets: cards, feeBps: FEE_BPS })
   } catch (e) {
     // On-chain read hiccup — fall back to the preview list rather than an empty tab.
     console.error('[invest/getequity] listAssets failed:', e instanceof Error ? e.message : e)
-    return NextResponse.json({ live: false, assets: previewCards() })
+    return NextResponse.json({ live: false, assets: previewCards(), feeBps: FEE_BPS })
   }
 }
 
@@ -129,6 +129,19 @@ function serviceClient() {
 }
 
 const MIN_CNGN_MICRO = 1_000_000_000n // ₦1,000 minimum
+
+/** PawaSave's own platform fee on a GetEquity buy (revenue), in basis points.
+ *  This is ON TOP of GetEquity's ~0.5–1% on-chain vault fee (which goes to them).
+ *  Deducted from the amount the user commits: they pay X, we keep feeBps·X, and the
+ *  remainder buys the asset. Configurable via GETEQUITY_FEE_BPS (default 100 = 1%). */
+const FEE_BPS = (() => {
+  const n = Number(process.env.GETEQUITY_FEE_BPS)
+  return Number.isFinite(n) && n >= 0 && n <= 1000 ? Math.floor(n) : 100
+})()
+function splitFee(gross: bigint): { fee: bigint; net: bigint } {
+  const fee = (gross * BigInt(FEE_BPS)) / 10_000n
+  return { fee, net: gross - fee }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -151,14 +164,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Minimum investment is ₦1,000' }, { status: 400 })
     }
 
-    // KYC gate (also enforced in the RPC) — clean message before any debit.
-    const { data: profile } = await supabase.from('profiles').select('kyc_status').eq('id', user.id).single()
-    if (profile?.kyc_status !== 'verified') {
-      return NextResponse.json({ error: 'Complete identity verification (KYC) to invest.' }, { status: 403 })
+    // Identity gate before any debit — SAME policy as the live tokenized-stock flow
+    // (/api/invest/equity): Strails BVN onboarding is enough to invest; full 'verified'
+    // also passes. Also enforced in the RPC.
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('kyc_status, strails_onboard_status, strails_va_account_number')
+      .eq('id', user.id)
+      .single()
+    const identityOk = profile?.kyc_status === 'verified'
+      || profile?.strails_onboard_status === 'completed'
+      || !!profile?.strails_va_account_number
+    if (!identityOk) {
+      return NextResponse.json({ error: 'Add your BVN to set up your account, then you can invest.' }, { status: 403 })
     }
 
-    // Not switched on yet (testnet) → surface clearly and DO NOT debit. This is
-    // what keeps the route safe to deploy before the migration is applied.
+    // Not switched on yet → surface clearly and DO NOT debit. This is what keeps the
+    // route safe to deploy before the migration is applied.
     if (!GETEQUITY_ENABLED || !token) {
       return NextResponse.json(
         { status: 'coming_soon', message: 'Regulated investments are launching soon.' },
@@ -166,12 +188,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Atomic cNGN debit + pending order (via the user's session → auth.uid()).
+    // Split the committed amount into PawaSave's fee (revenue) and the net that buys
+    // the asset on-chain. The wallet is debited net+fee; the fee is booked to revenue
+    // only when the buy fills, and fully refunded with the net if it fails.
+    const { fee, net } = splitFee(amount)
+    if (net < MIN_CNGN_MICRO / 2n) {
+      return NextResponse.json({ error: 'Amount too small after fees' }, { status: 400 })
+    }
+
+    // Atomic cNGN debit (net + fee) + pending order (via the user's session → auth.uid()).
     const { data: orderId, error: placeErr } = await supabase.rpc('place_getequity_order', {
       p_user_id: user.id,
       p_symbol: symbol,
       p_token: token,
-      p_amount_cngn_micro: amount.toString(),
+      p_amount_cngn_micro: net.toString(),
+      p_fee_cngn_micro: fee.toString(),
     })
     if (placeErr || !orderId) {
       const msg = /insufficient/i.test(placeErr?.message || '') ? 'Insufficient cNGN balance' : 'Could not place order'
@@ -180,14 +211,17 @@ export async function POST(request: NextRequest) {
 
     const admin = serviceClient()
     try {
-      const { txHash, units } = await buyWithCngn(token, amount)
+      const { txHash, units } = await buyWithCngn(token, net)
       await admin.rpc('settle_getequity_order', {
         p_order_id: orderId,
         p_status: 'filled',
         p_units: units,
         p_tx_hash: txHash,
       })
-      return NextResponse.json({ status: 'filled', orderId, symbol, units, txHash })
+      return NextResponse.json({
+        status: 'filled', orderId, symbol, units, txHash,
+        feeCngnMicro: fee.toString(), netCngnMicro: net.toString(),
+      })
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'On-chain buy failed'
       // Refund the debited cNGN.

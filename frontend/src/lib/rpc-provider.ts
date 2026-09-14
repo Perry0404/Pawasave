@@ -49,10 +49,10 @@ export function baseRpcUrls(): string[] {
 export function getBaseProvider(): ethers.AbstractProvider {
   const urls = baseRpcUrls()
   if (urls.length <= 1) {
-    return new ethers.JsonRpcProvider(urls[0] || PUBLIC_FALLBACKS[0], BASE_CHAIN_ID)
+    return staticProvider(urls[0] || PUBLIC_FALLBACKS[0])
   }
   const configs = urls.map((url, i) => ({
-    provider: new ethers.JsonRpcProvider(url, BASE_CHAIN_ID),
+    provider: staticProvider(url),
     priority: i + 1, // primary first
     stallTimeout: 2000, // ms before trying the next endpoint
     weight: 1,
@@ -189,7 +189,7 @@ export async function withBaseRead<T>(
   for (let pass = 0; pass < passes; pass++) {
     for (const url of urls) {
       try {
-        return await fn(new ethers.JsonRpcProvider(url, BASE_CHAIN_ID))
+        return await fn(staticProvider(url))
       } catch (err) {
         lastErr = err
       }

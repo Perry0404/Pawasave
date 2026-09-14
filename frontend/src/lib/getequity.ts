@@ -13,23 +13,24 @@
  * shape as supplyToLend(). The API's fund-invest path routes through Flutterwave
  * fiat and their fees, which would break the cNGN settlement story.
  *
- * STATUS: DARK. GetEquity is on Base Sepolia (chain 84532); mainnet is pending
- * (~ Aug 2026 per their team). Nothing here runs unless GETEQUITY_ENABLED is set
- * AND GETEQUITY_MARKET_ADDRESS is configured — every export is a no-op / throws
- * clearly otherwise, so this file is inert dead code until we flip it on. Built
- * behind a flag the same way the Strails ramp was (see [[strails-ramp]]).
+ * STATUS: LIVE on Base MAINNET (chain 8453). Nothing here runs unless
+ * GETEQUITY_ENABLED is set AND GETEQUITY_MARKET_ADDRESS is configured — every
+ * export is a no-op / throws clearly otherwise. Built behind a flag the same way
+ * the Strails ramp was (see [[strails-ramp]]).
  *
  * Required env when enabled:
  *   GETEQUITY_ENABLED=1
- *   GETEQUITY_RPC_URL         — RPC for GetEquity's chain (Base Sepolia now, Base mainnet later)
- *   GETEQUITY_MARKET_ADDRESS  — the Market contract (0x68543Dc7…C4bc on Sepolia)
+ *   GETEQUITY_RPC_URL         — Base MAINNET RPC (use a reliable paid one; the public
+ *                               mainnet.base.org gives spurious "missing revert data")
+ *   GETEQUITY_MARKET_ADDRESS  — the Market contract (0x716B…A2DD on Base mainnet)
  *   CUSTODY_PRIVATE_KEY       — reused; the custody wallet buys/holds the positions
  *
- * Contracts (Base Sepolia testnet — swap for mainnet on their launch):
- *   Market   0x68543Dc71F76d0835e724dbEF898Dd010209C4bc
- *   cNGN     0x7E29CF1D8b1F4c847D0f821b79dDF6E67A5c11F8
- *   NTBL     0xda42AEaC0A2ab7938C20Eb75221e9678f0d431aD  (Nigerian Treasury Bill)
- *   ANMF     0xBdd5357A6c17B3d55Ab0A15C608d26A357c2C8C5  (ARM NGN Mutual Fund)
+ * Contracts (Base MAINNET 8453 — verified on-chain 2026-09-15, all settle in cNGN):
+ *   Market   0x716B0B731f2FB292C74BD121485d930FA3dEA2DD
+ *   cNGN     0x46C85152bFe9f96829aA94755D9f915F9B10EF5F  (6-dp payout token)
+ *   DPRI     0xc68b460fe4c916Fd17d6ab6b181A409C763002d9  (Dangote Refinery IPO, 18-dp, ~1% fee)
+ *   NTBS5    0x7d7177214b2340e8046c9E802Ef7de19c7c0F2F1  (Nigerian T-Bill Series 5, 18-dp, ~0.5% fee)
+ * (The mutual fund / ANMF is not yet listed on mainnet — testnet only.)
  */
 
 import { ethers } from 'ethers'

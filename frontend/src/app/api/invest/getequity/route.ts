@@ -39,12 +39,26 @@ async function getUser() {
  *  `kind` classifies liquidity for the UI (term = locked to maturity, fund =
  *  redeemable, equity = shares). At runtime we override `kind` from the token's
  *  own hasMaturity()/hasPeriodicPayouts() flags — this is just the fallback/preview. */
-// Symbols verified against GetEquity's live Base Sepolia contracts.
+// Symbols verified on-chain against GetEquity's live Base MAINNET contracts (2026-09-15).
 const PRODUCT_META: Record<string, { name: string; kind: 'term' | 'fund' | 'equity'; blurb: string }> = {
-  NTBL:   { name: 'Nigerian Treasury Bill',  kind: 'term',   blurb: 'Government-backed · fixed income' },
-  ARMNGF: { name: 'ARM NGN Mutual Fund',     kind: 'fund',   blurb: 'Money-market income fund' },
-  CHDNRE: { name: 'Chapel Hill Denham REIT', kind: 'equity', blurb: 'Real estate income' },
-  DPRI:   { name: 'Dangote Refinery IPO',    kind: 'equity', blurb: 'Pre-IPO equity' },
+  DPRI:  { name: 'Dangote Refinery IPO',         kind: 'equity', blurb: 'Pre-IPO equity' },
+  NTBS5: { name: 'Nigerian Treasury Bill Series 5', kind: 'term', blurb: 'Government-backed · fixed income' },
+}
+
+/**
+ * Marketplace visibility allowlist. When GETEQUITY_MARKETPLACE_SYMBOLS is set
+ * (comma-separated symbols, e.g. "DPRI"), only those symbols are offered for
+ * purchase — everything else the Market lists is hidden. This is how we keep the
+ * T-bill (NTBS5) OFF the marketplace until its exact yield/rate is confirmed,
+ * while the Dangote IPO (DPRI) is live. Unset = show every registered asset.
+ */
+function marketplaceAllowlist(): Set<string> | null {
+  const raw = (process.env.GETEQUITY_MARKETPLACE_SYMBOLS || '').trim()
+  if (!raw) return null
+  return new Set(raw.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean))
+}
+function isAllowed(symbol: string, allow: Set<string> | null): boolean {
+  return !allow || allow.has(symbol.toUpperCase())
 }
 
 type ProductCard = {
@@ -60,10 +74,13 @@ type ProductCard = {
 /** Static preview shown before the integration is switched on, so the tab is
  *  never empty and users can register interest ahead of the mainnet launch. */
 function previewCards(): ProductCard[] {
-  return Object.entries(PRODUCT_META).map(([symbol, m]) => ({
-    token: null, symbol, name: m.name, kind: m.kind, blurb: m.blurb,
-    tradeable: false, maturityDate: 0,
-  }))
+  const allow = marketplaceAllowlist()
+  return Object.entries(PRODUCT_META)
+    .filter(([symbol]) => isAllowed(symbol, allow))
+    .map(([symbol, m]) => ({
+      token: null, symbol, name: m.name, kind: m.kind, blurb: m.blurb,
+      tradeable: false, maturityDate: 0,
+    }))
 }
 
 function toCard(a: GetEquityAsset): ProductCard {
@@ -92,8 +109,10 @@ export async function GET() {
     return NextResponse.json({ live: false, assets: previewCards() })
   }
   try {
+    const allow = marketplaceAllowlist()
     const assets = await listAssets()
-    return NextResponse.json({ live: true, assets: assets.map(toCard) })
+    const cards = assets.map(toCard).filter((c) => isAllowed(c.symbol, allow))
+    return NextResponse.json({ live: true, assets: cards })
   } catch (e) {
     // On-chain read hiccup — fall back to the preview list rather than an empty tab.
     console.error('[invest/getequity] listAssets failed:', e instanceof Error ? e.message : e)
@@ -123,6 +142,11 @@ export async function POST(request: NextRequest) {
     try { amount = BigInt(body.amountCngnMicro) } catch { amount = 0n }
 
     if (!symbol) return NextResponse.json({ error: 'Symbol required' }, { status: 400 })
+    // Enforce the marketplace allowlist server-side — a hidden asset (e.g. the T-bill
+    // pending its confirmed rate) can't be bought even by POSTing its symbol directly.
+    if (!isAllowed(symbol, marketplaceAllowlist())) {
+      return NextResponse.json({ error: 'This investment is not currently available.' }, { status: 403 })
+    }
     if (amount < MIN_CNGN_MICRO) {
       return NextResponse.json({ error: 'Minimum investment is ₦1,000' }, { status: 400 })
     }

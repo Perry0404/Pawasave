@@ -24,7 +24,8 @@ ALTER TABLE public.portfolio_holdings
 
 -- Admit 'investment' on transactions so a filled buy books a ledger row — it then
 -- shows in the user's activity feed AND is counted by admin_tx_volume (057).
--- Superset of 046's list.
+-- Full UNION of every type the app writes, incl. 'equity_buy'/'equity_sell' (062/063)
+-- which already exist in live rows — a narrower list would fail to validate.
 ALTER TABLE public.transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
 ALTER TABLE public.transactions ADD CONSTRAINT transactions_type_check CHECK (type IN (
   'deposit', 'withdrawal', 'save_to_vault', 'vault_withdraw',
@@ -33,7 +34,7 @@ ALTER TABLE public.transactions ADD CONSTRAINT transactions_type_check CHECK (ty
   'goal_contribute', 'goal_claim',
   'creator_incentive', 'cngn_pool_in',
   'loan_disbursement', 'loan_repayment', 'loan_liquidation',
-  'investment'
+  'equity_buy', 'equity_sell', 'investment'
 ));
 
 CREATE TABLE IF NOT EXISTS public.getequity_orders (

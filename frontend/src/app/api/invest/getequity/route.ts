@@ -71,6 +71,7 @@ type ProductCard = {
   blurb: string
   tradeable: boolean
   maturityDate: number
+  minCngnMicro?: string   // real minimum buy (10 units at live price, grossed up for our fee)
 }
 
 /** Static preview shown before the integration is switched on, so the tab is
@@ -114,7 +115,18 @@ export async function GET() {
     const allow = marketplaceAllowlist()
     const assets = await listAssets()
     const cards = assets.map(toCard).filter((c) => isAllowed(c.symbol, allow))
-    return NextResponse.json({ live: true, assets: cards, feeBps: FEE_BPS })
+    // Attach each asset's real minimum: the cost of GETEQUITY_MIN_UNITS at the live
+    // price, grossed up so NET (after our fee) still clears the minimum. So the UI can
+    // show the true floor instead of a flat ₦1,000. Per-asset; a quote hiccup just omits it.
+    const withMin = await Promise.all(cards.map(async (c) => {
+      if (!c.token || !c.tradeable) return c
+      try {
+        const minCost = (await quoteBuy(c.token, GETEQUITY_MIN_UNITS * 10n ** 18n)).totalCost
+        const minGross = (minCost * 10_000n) / BigInt(10_000 - FEE_BPS)
+        return { ...c, minCngnMicro: minGross.toString() }
+      } catch { return c }
+    }))
+    return NextResponse.json({ live: true, assets: withMin, feeBps: FEE_BPS, minUnits: Number(GETEQUITY_MIN_UNITS) })
   } catch (e) {
     // On-chain read hiccup — fall back to the preview list rather than an empty tab.
     console.error('[invest/getequity] listAssets failed:', e instanceof Error ? e.message : e)

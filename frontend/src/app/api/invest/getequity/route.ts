@@ -235,7 +235,15 @@ export async function POST(request: NextRequest) {
       p_fee_cngn_micro: fee.toString(),
     })
     if (placeErr || !orderId) {
-      const msg = /insufficient/i.test(placeErr?.message || '') ? 'Insufficient cNGN balance' : 'Could not place order'
+      const raw = placeErr?.message || ''
+      console.error('[invest/getequity] place_getequity_order failed:', raw)
+      const msg = /insufficient/i.test(raw)
+        ? 'Insufficient cNGN balance'
+        : /identity|kyc|verif/i.test(raw)
+        ? 'Add your BVN to set up your account, then you can invest.'
+        : /function|schema cache|does not exist|argument/i.test(raw)
+        ? 'Investing is being set up — please try again shortly.' // DB function/signature not migrated yet
+        : 'Could not place order'
       return NextResponse.json({ error: msg }, { status: 400 })
     }
 

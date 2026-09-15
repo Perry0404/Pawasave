@@ -457,7 +457,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           <div className="info" style={{ marginTop: 'var(--s-4)' }}>
             <p className="l">Also accepted at this address</p>
             <p className="hint" style={{ lineHeight: 1.5 }}>
-              <strong>USDC or USDT</strong> on {ccChains.map((c) => c.name).join(', ')} — auto-converted to cNGN at the live rate and credited to your balance (usually within a few minutes).
+              <strong>USDC or USDT</strong> on {ccChains.map((c) => c.name).join(', ')} — auto-converted to cNGN at the live rate and credited to your balance (usually within a few minutes). Minimum <strong>~$2</strong>; smaller cross-chain amounts may be used up by network fees.
             </p>
           </div>
         )}

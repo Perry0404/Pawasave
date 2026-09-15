@@ -529,6 +529,10 @@ export async function breakSavingsGoal(goalId: string): Promise<void> {
   if (!res.ok) throw new Error(out?.error || 'Could not break this goal')
 }
 
+// No callers right now, and please don't delete it as dead code. The only UI that
+// used it was goals-view, which was unreachable and has been removed — which means
+// a user can currently start recurring contributions and has no way to stop them.
+// This is the function the pause control needs. See spec frontend-ux-elevation UX-48.
 export async function setGoalAutoContribute(goalId: string, enabled: boolean): Promise<void> {
   const { error } = await supabase.rpc('set_goal_auto_contribute', {
     p_goal_id: goalId,

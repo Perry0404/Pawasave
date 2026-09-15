@@ -16,6 +16,10 @@ import { NextRequest, NextResponse } from 'next/server'
  *
  * Both legs now happen here, in order, with the forfeiture derived from the stored row. The
  * matching grants are revoked so the browser cannot reach either function directly.
+ *
+ * Needs migration 079. Before it, both record_* functions took a bigint id and compared it to
+ * a uuid primary key, so they raised on every call and had never recorded anything. Refusing
+ * to withdraw on a forfeiture failure would therefore have blocked early exit outright.
  */
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -83,15 +87,20 @@ export async function POST(request: NextRequest) {
           lock.created_at,
         )
         if (forfeited > 0) {
-          const { error: fErr } = await admin.rpc('record_lock_forfeiture', {
+          // Returns false when it recorded nothing: zero amount, unknown id, or a lock owned
+          // by someone else. Void used to hide all of that, which is how a type mismatch in
+          // this function went unnoticed for months (see migration 079).
+          const { data: recorded, error: fErr } = await admin.rpc('record_lock_forfeiture', {
             p_lock_id: lockId,
             p_user_id: user.id,
             p_forfeited_interest_usdc_micro: forfeited,
           })
           // Record before withdrawing. If the forfeiture cannot be written, do not withdraw,
           // otherwise the customer exits early and keeps interest they owed back.
-          if (fErr) {
-            console.error('[forfeit-withdraw] lock forfeiture failed, not withdrawing:', fErr.message)
+          if (fErr || recorded !== true) {
+            console.error('[forfeit-withdraw] lock forfeiture not recorded, not withdrawing:', {
+              lockId, forfeited, err: fErr?.message, recorded,
+            })
             return NextResponse.json({ error: 'Could not record forfeiture' }, { status: 500 })
           }
         }
@@ -124,13 +133,15 @@ export async function POST(request: NextRequest) {
         goal.started_at,
       )
       if (forfeited > 0) {
-        const { error: fErr } = await admin.rpc('record_goal_forfeiture', {
+        const { data: recorded, error: fErr } = await admin.rpc('record_goal_forfeiture', {
           p_goal_id: goalId,
           p_user_id: user.id,
           p_forfeited_interest_usdc_micro: forfeited,
         })
-        if (fErr) {
-          console.error('[forfeit-withdraw] goal forfeiture failed, not breaking:', fErr.message)
+        if (fErr || recorded !== true) {
+          console.error('[forfeit-withdraw] goal forfeiture not recorded, not breaking:', {
+            goalId, forfeited, err: fErr?.message, recorded,
+          })
           return NextResponse.json({ error: 'Could not record forfeiture' }, { status: 500 })
         }
       }

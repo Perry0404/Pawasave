@@ -49,10 +49,10 @@ export function baseRpcUrls(): string[] {
 export function getBaseProvider(): ethers.AbstractProvider {
   const urls = baseRpcUrls()
   if (urls.length <= 1) {
-    return new ethers.JsonRpcProvider(urls[0] || PUBLIC_FALLBACKS[0], BASE_CHAIN_ID)
+    return staticProvider(urls[0] || PUBLIC_FALLBACKS[0])
   }
   const configs = urls.map((url, i) => ({
-    provider: new ethers.JsonRpcProvider(url, BASE_CHAIN_ID),
+    provider: staticProvider(url),
     priority: i + 1, // primary first
     stallTimeout: 2000, // ms before trying the next endpoint
     weight: 1,
@@ -60,22 +60,111 @@ export function getBaseProvider(): ethers.AbstractProvider {
   return new ethers.FallbackProvider(configs, BASE_CHAIN_ID, { quorum: 1 })
 }
 
+/** Ordered write endpoints, primary first. Public ones are last-resort, same as reads. */
+export function writeRpcUrls(): string[] {
+  const urls = [
+    process.env.BASE_WRITE_RPC_URL,
+    process.env.BASE_MAINNET_RPC_URL,
+    process.env.NEXT_PUBLIC_BASE_RPC_URL,
+    ...(process.env.BASE_RPC_FALLBACKS?.split(',') ?? []),
+    ...PUBLIC_FALLBACKS,
+  ]
+  return [...new Set(urls.map((u) => u?.trim()).filter((u): u is string => Boolean(u)))]
+}
+
 /**
- * A SINGLE reliable Base RPC for SIGNING transactions. FallbackProvider is great
- * for resilient reads, but it races nonces across endpoints on SEQUENTIAL writes:
- * a lagging RPC reports a stale transaction count, so the 2nd of two back-to-back
- * txs (e.g. off-ramp: withdraw-from-pool THEN send-to-provider) reuses the 1st's
- * nonce and silently fails — leaving funds stranded in custody. Signing through
- * ONE endpoint gives a consistent, monotonic nonce. Use this for the custody
- * signer; keep getBaseProvider() for reads.
+ * Endpoint-level failures worth trying the next RPC for. Deliberately narrow: a revert,
+ * a bad nonce or "already known" means the chain answered, and re-sending those risks
+ * double-broadcasting or masking a real failure.
  */
+function isEndpointFailure(err: unknown): boolean {
+  const m = (err instanceof Error ? err.message : String(err)).toLowerCase()
+  if (/nonce|revert|insufficient funds|already known|replacement|underpriced/.test(m)) return false
+  return /429|capacity|rate.?limit|quota|failed to detect network|timeout|socket|econnreset|fetch failed|502|503|504|server_error|network_error/.test(m)
+}
+
+// Which endpoint we settled on. Sticky for the life of the process so sequential custody
+// txs keep getting a monotonic nonce from one source.
+let activeWriteIdx = 0
+
+/**
+ * A SINGLE reliable Base RPC for SIGNING transactions, with failover.
+ *
+ * FallbackProvider is great for resilient reads but races nonces across endpoints on
+ * SEQUENTIAL writes: a lagging RPC reports a stale transaction count, so the 2nd of two
+ * back-to-back txs reuses the 1st's nonce and silently fails, leaving funds stranded in
+ * custody. So this stays on ONE endpoint and only moves when that endpoint is hard-down,
+ * then sticks to the new one.
+ *
+ * Added after the configured Alchemy key hit its monthly cap and returned 429 to every
+ * call. Reads degraded fine via the public fallbacks, writes had no fallback at all, so
+ * every withdrawal failed for four days while the app looked healthy.
+ */
+const WRITE_TIMEOUT_MS = Number(process.env.BASE_WRITE_TIMEOUT_MS) || 12_000
+
+/**
+ * A dead endpoint does not always return an error. An exhausted Alchemy key left ethers
+ * looping on "failed to detect network, retry in 1s" forever, which is how the outage stayed
+ * invisible: nothing threw, calls just never came back. So every attempt is bounded.
+ */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`timeout after ${ms}ms on ${label}`)), ms)
+    p.then((v) => { clearTimeout(t); resolve(v) }, (e) => { clearTimeout(t); reject(e) })
+  })
+}
+
+/** Pinning the network stops ethers probing eth_chainId, which is what stalls on a dead RPC. */
+function staticProvider(url: string): ethers.JsonRpcProvider {
+  return new ethers.JsonRpcProvider(url, BASE_CHAIN_ID, {
+    staticNetwork: ethers.Network.from(BASE_CHAIN_ID),
+  })
+}
+
+class FailoverWriteProvider extends ethers.JsonRpcProvider {
+  private children: ethers.JsonRpcProvider[]
+
+  constructor(private urls: string[]) {
+    super(urls[activeWriteIdx] ?? urls[0], BASE_CHAIN_ID, {
+      staticNetwork: ethers.Network.from(BASE_CHAIN_ID),
+    })
+    this.children = urls.map(staticProvider)
+  }
+
+  async send(method: string, params: Array<unknown>): Promise<unknown> {
+    let lastErr: unknown
+    for (let i = 0; i < this.children.length; i++) {
+      const idx = (activeWriteIdx + i) % this.children.length
+      const name = redactRpc(this.urls[idx])
+      try {
+        const out = await withTimeout(this.children[idx].send(method, params), WRITE_TIMEOUT_MS, name)
+        if (idx !== activeWriteIdx) {
+          console.warn(`[rpc] write endpoint failed over to ${name}`)
+          activeWriteIdx = idx
+        }
+        return out
+      } catch (err) {
+        lastErr = err
+        if (!isEndpointFailure(err)) throw err
+        console.error(`[rpc] write endpoint ${name} unusable:`, err instanceof Error ? err.message : err)
+      }
+    }
+    throw lastErr ?? new Error('All Base write RPC endpoints failed')
+  }
+}
+
+/** Strip the API key path segment so endpoints can be named in logs safely. */
+export function redactRpc(url: string): string {
+  try {
+    const u = new URL(url)
+    return `${u.hostname}${u.pathname.replace(/\/[A-Za-z0-9_-]{12,}\/?$/, '/<key>')}`
+  } catch {
+    return 'unparseable-rpc-url'
+  }
+}
+
 export function getWriteProvider(): ethers.JsonRpcProvider {
-  const url =
-    process.env.BASE_WRITE_RPC_URL ||
-    process.env.BASE_MAINNET_RPC_URL ||
-    process.env.NEXT_PUBLIC_BASE_RPC_URL ||
-    'https://base.publicnode.com'
-  return new ethers.JsonRpcProvider(url, BASE_CHAIN_ID)
+  return new FailoverWriteProvider(writeRpcUrls())
 }
 
 /**
@@ -100,7 +189,7 @@ export async function withBaseRead<T>(
   for (let pass = 0; pass < passes; pass++) {
     for (const url of urls) {
       try {
-        return await fn(new ethers.JsonRpcProvider(url, BASE_CHAIN_ID))
+        return await fn(staticProvider(url))
       } catch (err) {
         lastErr = err
       }

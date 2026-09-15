@@ -8,6 +8,13 @@ import Link from 'next/link'
 
 const ADMIN_STORAGE_KEY = 'pawa_admin_auth'
 
+interface AdminInvestment {
+  kind: string; side: 'buy' | 'sell' | string; symbol: string
+  user_id: string; display_name: string | null; phone: string | null
+  amount_cngn_micro: number; shares: number | null; status: string
+  reference: string | null; created_at: string
+}
+
 export default function AdminView() {
   const [authed, setAuthed] = useState(false)
   const [password, setPassword] = useState('')
@@ -18,6 +25,7 @@ export default function AdminView() {
   const [users, setUsers] = useState<AdminUserStats | null>(null)
   const [volume, setVolume] = useState<AdminTxVolume | null>(null)
   const [recentFees, setRecentFees] = useState<PlatformFee[]>([])
+  const [recentInvestments, setRecentInvestments] = useState<AdminInvestment[]>([])
   const [ajo, setAjo] = useState<{ groups: number; members: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [revenueKobo, setRevenueKobo] = useState(0)
@@ -62,6 +70,7 @@ export default function AdminView() {
           setUsers(data.users)
           setVolume(data.volume)
           setRecentFees(data.recentFees || [])
+          setRecentInvestments(data.recentInvestments || [])
           setRevenueKobo(data.revenueKobo || 0)
           setAjo(data.ajo || null)
         }
@@ -353,6 +362,45 @@ export default function AdminView() {
             </span>
           </div>
         </div>
+      </div>
+
+      {/* Recent Investments — each buy/sell, newest first */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-semibold text-slate-800">Recent Investments</p>
+          <span className="text-[11px] text-slate-400">{recentInvestments.length} shown</span>
+        </div>
+        {recentInvestments.length === 0 ? (
+          <p className="text-xs text-slate-400 py-2">No investments yet.</p>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {recentInvestments.map((inv, i) => {
+              const buy = inv.side === 'buy'
+              const done = inv.status === 'filled' || inv.status === 'completed' || inv.status === 'credited'
+              const failed = inv.status === 'failed' || inv.status === 'refunded'
+              return (
+                <div key={`${inv.reference || inv.user_id}-${i}`} className="flex items-center justify-between py-2 text-sm">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${buy ? 'bg-emerald-50 text-emerald-700' : 'bg-orange-50 text-orange-700'}`}>{buy ? 'BUY' : 'SELL'}</span>
+                      <span className="font-semibold text-slate-800">{inv.symbol}</span>
+                      <span className="text-[10px] text-slate-400">{inv.kind}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 truncate">
+                      {inv.display_name || inv.phone || inv.user_id.slice(0, 8)} · {new Date(inv.created_at).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })}
+                    </p>
+                  </div>
+                  <div className="text-right flex-none ml-2">
+                    <div className="font-semibold text-slate-900">{formatNaira((inv.amount_cngn_micro || 0) / 10000)}</div>
+                    <div className={`text-[10px] font-medium ${done ? 'text-emerald-600' : failed ? 'text-red-500' : 'text-amber-600'}`}>
+                      {inv.status}{inv.shares ? ` · ${Number(inv.shares).toFixed(4)} sh` : ''}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Revenue Withdrawal */}

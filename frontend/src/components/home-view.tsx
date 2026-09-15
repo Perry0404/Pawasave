@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react'
 import { formatNaira, microUsdcToKobo, getRate, timeAgo, cleanDescription } from '@/lib/format'
 import { initiateDeposit, initiateWithdrawal, getBanks, resolveAccount, type RampResult, type Bank } from '@/lib/flint'
 import { talkback } from '@/lib/voice'
-import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard, Loader2, ArrowLeft, Copy, Check, ChevronDown, Building2 } from 'lucide-react'
+// Bank aliased: `Bank` is already the bank-list type from @/lib/flint.
+import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard, CircleNotch, ArrowLeft, Copy, Check, CaretDown, FileText, Bank as BankIcon } from '@phosphor-icons/react'
 import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -37,6 +38,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   const [acctCopied, setAcctCopied] = useState(false)
   const [liveRate, setLiveRate] = useState<number>(getRate())
   const [depositAddr, setDepositAddr] = useState<string | null>(wallet?.deposit_address ?? null)
+  const [ccChains, setCcChains] = useState<{ key: string; name: string }[]>([])
   const [rampStatus, setRampStatus] = useState<RampStatus | null>(null)
 
   // Withdraw state
@@ -133,7 +135,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   useEffect(() => {
     fetch('/api/wallet/deposit-address')
       .then((res) => res.ok ? res.json() : null)
-      .then((data) => { if (data?.address) setDepositAddr(data.address) })
+      .then((data) => { if (data?.address) setDepositAddr(data.address); if (Array.isArray(data?.crosschain)) setCcChains(data.crosschain) })
       .catch(() => undefined)
 
     fetch('/api/wallet/sync-deposits', { method: 'POST' })
@@ -143,7 +145,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  if (!wallet) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
+  if (!wallet) return <div className="flex items-center justify-center py-20"><CircleNotch size={24} className="animate-spin" style={{ color: 'var(--faint)' }} /></div>
 
   const rate = liveRate
   const savingsKobo = microUsdcToKobo(wallet.usdc_balance_micro, rate)
@@ -267,32 +269,32 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     const checking = rampStatus === null
     const nairaDown = rampStatus ? !rampStatus.naira.available : false
     return (
-      <div className="px-4 pt-5 pb-28">
-        <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
+      <div className="b">
+        <button onClick={goBack} className="back">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <h2 className="text-lg font-bold text-slate-900 mb-1">Receive Money</h2>
-        <p className="text-sm text-slate-400 mb-5">Choose how you want to add money. Both are credited as cNGN (1 cNGN = ₦1).</p>
+        <h2 className="h2">Receive Money</h2>
+        <p className="p">Choose how you want to add money. Both are credited as cNGN (1 cNGN = ₦1).</p>
 
-        {feedback && <div className="mb-3 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>}
+        {feedback && <div className="flash err" style={{ marginTop: 0, marginBottom: 'var(--s-3)' }}>{feedback}</div>}
 
         <button
           onClick={() => setView('deposit-naira')}
-          className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 mb-3 flex items-start gap-3 transition active:scale-[0.99]"
+          className="rows" style={{ marginBottom: 'var(--s-3)', display: 'block', textAlign: 'left', width: '100%', border: '1px solid var(--line)', cursor: 'pointer' }}
         >
-          <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
-            <Building2 className="w-5 h-5 text-emerald-600" />
+          <div className="dot">
+            <BankIcon size={20} style={{ color: 'var(--green)' }} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-slate-900">Naira bank transfer</p>
-            <p className="text-xs text-slate-400 mt-0.5">Get your own account number. Transfer from your bank anytime.</p>
-            {checking && <p className="text-[11px] text-slate-400 mt-1.5">Checking availability…</p>}
+            <p className="nm">Naira bank transfer</p>
+            <p className="sub">Get your own account number. Transfer from your bank anytime.</p>
+            {checking && <p className="hint tight">Checking availability…</p>}
             {nairaDown && (
               <>
-                <span className="inline-block mt-2 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                <span style={{ display: 'inline-block', marginTop: 8, fontSize: 'var(--t-2xs)', fontWeight: 'var(--w-medium)', color: 'var(--amber)', background: 'color-mix(in srgb,var(--amber) 12%,transparent)', border: '1px solid color-mix(in srgb,var(--amber) 30%,transparent)', borderRadius: 'var(--r-full)', padding: '2px 8px' }}>
                   Temporarily unavailable{rampStatus?.naira.reason ? ' — ' + rampStatus.naira.reason : ''}
                 </span>
-                <p className="text-[11px] text-slate-400 mt-1.5">Tap to try anyway — it may be back up.</p>
+                <p className="hint tight">Tap to try anyway — it may be back up.</p>
               </>
             )}
           </div>
@@ -300,14 +302,14 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
 
         <button
           onClick={() => setView('deposit-crypto')}
-          className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 flex items-start gap-3 transition active:scale-[0.99]"
+          className="rows" style={{ display: 'block', textAlign: 'left', width: '100%', border: '1px solid var(--line)', cursor: 'pointer' }}
         >
-          <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
-            <Wallet className="w-5 h-5 text-emerald-600" />
+          <div className="dot">
+            <Wallet size={20} style={{ color: 'var(--green)' }} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-slate-900">Crypto deposit (cNGN)</p>
-            <p className="text-xs text-slate-400 mt-0.5">Send cNGN on Base to your address. Credited 1:1 automatically.</p>
+            <p className="nm">Crypto deposit (cNGN)</p>
+            <p className="sub">Send cNGN on Base to your address. Credited 1:1 automatically.</p>
           </div>
         </button>
       </div>
@@ -322,45 +324,45 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     const verified = profile?.kyc_status === 'verified'
 
     return (
-      <div className="px-4 pt-5 pb-28">
-        <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
+      <div className="b">
+        <button onClick={goBack} className="back">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <h2 className="text-lg font-bold text-slate-900 mb-1">Naira bank transfer</h2>
+        <h2 className="h2">Naira bank transfer</h2>
 
         {acct ? (
           <>
-            <p className="text-sm text-slate-400 mb-4">
+            <p className="p">
               This account is permanently yours. Money sent to it is credited as cNGN automatically.
             </p>
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-3">
+            <div className="info" style={{ display: 'grid', gap: 'var(--s-3)' }}>
               <div>
-                <p className="text-[11px] text-emerald-600 font-medium">Account Number</p>
+                <p className="l">Account Number</p>
                 <div className="flex items-center gap-2">
-                  <p className="text-2xl font-bold text-emerald-900 tracking-wider">{acct}</p>
+                  <p className="big num">{acct}</p>
                   <button
                     onClick={() => {
                       navigator.clipboard.writeText(acct)
                       setAcctCopied(true)
                       setTimeout(() => setAcctCopied(false), 2000)
                     }}
-                    className="text-emerald-600 p-1"
+                    style={{ color: 'var(--green)', background: 'none', border: 0, padding: 4, cursor: 'pointer' }}
                   >
                     {acctCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
               <div>
-                <p className="text-[11px] text-emerald-600 font-medium">Bank</p>
-                <p className="text-sm font-semibold text-emerald-900">{p?.strails_va_bank_name}</p>
+                <p className="l">Bank</p>
+                <p className="v">{p?.strails_va_bank_name}</p>
               </div>
               <div>
-                <p className="text-[11px] text-emerald-600 font-medium">Account Name</p>
-                <p className="text-sm font-semibold text-emerald-900">{p?.strails_va_account_name}</p>
+                <p className="l">Account Name</p>
+                <p className="v">{p?.strails_va_account_name}</p>
               </div>
             </div>
-            <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-              <p className="text-xs text-amber-800">
+            <div className="note">
+              <p style={{ lineHeight: 1.5 }}>
                 Transfer only from a bank account in <span className="font-semibold">your own name</span>.
                 Deposits from someone else&apos;s account are automatically returned.
               </p>
@@ -368,26 +370,26 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           </>
         ) : pending ? (
           <div className="mt-6 text-center">
-            <Loader2 className="w-6 h-6 animate-spin text-emerald-600 mx-auto mb-3" />
-            <p className="text-sm font-medium text-slate-700">Creating your account…</p>
-            <p className="text-xs text-slate-400 mt-1">This usually takes about 2 minutes.</p>
+            <CircleNotch size={24} className="animate-spin" style={{ color: 'var(--green)', margin: '0 auto 12px' }} />
+            <p style={{ fontSize: 'var(--t-sm)', fontWeight: 'var(--w-semi)', color: 'var(--ink)' }}>Creating your account…</p>
+            <p className="hint tight">This usually takes about 2 minutes.</p>
             <button
               onClick={async () => {
                 try { await fetch('/api/strails/onboard-status') } catch { /* ignore */ }
                 await refresh()
               }}
-              className="mt-4 text-sm text-emerald-600 font-medium"
+              style={{ marginTop: 'var(--s-4)', fontSize: 'var(--t-sm)', fontWeight: 'var(--w-semi)', color: 'var(--green)', background: 'none', border: 0, cursor: 'pointer' }}
             >
               Check again
             </button>
           </div>
         ) : (
           <>
-            <p className="text-sm text-slate-400 mb-4">
+            <p className="p">
               Get your own dedicated Naira account. Enter your BVN — we use it only to verify your
               identity with your bank and never store it. This unlocks tier 1 (up to ₦20,000).
             </p>
-            <label className="text-xs text-slate-500 block mb-1.5">BVN</label>
+            <label className="lab">BVN</label>
             <input
               type="tel"
               inputMode="numeric"
@@ -395,16 +397,16 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
               value={bvn}
               onChange={(e) => setBvn(e.target.value.replace(/\D/g, ''))}
               placeholder="11-digit BVN"
-              className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-lg font-semibold tracking-wider focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="field num" style={{ fontSize: 'var(--t-lg)', letterSpacing: '.08em' }}
               autoFocus
             />
-            {feedback && <div className="mt-3 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>}
+            {feedback && <div className="flash err">{feedback}</div>}
             <button
               onClick={submitBvn}
               disabled={busy || bvn.length !== 11}
-              className="w-full mt-5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-60"
+              className="cta" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
             >
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Building2 className="w-4 h-4" />}
+              {busy ? <CircleNotch className="w-4 h-4 animate-spin" /> : <BankIcon className="w-4 h-4" />}
               Create my account
             </button>
           </>
@@ -416,40 +418,57 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   // --- Receive: crypto (cNGN) address ---
   if (view === 'deposit-crypto') {
     return (
-      <div className="px-4 pt-5 pb-28">
-        <button onClick={() => setView('deposit-choose')} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
+      <div className="b">
+        <button onClick={() => setView('deposit-choose')} className="back">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <h2 className="text-lg font-bold text-slate-900 mb-1">Crypto Deposit</h2>
-        <p className="text-sm text-slate-400 mb-5">Send cNGN on the Base network to the address below. Your balance is credited automatically once it confirms.</p>
+        <h2 className="h2">Crypto Deposit</h2>
+        <p className="p">
+          {ccChains.length > 0
+            ? 'Send cNGN on Base — or USDC/USDT on any supported chain — to the address below. It’s converted to cNGN and credited automatically.'
+            : 'Send cNGN on the Base network to the address below. Your balance is credited automatically once it confirms.'}
+        </p>
 
         {depositAddr ? (
-          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5">
-            <p className="text-[11px] text-emerald-600 font-medium">Your cNGN address (Base network)</p>
+          <div className="info">
+            <p className="l">Your cNGN address (Base network)</p>
             <div className="flex items-center gap-2 mt-1">
-              <code className="text-xs font-bold text-emerald-900 break-all">{depositAddr}</code>
+              <code className="code">{depositAddr}</code>
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(depositAddr)
                   setAddrCopied(true)
                   setTimeout(() => setAddrCopied(false), 2000)
                 }}
-                className="text-emerald-600 hover:text-emerald-800 transition p-1 flex-shrink-0"
+                style={{ color: 'var(--green)', background: 'none', border: 0, padding: 4, cursor: 'pointer', flex: 'none' }}
               >
                 {addrCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               </button>
             </div>
-            <p className="text-[11px] text-emerald-500 mt-2">1 cNGN = ₦1. Credited automatically, usually within 1–5 minutes.</p>
+            <p className="hint">1 cNGN = ₦1. Credited automatically, usually within 1–5 minutes.</p>
           </div>
         ) : (
-          <div className="flex items-center gap-2 text-sm text-slate-400 py-6">
-            <Loader2 className="w-4 h-4 animate-spin" /> Generating your address…
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--t-sm)', color: 'var(--muted)', padding: '24px 0' }}>
+            <CircleNotch className="w-4 h-4 animate-spin" /> Generating your address…
           </div>
         )}
 
-        <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-          <p className="text-xs text-amber-700 leading-relaxed">
-            Only send <strong>cNGN on Base</strong> to this address. Any other token or network will be lost.
+        {ccChains.length > 0 && (
+          <div className="info" style={{ marginTop: 'var(--s-4)' }}>
+            <p className="l">Also accepted at this address</p>
+            <p className="hint" style={{ lineHeight: 1.5 }}>
+              <strong>USDC or USDT</strong> on {ccChains.map((c) => c.name).join(', ')} — auto-converted to cNGN at the live rate and credited to your balance (usually within a few minutes).
+            </p>
+          </div>
+        )}
+
+        <div className="note">
+          <p style={{ lineHeight: 1.5 }}>
+            {ccChains.length > 0 ? (
+              <>Send only <strong>cNGN on Base</strong> or <strong>USDC/USDT</strong> on the chains listed above. Any other token or network will be lost.</>
+            ) : (
+              <>Only send <strong>cNGN on Base</strong> to this address. Any other token or network will be lost.</>
+            )}
           </p>
         </div>
       </div>
@@ -460,46 +479,46 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   if (view === 'deposit') {
     const val = parseFloat(amount) || 0
     return (
-      <div className="px-4 pt-5 pb-28">
-        <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
+      <div className="b">
+        <button onClick={goBack} className="back">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <h2 className="text-lg font-bold text-slate-900 mb-1">Naira Deposit</h2>
-        <p className="text-sm text-slate-400 mb-4">Send naira from your bank. Funds are credited as cNGN (1 cNGN = ₦1).</p>
+        <h2 className="h2">Naira Deposit</h2>
+        <p className="p">Send naira from your bank. Funds are credited as cNGN (1 cNGN = ₦1).</p>
 
-        <div className="mb-5 bg-slate-100 rounded-xl px-3 py-2.5">
-          <p className="text-xs text-slate-600">Provider is selected automatically for best rate and uptime.</p>
+        <div style={{ marginBottom: 'var(--s-5)', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', padding: '10px 12px' }}>
+          <p style={{ fontSize: 'var(--t-xs)', fontWeight: 'var(--w-medium)', color: 'var(--muted)' }}>Provider is selected automatically for best rate and uptime.</p>
         </div>
 
         <div>
-          <label className="text-xs text-slate-500 block mb-1.5">Amount (₦)</label>
+          <label className="lab">Amount (₦)</label>
           <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">₦</span>
+            <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--faint)', fontWeight: 'var(--w-medium)' }}>₦</span>
             <input
               type="number"
               inputMode="decimal"
               value={amount}
               onChange={e => setAmount(e.target.value)}
               placeholder="e.g. 5000"
-              className="w-full pl-8 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="field num" style={{ fontSize: 'var(--t-lg)', paddingLeft: 30 }}
               autoFocus
             />
           </div>
           {val > 0 ? (
-            <p className="text-xs text-slate-400 mt-2">≈ {val.toLocaleString('en-NG', { maximumFractionDigits: 0 })} cNGN</p>
+            <p className="hint">≈ {val.toLocaleString('en-NG', { maximumFractionDigits: 0 })} cNGN</p>
           ) : (
-            <p className="text-xs text-slate-400 mt-2">Minimum deposit ₦2,000</p>
+            <p className="hint">Minimum deposit ₦2,000</p>
           )}
         </div>
 
-        {feedback && <div className="mt-3 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>}
+        {feedback && <div className="flash err">{feedback}</div>}
 
         <button
           onClick={handleDeposit}
           disabled={busy || !amount}
-          className="w-full mt-6 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-60"
+          className="cta" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
         >
-          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+          {busy ? <CircleNotch className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
           Continue
         </button>
       </div>
@@ -509,57 +528,57 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   // --- Deposit bank info (post-API) ---
   if (view === 'deposit-info' && depositInfo) {
     return (
-      <div className="px-4 pt-5 pb-28">
-        <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
+      <div className="b">
+        <button onClick={goBack} className="back">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <h2 className="text-lg font-bold text-slate-900 mb-1">Complete Transfer</h2>
-        <p className="text-sm text-slate-400 mb-5">
+        <h2 className="h2">Complete Transfer</h2>
+        <p className="p">
           Send the exact amount below. Your cNGN balance will be credited automatically once confirmed.
         </p>
 
-        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 space-y-4">
+        <div className="info" style={{ display: 'grid', gap: 'var(--s-4)' }}>
           <div>
-            <p className="text-[11px] text-emerald-600 font-medium">Amount</p>
-            <p className="text-2xl font-bold text-emerald-800">
+            <p className="l">Amount</p>
+            <p className="big num">
               ₦{parseInt(amount).toLocaleString()}
             </p>
           </div>
           {/* Xend: show wallet address */}
           {depositInfo.walletAddress && (
             <div>
-              <p className="text-[11px] text-emerald-600 font-medium">Wallet Address ({depositInfo.network || 'Base'})</p>
+              <p className="l">Wallet Address ({depositInfo.network || 'Base'})</p>
               <div className="flex items-center gap-2">
-                <code className="text-xs font-bold text-emerald-900 break-all">{depositInfo.walletAddress}</code>
+                <code className="code">{depositInfo.walletAddress}</code>
                 <button
                   onClick={() => {
                     navigator.clipboard.writeText(depositInfo.walletAddress!)
                     setCopied(true)
                     setTimeout(() => setCopied(false), 2000)
                   }}
-                  className="text-emerald-600 hover:text-emerald-800 transition p-1 flex-shrink-0"
+                  style={{ color: 'var(--green)', background: 'none', border: 0, padding: 4, cursor: 'pointer', flex: 'none' }}
                 >
                   {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                 </button>
               </div>
               {depositInfo.currency && (
-                <p className="text-[11px] text-emerald-500 mt-1">Currency: {depositInfo.currency}</p>
+                <p className="hint">Currency: {depositInfo.currency}</p>
               )}
             </div>
           )}
           {/* FlintAPI: show bank details */}
           {depositInfo.bankName && (
             <div>
-              <p className="text-[11px] text-emerald-600 font-medium">Bank</p>
-              <p className="text-sm font-semibold text-emerald-900">{depositInfo.bankName}</p>
+              <p className="l">Bank</p>
+              <p className="v">{depositInfo.bankName}</p>
             </div>
           )}
           {depositInfo.accountNumber && (
             <div>
-              <p className="text-[11px] text-emerald-600 font-medium">Account Number</p>
+              <p className="l">Account Number</p>
               <div className="flex items-center gap-2">
-                <p className="text-lg font-bold text-emerald-900 tracking-wider">{depositInfo.accountNumber}</p>
-                <button onClick={copyAccount} className="text-emerald-600 hover:text-emerald-800 transition p-1">
+                <p className="big num">{depositInfo.accountNumber}</p>
+                <button onClick={copyAccount} style={{ color: 'var(--green)', background: 'none', border: 0, padding: 4, cursor: 'pointer' }}>
                   {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                 </button>
               </div>
@@ -567,44 +586,44 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           )}
           {depositInfo.accountName && (
             <div>
-              <p className="text-[11px] text-emerald-600 font-medium">Account Name</p>
-              <p className="text-sm font-semibold text-emerald-900">{depositInfo.accountName}</p>
+              <p className="l">Account Name</p>
+              <p className="v">{depositInfo.accountName}</p>
             </div>
           )}
           {/* Fallback when no fiat bank account is returned: deposit cNGN to the
               user's own Base address — auto-credited 1:1 by the deposit scanner. */}
           {!depositInfo.walletAddress && !depositInfo.bankName && !depositInfo.accountNumber && depositAddr && (
             <div>
-              <p className="text-[11px] text-emerald-600 font-medium">Send cNGN to this address (Base network)</p>
+              <p className="l">Send cNGN to this address (Base network)</p>
               <div className="flex items-center gap-2">
-                <code className="text-xs font-bold text-emerald-900 break-all">{depositAddr}</code>
+                <code className="code">{depositAddr}</code>
                 <button
                   onClick={() => {
                     navigator.clipboard.writeText(depositAddr)
                     setAddrCopied(true)
                     setTimeout(() => setAddrCopied(false), 2000)
                   }}
-                  className="text-emerald-600 hover:text-emerald-800 transition p-1 flex-shrink-0"
+                  style={{ color: 'var(--green)', background: 'none', border: 0, padding: 4, cursor: 'pointer', flex: 'none' }}
                 >
                   {addrCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                 </button>
               </div>
-              <p className="text-[11px] text-emerald-500 mt-1">
+              <p className="hint">
                 Send exactly {amount ? parseInt(amount).toLocaleString() : ''} cNGN (1 cNGN = ₦1). Credited automatically once the transfer confirms.
               </p>
             </div>
           )}
         </div>
 
-        <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-          <p className="text-xs text-amber-700 leading-relaxed">
+        <div className="note">
+          <p style={{ lineHeight: 1.5 }}>
             After transferring, your deposit will be automatically confirmed and your cNGN balance credited. This usually takes 1–5 minutes.
           </p>
         </div>
 
         <button
           onClick={() => { goBack(); refresh() }}
-          className="w-full mt-6 bg-slate-900 hover:bg-slate-800 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98]"
+          className="cta" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
         >
           I&apos;ve Sent the Money
         </button>
@@ -615,66 +634,66 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   // --- Withdraw form ---
   if (view === 'withdraw') {
     return (
-      <div className="px-4 pt-5 pb-28">
-        <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-500 mb-4">
+      <div className="b">
+        <button onClick={goBack} className="back">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <h2 className="text-lg font-bold text-slate-900 mb-1">Send Money</h2>
-        <p className="text-sm text-slate-400 mb-4">Send naira from your cNGN balance to any Nigerian bank account.</p>
+        <h2 className="h2">Send Money</h2>
+        <p className="p">Send naira from your cNGN balance to any Nigerian bank account.</p>
 
         {profile?.kyc_status !== 'verified' && (
           (profile as any)?.strails_va_account_number ? (
-            <div className="mb-4 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
-              <p className="text-xs text-emerald-800 font-medium">Tier 1 · ₦3,000,000 daily limit</p>
-              <p className="text-xs text-emerald-700 mt-1">
+            <div className="info" style={{ marginBottom: 'var(--s-4)' }}>
+              <p className="l">Tier 1 · ₦3,000,000 daily limit</p>
+              <p className="hint">
                 You can withdraw up to ₦3,000,000 per day.{kycAvailable ? ' Full verification removes the limit.' : ''}
               </p>
               {kycAvailable && (
                 <button
                   onClick={onStartKyc}
-                  className="mt-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition"
+                  style={{ marginTop: 8, fontSize: 'var(--t-xs)', fontWeight: 'var(--w-semi)', background: 'var(--green)', color: '#fff', border: 0, padding: '6px 12px', borderRadius: 'var(--r-sm)', cursor: 'pointer' }}
                 >
                   Verify identity
                 </button>
               )}
             </div>
           ) : (
-            <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-              <p className="text-xs text-amber-800 font-medium">₦20,000 limit</p>
-              <p className="text-xs text-amber-700 mt-1">
+            <div className="note" style={{ marginTop: 0, marginBottom: 'var(--s-4)' }}>
+              <p style={{ fontWeight: 'var(--w-semi)' }}>₦20,000 limit</p>
+              <p style={{ marginTop: 4 }}>
                 Add your BVN to get a Naira account and raise your limit to ₦3,000,000 per day.
               </p>
             </div>
           )
         )}
 
-        <div className="mb-5 bg-slate-100 rounded-xl px-3 py-2.5">
-          <p className="text-xs text-slate-600">Provider is selected automatically for best effective rate and uptime.</p>
+        <div style={{ marginBottom: 'var(--s-5)', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', padding: '10px 12px' }}>
+          <p style={{ fontSize: 'var(--t-xs)', fontWeight: 'var(--w-medium)', color: 'var(--muted)' }}>Provider is selected automatically for best effective rate and uptime.</p>
         </div>
 
         <div className="space-y-4">
           <div>
-            <label className="text-xs text-slate-500 block mb-1.5">Amount (₦)</label>
+            <label className="lab">Amount (₦)</label>
             <input
               type="number"
               inputMode="numeric"
               value={amount}
               onChange={e => setAmount(e.target.value)}
               placeholder="e.g. 5000"
-              className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="field num" style={{ fontSize: 'var(--t-lg)' }}
               autoFocus
             />
             {amount && parseFloat(amount) >= 100 && (
-              <p className="text-xs text-slate-400 mt-1">≈ {parseFloat(amount).toLocaleString('en-NG')} cNGN will be debited</p>
+              <p className="hint tight">≈ {parseFloat(amount).toLocaleString('en-NG')} cNGN will be debited</p>
             )}
           </div>
 
           <div>
-            <label className="text-xs text-slate-500 block mb-1.5">Bank</label>
+            <label className="lab">Bank</label>
             {banksLoading ? (
-              <div className="flex items-center gap-2 py-3 text-sm text-slate-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading banks...</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--t-sm)', color: 'var(--muted)', padding: '12px 0' }}><CircleNotch className="w-4 h-4 animate-spin" /> Loading banks...</div>
             ) : banksError ? (
-              <div className="text-xs text-red-500 py-2">Could not load banks. Please retry.</div>
+              <div style={{ fontSize: 'var(--t-xs)', fontWeight: 'var(--w-medium)', color: 'var(--neg)', padding: '8px 0' }}>Could not load banks. Please retry.</div>
             ) : (
               <div className="space-y-2">
                 <div className="relative">
@@ -683,11 +702,11 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
                     value={bankSearch}
                     onChange={e => { setBankSearch(e.target.value); setBankCode('') }}
                     placeholder="Search bank name..."
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="field"
                   />
                 </div>
                 {bankSearch.length > 0 && (
-                  <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl bg-white shadow-sm divide-y divide-slate-100">
+                  <div style={{ maxHeight: 192, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', background: 'var(--surface)', boxShadow: 'var(--e-1)' }}>
                     {banks
                       .filter(b => b.name.toLowerCase().includes(bankSearch.toLowerCase()))
                       .slice(0, 10)
@@ -696,28 +715,35 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
                           key={b.code}
                           type="button"
                           onClick={() => { setBankCode(b.code); setBankSearch(b.name) }}
-                          className={`w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 transition ${bankCode === b.code ? 'font-semibold text-emerald-700 bg-emerald-50' : 'text-slate-800'}`}
+                          style={{
+                            width: '100%', textAlign: 'left', padding: '10px 14px', border: 0, cursor: 'pointer',
+                            fontFamily: 'inherit', fontSize: 'var(--t-sm)',
+                            borderTop: '1px solid var(--line-2)',
+                            fontWeight: bankCode === b.code ? 'var(--w-semi)' : 'var(--w-medium)',
+                            color: bankCode === b.code ? 'var(--green)' : 'var(--ink)',
+                            background: bankCode === b.code ? 'var(--green-soft)' : 'transparent',
+                          }}
                         >
                           {b.name}
                         </button>
                       ))}
                     {banks.filter(b => b.name.toLowerCase().includes(bankSearch.toLowerCase())).length === 0 && (
-                      <p className="px-4 py-3 text-sm text-slate-400">No banks found</p>
+                      <p style={{ padding: '12px 14px', fontSize: 'var(--t-sm)', color: 'var(--muted)' }}>No banks found</p>
                     )}
                   </div>
                 )}
                 {!bankSearch && (
                   <div className="relative">
-                    <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                    <BankIcon size={16} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--faint)', pointerEvents: 'none' }} />
                     <select
                       value={bankCode}
                       onChange={e => { setBankCode(e.target.value); setBankSearch(banks.find(b => b.code === e.target.value)?.name || '') }}
-                      className="w-full pl-10 pr-8 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="field" style={{ paddingLeft: 38, paddingRight: 30, appearance: 'none' }}
                     >
                       <option value="">— or select from list —</option>
                       {banks.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
                     </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                    <CaretDown size={16} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--faint)', pointerEvents: 'none' }} />
                   </div>
                 )}
               </div>
@@ -725,7 +751,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           </div>
 
           <div>
-            <label className="text-xs text-slate-500 block mb-1.5">Account Number</label>
+            <label className="lab">Account Number</label>
             <input
               type="text"
               inputMode="numeric"
@@ -733,12 +759,12 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
               value={accountNumber}
               onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
               placeholder="0123456789"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="field"
             />
           </div>
 
           <div>
-            <label className="text-xs text-slate-500 block mb-1.5">Account Holder Name</label>
+            <label className="lab">Account Holder Name</label>
             <div className="relative">
               <input
                 type="text"
@@ -747,16 +773,17 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
                 placeholder={resolvingName ? 'Checking account…' : 'Full name on bank account'}
                 readOnly={nameResolved}
                 autoComplete="name"
-                className={`w-full px-4 py-3 pr-10 bg-slate-50 border rounded-xl text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${nameResolved ? 'border-emerald-300' : 'border-slate-200'}`}
+                className="field"
+                style={{ paddingRight: 38, borderColor: nameResolved ? 'var(--green)' : 'var(--line)' }}
               />
-              {resolvingName && <Loader2 className="w-4 h-4 animate-spin text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />}
-              {nameResolved && !resolvingName && <Check className="w-4 h-4 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2" />}
+              {resolvingName && <CircleNotch size={16} className="animate-spin" style={{ color: 'var(--faint)', position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }} />}
+              {nameResolved && !resolvingName && <Check size={16} style={{ color: 'var(--green)', position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }} />}
             </div>
-            {resolveError && <p className="text-xs text-amber-600 mt-1.5">{resolveError}</p>}
+            {resolveError && <p className="hint" style={{ color: 'var(--amber)' }}>{resolveError}</p>}
           </div>
 
           <div>
-            <label className="text-xs text-slate-500 block mb-1.5">Transaction PIN</label>
+            <label className="lab">Transaction PIN</label>
             <input
               type="password"
               inputMode="numeric"
@@ -764,7 +791,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
               value={transactionPin}
               onChange={e => setTransactionPin(e.target.value.replace(/\D/g, ''))}
               placeholder="****"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 text-sm tracking-[0.35em] focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="field num" style={{ letterSpacing: '.35em' }}
             />
           </div>
         </div>
@@ -775,23 +802,23 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           const ourFee = Math.round(net * 0.015)                       // PawaSave 1.5%
           const total = net + networkFee + ourFee
           return (
-            <div className="mt-4 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 text-sm">
-              <div className="flex justify-between text-slate-600"><span>Recipient gets</span><span className="font-semibold text-slate-900">₦{net.toLocaleString('en-NG')}</span></div>
-              <div className="flex justify-between text-slate-600 mt-1"><span>Network fee (~1%)</span><span>₦{networkFee.toLocaleString('en-NG')}</span></div>
-              <div className="flex justify-between text-slate-600 mt-1"><span>PawaSave fee (1.5%)</span><span>₦{ourFee.toLocaleString('en-NG')}</span></div>
-              <div className="flex justify-between mt-1.5 pt-1.5 border-t border-slate-200 font-semibold text-slate-900"><span>Total from wallet</span><span>₦{total.toLocaleString('en-NG')}</span></div>
+            <div className="breakdown">
+              <div className="r"><span>Recipient gets</span><span className="num" style={{ color: 'var(--ink)', fontWeight: 'var(--w-semi)' }}>₦{net.toLocaleString('en-NG')}</span></div>
+              <div className="r"><span>Network fee (~1%)</span><span>₦{networkFee.toLocaleString('en-NG')}</span></div>
+              <div className="r"><span>PawaSave fee (1.5%)</span><span>₦{ourFee.toLocaleString('en-NG')}</span></div>
+              <div className="tot"><span>Total from wallet</span><span>₦{total.toLocaleString('en-NG')}</span></div>
             </div>
           )
         })()}
 
-        {feedback && <div className="mt-3 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-50 text-red-700">{feedback}</div>}
+        {feedback && <div className="flash err">{feedback}</div>}
 
         <button
           onClick={handleWithdraw}
           disabled={busy || !amount || !bankCode || accountNumber.length < 10 || !accountHolderName.trim() || transactionPin.length < 4}
-          className="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-60"
+          className="cta" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
         >
-          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUpRight className="w-4 h-4" />}
+          {busy ? <CircleNotch className="w-4 h-4 animate-spin" /> : <ArrowUpRight className="w-4 h-4" />}
           Send Money
         </button>
       </div>
@@ -864,7 +891,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           onClick={() => setShowStatement(true)}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 0, fontFamily: 'inherit', cursor: 'pointer', color: 'inherit' }}
         >
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+          <FileText size={14} />
           Statement
         </button>
       </div>
@@ -987,7 +1014,7 @@ function StatementSheet({ email, onClose, flash }: { email?: string; onClose: ()
             disabled={!!busy}
             style={{ flex: 1, padding: '13px', borderRadius: 13, fontWeight: 650, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit', border: '1.5px solid var(--green)', background: 'var(--surface)', color: 'var(--green)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, opacity: busy ? 0.7 : 1 }}
           >
-            {busy === 'view' ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Print / PDF
+            {busy === 'view' ? <CircleNotch className="w-4 h-4 animate-spin" /> : null} Print / PDF
           </button>
           <button
             onClick={() => run('email')}
@@ -995,7 +1022,7 @@ function StatementSheet({ email, onClose, flash }: { email?: string; onClose: ()
             className="cta"
             style={{ flex: 1, margin: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, opacity: busy ? 0.7 : 1 }}
           >
-            {busy === 'email' ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Email to me
+            {busy === 'email' ? <CircleNotch className="w-4 h-4 animate-spin" /> : null} Email to me
           </button>
         </div>
       </div>

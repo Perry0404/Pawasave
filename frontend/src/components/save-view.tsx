@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { Lock, Plus, CaretRight } from '@phosphor-icons/react'
 import { formatNaira, formatCngn, koboToMicroUsdc, microUsdcToKobo } from '@/lib/format'
 import {
   useSavingsLocks, lockSavings, withdrawLock,
@@ -23,9 +24,9 @@ const LOCK_DURATIONS = [
 const FREQ = ['daily', 'weekly', 'monthly'] as const
 const FREQ_LABELS: Record<string, string> = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' }
 
-const IconLock = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="9" width="16" height="12" rx="2" /><path d="M8 9V7a4 4 0 0 1 8 0v2" /></svg>
-const IconPlus = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-const Chevron = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+const IconLock = () => <Lock />
+const IconPlus = () => <Plus />
+const Chevron = () => <CaretRight />
 
 type Screen = 'main' | 'lock' | 'goal-new' | { goal: SavingsGoal }
 

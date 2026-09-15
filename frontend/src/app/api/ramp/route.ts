@@ -8,6 +8,8 @@ import {
   getFlipeetRate,
   initializeFlipeetOffRamp,
   initializeFlipeetOnRamp,
+  lookupFlipeetAccount,
+  FlipeetApiError,
 } from '@/lib/flipeet'
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
 import { sendCngn, cngnToShares, withdrawFromLend, custodyCngnBalance, custodyAddress } from '@/lib/custody'
@@ -123,6 +125,61 @@ function formatProviderError(provider: Provider, error: unknown) {
   return 'Payment provider is temporarily unavailable. Please try again shortly, or contact support if it persists.'
 }
 
+/**
+ * Check the payout provider can actually route to this bank + account.
+ *
+ * Only a definitive rejection blocks. If the lookup itself is down, let the withdrawal
+ * proceed and leave it to the existing debit-and-refund path, because failing closed here
+ * would take every withdrawal offline whenever one provider endpoint is flaky.
+ */
+async function verifyPayoutDestination(bankCode: string, accountNumber: string): Promise<NextResponse | null> {
+  if (!FLIPEET_CONFIGURED) return null
+
+  try {
+    await lookupFlipeetAccount({ bankCode, accountNumber })
+    return null
+  } catch (err) {
+    const status = err instanceof FlipeetApiError ? err.status : 0
+    if (status < 400 || status >= 500) {
+      console.error('[ramp] destination lookup unavailable, allowing through:', err instanceof Error ? err.message : err)
+      return null
+    }
+
+    console.warn('[ramp] payout destination rejected', { bankCode, status })
+    return NextResponse.json(
+      {
+        error: 'We could not verify that account with our payout partner. Check the bank and account number, or pick a different bank.',
+        code: 'DESTINATION_UNROUTABLE',
+      },
+      { status: 422 },
+    )
+  }
+}
+
+/**
+ * Mark a withdrawal failed and record WHY on the row.
+ * The user-facing message is deliberately generic, so without this the only trace of a real
+ * failure was a console line. Forty-eight failed off-ramps had no recorded reason, and
+ * diagnosing a four day outage meant reading container logs that had already rotated.
+ */
+async function markTxFailed(supabase: any, reference: string, reason?: unknown) {
+  const db = adminDb() ?? supabase
+  const text = reason === undefined
+    ? null
+    : (reason instanceof Error ? ((reason as any).shortMessage || reason.message) : String(reason))
+
+  try {
+    const { data } = await db.from('transactions').select('metadata').eq('reference', reference).maybeSingle()
+    await db.from('transactions').update({
+      status: 'failed',
+      metadata: { ...(data?.metadata ?? {}), failure_reason: text?.slice(0, 400) ?? null, failed_at: new Date().toISOString() },
+    }).eq('reference', reference)
+  } catch {
+    // Recording the reason must never be what stops us marking the row failed.
+    await db.from('transactions').update({ status: 'failed' }).eq('reference', reference)
+  }
+}
+
 // Flipeet rejects beneficiary names containing non-alphanumeric characters (e.g. the
 // hyphen in "pascal-mary chinonso" → 400 "Name can only contain alphanumeric
 // characters"). Reduce to letters, digits and single spaces — that satisfies the
@@ -214,8 +271,10 @@ async function maybeDebitForWithdrawal(
   amountNaira: number,
   reference: string,
 ): Promise<NextResponse | null> {
-  // cNGN balance: 1 NGN = 1 cNGN. Debit the naira value as cNGN micro (no rate).
-  const cngnMicro = Math.floor(amountNaira * 1_000_000)
+  // cNGN balance: 1 NGN = 1 cNGN. Derive from integer kobo, not from the naira float: the
+  // ledger row rounds and this used to floor, so the two could disagree by a kobo on the same
+  // withdrawal. 100 kobo = 1 NGN = 1e6 micro, so 1 kobo = 1e4 micro exactly.
+  const cngnMicro = Math.round(amountNaira * 100) * 10_000
 
   // Deposits auto-allocate 90% into the savings pool (cngn_pool_micro), leaving
   // only ~10% spendable. A withdrawal must be able to reach the pooled savings, so
@@ -231,7 +290,7 @@ async function maybeDebitForWithdrawal(
     const shortfall = cngnMicro - spendable
     const pool = Number(wallet?.cngn_pool_micro || 0)
     if (pool < shortfall) {
-      await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
+      await markTxFailed(supabase, reference, 'insufficient balance')
       return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 })
     }
     const { data: moved } = await moneyDb().rpc('withdraw_cngn_pool', {
@@ -239,7 +298,7 @@ async function maybeDebitForWithdrawal(
       p_amount_micro: shortfall,
     })
     if (!moved) {
-      await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
+      await markTxFailed(supabase, reference, 'insufficient balance')
       return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 })
     }
   }
@@ -251,7 +310,7 @@ async function maybeDebitForWithdrawal(
   })
 
   if (!ok) {
-    await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
+    await markTxFailed(supabase, reference, 'debit_wallet declined, insufficient balance')
     return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 })
   }
 
@@ -482,7 +541,10 @@ async function ensureXendMemberId(supabase: any, userId: string): Promise<string
   const result = await registerProxyMember(userId)
   const memberId = result.data.memberId
 
-  await supabase
+  // Service role: migration 080 removed the client UPDATE policy on profiles, because that
+  // policy also let a user set their own kyc_status and lift their withdrawal cap. The
+  // read above is still fine on the session.
+  await moneyDb()
     .from('profiles')
     .update({ xend_member_id: memberId })
     .eq('id', userId)
@@ -623,7 +685,7 @@ async function runXend(
       // Best-effort debit back; if this also fails the merchant wallet already has the funds
     }
     await moneyDb().rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: usdcMicro })
-    await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
+    await markTxFailed(supabase, reference, xendErr)
     throw new Error(xendErr.message || 'Xend withdrawal failed. Please try again.')
   }
 }
@@ -732,7 +794,7 @@ async function runFlipeet(
       // Refund the FULL debit (net + fee), not just the net — the user was debited
       // amount+fee before this API call.
       await moneyDb().rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
-      await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
+      await markTxFailed(supabase, reference, apiErr)
     }
     throw apiErr
   }
@@ -809,7 +871,7 @@ async function runFlipeet(
               reference, needed: cngnMicro.toString(), available: available.toString(),
             })
             await moneyDb().rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
-            await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
+            await markTxFailed(supabase, reference, `custody cNGN shortfall, need ${cngnMicro} have ${available}`)
             const e: any = new Error(`Not enough settled cNGN to cover this withdrawal (have ${(Number(available) / 1e6).toFixed(2)}, need ${(Number(cngnMicro) / 1e6).toFixed(2)}). Your balance was refunded.`)
             e.onChainFail = true
             // This path already refunded. Without the flag the catch below treats the throw
@@ -858,7 +920,7 @@ async function runFlipeet(
         if (!(sendErr as any)?.alreadyRefunded) {
           await moneyDb().rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
         }
-        await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
+        await markTxFailed(supabase, reference, sendErr)
         const reason = sendErr instanceof Error ? ((sendErr as any).shortMessage || sendErr.message) : String(sendErr)
         const e: any = new Error(`Withdrawal couldn't be settled on-chain (${reason}). Your balance was refunded.`)
         e.onChainFail = true
@@ -870,7 +932,7 @@ async function runFlipeet(
       // instead of leaving the transaction pending forever with funds gone.
       console.error('Flipeet off-ramp: no deposit address in response', result)
       await moneyDb().rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: offrampDebitMicro })
-      await (adminDb() ?? supabase).from('transactions').update({ status: 'failed' }).eq('reference', reference)
+      await markTxFailed(supabase, reference, 'provider returned no settlement address')
       throw new Error('Off-ramp failed — no settlement address returned. Your balance was refunded.')
     }
   }
@@ -910,8 +972,39 @@ async function runFlipeet(
 // full (Sense) KYC. "Full" is exactly kyc_status='verified' (see migration 058), so we
 // key off kyc_status and never read the new kyc_tier column — safe to deploy in any
 // order relative to the migration.
-const LITE_KYC_CAP_NGN  = Number(process.env.LITE_KYC_CAP_NGN)  || 20000      // no BVN yet — per withdrawal
-const BVN_DAILY_CAP_NGN = Number(process.env.BVN_DAILY_CAP_NGN) || 3_000_000  // BVN-verified (tier 1) — per rolling 24h; above this needs full (Sense) KYC
+const LITE_KYC_CAP_NGN  = Number(process.env.LITE_KYC_CAP_NGN)  || 20000      // no BVN yet, per withdrawal
+const BVN_DAILY_CAP_NGN = Number(process.env.BVN_DAILY_CAP_NGN) || 3_000_000  // BVN tier, per rolling 24h
+
+/**
+ * Absolute per-withdrawal maximum, applied to everyone including fully verified accounts.
+ *
+ * The tier caps read customer-writable data. enforceWithdrawalKycCap sums amount_kobo from
+ * transactions, and that table still carries an INSERT policy for the browser, so a negative
+ * row made the daily total negative and the cap unreachable. Migration 081 blocks negative
+ * amounts, and this is the second layer: it reads only env, so bypassing the cap now needs both
+ * the constraint and this to fail.
+ *
+ * Set above BVN_DAILY_CAP_NGN so the existing tiers behave unchanged for real customers.
+ * Tunable without a deploy.
+ */
+const HARD_WITHDRAWAL_CEILING_NGN = Number(process.env.HARD_WITHDRAWAL_CEILING_NGN) || 5_000_000
+
+/** Rejects anything above the absolute ceiling, before any tier logic runs. */
+function enforceHardCeiling(userId: string, amountNaira: number): NextResponse | null {
+  if (!(amountNaira > HARD_WITHDRAWAL_CEILING_NGN)) return null
+  // Log the active value, otherwise a misconfigured ceiling is invisible until someone hits it.
+  console.warn('[ramp] withdrawal above the hard ceiling, rejected', {
+    userId, amountNaira, ceiling: HARD_WITHDRAWAL_CEILING_NGN,
+  })
+  return NextResponse.json(
+    {
+      error: `Withdrawals above ₦${HARD_WITHDRAWAL_CEILING_NGN.toLocaleString()} need to be arranged with support.`,
+      code: 'ABOVE_CEILING',
+      cap: HARD_WITHDRAWAL_CEILING_NGN,
+    },
+    { status: 403 },
+  )
+}
 
 async function enforceWithdrawalKycCap(
   supabase: any,
@@ -996,12 +1089,35 @@ export async function POST(request: NextRequest) {
     }
 
     if (type === 'off') {
+      // One integer kobo value for the whole request. Rejecting sub-kobo precision here means
+      // the ledger row and the on-chain send are both derived from the same integer and cannot
+      // round in opposite directions.
+      const amountKobo = Math.round(amount * 100)
+      if (!Number.isSafeInteger(amountKobo) || Math.abs(amount * 100 - amountKobo) > 1e-6) {
+        return NextResponse.json(
+          { error: 'Amount must be a whole number of kobo, so at most two decimal places.' },
+          { status: 400 },
+        )
+      }
+
+      // Absolute ceiling first, reading only env. Everything below it consults data the
+      // customer can influence.
+      const ceilingError = enforceHardCeiling(user.id, amountKobo / 100)
+      if (ceilingError) return ceilingError
+
       const pinError = await ensureWithdrawalPin(supabase, user.id, transactionPin || '')
       if (pinError) return pinError
       // Tiered KYC: deposits are uncapped; only withdrawals are capped for un-verified
       // (lite/none) users at ₦20k. Full biometric KYC lifts it.
       const capError = await enforceWithdrawalKycCap(supabase, user.id, amount)
       if (capError) return capError
+
+      // Resolve the destination with the payout provider BEFORE any debit. Our bank list
+      // comes from Flint or Paystack, which don't share a code namespace with Flipeet, so a
+      // code that looks fine here can be unroutable there. Palmpay 999991 is one: Flipeet
+      // cannot resolve it, and the old flow debited first and refunded on failure.
+      const destError = await verifyPayoutDestination(bankCode!, accountNumber!)
+      if (destError) return destError
     }
 
     const feePercent = await getNumberSetting(supabase, 'ramp_fee_percent', DEFAULT_FEE_PERCENT)

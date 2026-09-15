@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { notFound } from 'next/navigation'
+import { House, Vault, UsersThree, TrendUp, HandCoins, User, PiggyBank } from '@phosphor-icons/react'
+import type { Icon } from '@phosphor-icons/react'
 import Logo from '@/components/logo'
 
 /**
@@ -34,13 +36,18 @@ const COLOUR = [
   '--bg', '--surface', '--surface-2',
   '--ink', '--muted', '--faint',
   '--line', '--line-2',
-  '--green', '--green-soft', '--pos', '--neg', '--amber',
-  '--card-a', '--card-b',
+  '--green', '--green-soft', '--neg', '--amber',
+  '--hero', '--on-hero', '--on-hero-muted', '--on-hero-fill', '--on-hero-line',
 ] as const
 
 const RADIUS = [['--r-sm', 8], ['--r-md', 12], ['--r-lg', 16], ['--r-xl', 22]] as const
 const ELEVATION = ['--e-1', '--e-2', '--e-3'] as const
 const ICON = [['--i-sm', 16], ['--i-md', 20], ['--i-lg', 24], ['--i-xl', 32], ['--i-hero', 56]] as const
+
+const NAV: [string, Icon][] = [
+  ['Home', House], ['Save', Vault], ['Ajo', UsersThree],
+  ['Invest', TrendUp], ['Borrow', HandCoins], ['You', User],
+]
 
 function Section({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
   return (
@@ -221,7 +228,60 @@ export default function DesignSystemPage() {
           </div>
         </Section>
 
-        <Section title="Live primitives" note="Real .ps classes. The hero card below is still the OLD gradient — task 8 replaces it with a solid neutral.">
+        <Section
+          title="Icons — Phosphor"
+          note="THE CALL TO MAKE: is `regular` legible at 16px on your screen? If not, the fix is `bold` at small sizes, not a different library. Nav row below shows regular vs fill, which is how active state stops depending on colour."
+        >
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--r-lg)', padding: 16 }}>
+            <div style={{ fontSize: 'var(--t-2xs)', color: 'var(--faint)', fontWeight: 'var(--w-semi)', marginBottom: 12 }}>
+              SIZE RAMP · weight regular
+            </div>
+            <div style={{ display: 'flex', gap: 22, alignItems: 'flex-end', flexWrap: 'wrap', color: 'var(--ink)' }}>
+              {ICON.map(([token, px]) => (
+                <div key={token} style={{ textAlign: 'center' }}>
+                  <HandCoins size={px} />
+                  <div style={{ fontSize: 'var(--t-2xs)', color: 'var(--faint)', marginTop: 6 }}>{px}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 'var(--t-2xs)', color: 'var(--faint)', fontWeight: 'var(--w-semi)', margin: '22px 0 12px' }}>
+              WEIGHT RAMP · 20px
+            </div>
+            <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', color: 'var(--ink)' }}>
+              {(['thin', 'light', 'regular', 'bold', 'fill', 'duotone'] as const).map((w) => (
+                <div key={w} style={{ textAlign: 'center' }}>
+                  <Vault size={20} weight={w} />
+                  <div style={{ fontSize: 'var(--t-2xs)', color: 'var(--faint)', marginTop: 6 }}>{w}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 'var(--t-2xs)', color: 'var(--faint)', fontWeight: 'var(--w-semi)', margin: '22px 0 12px' }}>
+              NAV SET · inactive vs active. Borrow was a dollar sign in a naira app
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {NAV.map(([label, Cmp]) => (
+                <div key={label} style={{ display: 'flex', gap: 10, alignItems: 'center', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', padding: '8px 12px' }}>
+                  <span style={{ color: 'var(--faint)', display: 'grid', placeItems: 'center' }}><Cmp size={20} weight="regular" /></span>
+                  <span style={{ color: 'var(--green)', display: 'grid', placeItems: 'center' }}><Cmp size={20} weight="fill" /></span>
+                  <span style={{ fontSize: 'var(--t-2xs)', color: 'var(--muted)', fontWeight: 'var(--w-medium)' }}>{label}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 'var(--t-2xs)', color: 'var(--faint)', fontWeight: 'var(--w-semi)', margin: '22px 0 12px' }}>
+              DUOTONE AT HERO SIZE · for empty states, instead of an illustration dependency
+            </div>
+            <div style={{ display: 'flex', gap: 20, color: 'var(--green)' }}>
+              <PiggyBank size={56} weight="duotone" />
+              <UsersThree size={56} weight="duotone" />
+              <TrendUp size={56} weight="duotone" />
+            </div>
+          </div>
+        </Section>
+
+        <Section title="Live primitives" note="Real .ps classes. Hero card is now a solid neutral: green is reserved for earnings and the primary action, and the gloss overlay is gone.">
           <div className="acct">
             <div className="acct-top">
               <span className="acct-lab">Total balance</span>

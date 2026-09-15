@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
 
   // Run all RPCs independently — partial failures don't kill the dashboard
   // Wrap in Promise.resolve() so .catch() is available (supabase returns PromiseLike)
-  const [feesRes, usersRes, volumeRes, recentFeesRes, revenueRes, ajoGroupsRes, ajoMembersRes] = await Promise.all([
+  const [feesRes, usersRes, volumeRes, recentFeesRes, revenueRes, ajoGroupsRes, ajoMembersRes, investmentsRes] = await Promise.all([
     Promise.resolve(supabase.rpc('admin_fee_summary')).catch(() => ({ data: null, error: null })),
     Promise.resolve(supabase.rpc('admin_user_stats')).catch(() => ({ data: null, error: null })),
     Promise.resolve(supabase.rpc('admin_tx_volume')).catch(() => ({ data: null, error: null })),
@@ -42,6 +42,7 @@ export async function POST(request: NextRequest) {
     // Ajo (esusu) adoption — the clearest signal that Ajo savers use the product.
     Promise.resolve(supabase.from('esusu_groups').select('id', { count: 'exact', head: true })).catch(() => ({ count: null, error: null })),
     Promise.resolve(supabase.from('esusu_members').select('id', { count: 'exact', head: true })).catch(() => ({ count: null, error: null })),
+    Promise.resolve(supabase.rpc('admin_recent_investments', { p_limit: 50 })).catch(() => ({ data: null, error: null })),
   ])
 
   return NextResponse.json({
@@ -49,6 +50,7 @@ export async function POST(request: NextRequest) {
     users: (usersRes.data as any)?.[0] ?? null,
     volume: (volumeRes.data as any)?.[0] ?? null,
     recentFees: (recentFeesRes.data as any) ?? [],
+    recentInvestments: (investmentsRes.data as any) ?? [],
     revenueKobo: Number((revenueRes.data as any)?.value || 0),
     ajo: {
       groups: (ajoGroupsRes as any)?.count ?? 0,

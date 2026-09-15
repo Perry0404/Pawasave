@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
-import { GETEQUITY_ENABLED, listAssets, buyWithCngn, type GetEquityAsset } from '@/lib/getequity'
+import { GETEQUITY_ENABLED, GETEQUITY_MIN_UNITS, listAssets, buyWithCngn, quoteBuy, type GetEquityAsset } from '@/lib/getequity'
 import { withLease } from '@/lib/custody-lease'
 
 /**
@@ -16,11 +16,11 @@ import { withLease } from '@/lib/custody-lease'
  *   • Visible marketplace — the exact same products are ALSO listed here to buy
  *     directly (T-bill alongside the IPO etc.); the only difference is the yield.
  *
- * STATUS: GetEquity is on Base Sepolia testnet; mainnet pending. When
+ * STATUS: GetEquity's Market is LIVE on Base mainnet (settles in cNGN). When
  * GETEQUITY_ENABLED is off, the list is a static preview and buying returns 503
  * ("launching soon") with NO debit — same pattern as the equity broker. When it's
- * on, the list is read live from the chain. The buy path (atomic debit + custody
- * execution + ledger) lands with its migration on mainnet — see the plan doc.
+ * on, the list is read live from the chain and buys run under the custody lease.
+ * PawaSave charges GETEQUITY_FEE_BPS on top of GetEquity's on-chain vault fee.
  */
 export const dynamic = 'force-dynamic'
 
@@ -40,12 +40,26 @@ async function getUser() {
  *  `kind` classifies liquidity for the UI (term = locked to maturity, fund =
  *  redeemable, equity = shares). At runtime we override `kind` from the token's
  *  own hasMaturity()/hasPeriodicPayouts() flags — this is just the fallback/preview. */
-// Symbols verified against GetEquity's live Base Sepolia contracts.
+// Symbols verified on-chain against GetEquity's live Base MAINNET contracts (2026-09-15).
 const PRODUCT_META: Record<string, { name: string; kind: 'term' | 'fund' | 'equity'; blurb: string }> = {
-  NTBL:   { name: 'Nigerian Treasury Bill',  kind: 'term',   blurb: 'Government-backed · fixed income' },
-  ARMNGF: { name: 'ARM NGN Mutual Fund',     kind: 'fund',   blurb: 'Money-market income fund' },
-  CHDNRE: { name: 'Chapel Hill Denham REIT', kind: 'equity', blurb: 'Real estate income' },
-  DPRI:   { name: 'Dangote Refinery IPO',    kind: 'equity', blurb: 'Pre-IPO equity' },
+  DPRI:  { name: 'Dangote Refinery IPO',         kind: 'equity', blurb: 'Pre-IPO equity' },
+  NTBS5: { name: 'Nigerian Treasury Bill Series 5', kind: 'term', blurb: 'Government-backed · fixed income' },
+}
+
+/**
+ * Marketplace visibility allowlist. When GETEQUITY_MARKETPLACE_SYMBOLS is set
+ * (comma-separated symbols, e.g. "DPRI"), only those symbols are offered for
+ * purchase — everything else the Market lists is hidden. This is how we keep the
+ * T-bill (NTBS5) OFF the marketplace until its exact yield/rate is confirmed,
+ * while the Dangote IPO (DPRI) is live. Unset = show every registered asset.
+ */
+function marketplaceAllowlist(): Set<string> | null {
+  const raw = (process.env.GETEQUITY_MARKETPLACE_SYMBOLS || '').trim()
+  if (!raw) return null
+  return new Set(raw.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean))
+}
+function isAllowed(symbol: string, allow: Set<string> | null): boolean {
+  return !allow || allow.has(symbol.toUpperCase())
 }
 
 type ProductCard = {
@@ -61,10 +75,13 @@ type ProductCard = {
 /** Static preview shown before the integration is switched on, so the tab is
  *  never empty and users can register interest ahead of the mainnet launch. */
 function previewCards(): ProductCard[] {
-  return Object.entries(PRODUCT_META).map(([symbol, m]) => ({
-    token: null, symbol, name: m.name, kind: m.kind, blurb: m.blurb,
-    tradeable: false, maturityDate: 0,
-  }))
+  const allow = marketplaceAllowlist()
+  return Object.entries(PRODUCT_META)
+    .filter(([symbol]) => isAllowed(symbol, allow))
+    .map(([symbol, m]) => ({
+      token: null, symbol, name: m.name, kind: m.kind, blurb: m.blurb,
+      tradeable: false, maturityDate: 0,
+    }))
 }
 
 function toCard(a: GetEquityAsset): ProductCard {
@@ -90,15 +107,17 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   if (!GETEQUITY_ENABLED) {
-    return NextResponse.json({ live: false, assets: previewCards() })
+    return NextResponse.json({ live: false, assets: previewCards(), feeBps: FEE_BPS })
   }
   try {
+    const allow = marketplaceAllowlist()
     const assets = await listAssets()
-    return NextResponse.json({ live: true, assets: assets.map(toCard) })
+    const cards = assets.map(toCard).filter((c) => isAllowed(c.symbol, allow))
+    return NextResponse.json({ live: true, assets: cards, feeBps: FEE_BPS })
   } catch (e) {
     // On-chain read hiccup — fall back to the preview list rather than an empty tab.
     console.error('[invest/getequity] listAssets failed:', e instanceof Error ? e.message : e)
-    return NextResponse.json({ live: false, assets: previewCards() })
+    return NextResponse.json({ live: false, assets: previewCards(), feeBps: FEE_BPS })
   }
 }
 
@@ -112,6 +131,19 @@ function serviceClient() {
 
 const MIN_CNGN_MICRO = 1_000_000_000n // ₦1,000 minimum
 
+/** PawaSave's own platform fee on a GetEquity buy (revenue), in basis points.
+ *  This is ON TOP of GetEquity's ~0.5–1% on-chain vault fee (which goes to them).
+ *  Deducted from the amount the user commits: they pay X, we keep feeBps·X, and the
+ *  remainder buys the asset. Configurable via GETEQUITY_FEE_BPS (default 100 = 1%). */
+const FEE_BPS = (() => {
+  const n = Number(process.env.GETEQUITY_FEE_BPS)
+  return Number.isFinite(n) && n >= 0 && n <= 1000 ? Math.floor(n) : 100
+})()
+function splitFee(gross: bigint): { fee: bigint; net: bigint } {
+  const fee = (gross * BigInt(FEE_BPS)) / 10_000n
+  return { fee, net: gross - fee }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { user, supabase } = await getUser()
@@ -124,18 +156,32 @@ export async function POST(request: NextRequest) {
     try { amount = BigInt(body.amountCngnMicro) } catch { amount = 0n }
 
     if (!symbol) return NextResponse.json({ error: 'Symbol required' }, { status: 400 })
+    // Enforce the marketplace allowlist server-side — a hidden asset (e.g. the T-bill
+    // pending its confirmed rate) can't be bought even by POSTing its symbol directly.
+    if (!isAllowed(symbol, marketplaceAllowlist())) {
+      return NextResponse.json({ error: 'This investment is not currently available.' }, { status: 403 })
+    }
     if (amount < MIN_CNGN_MICRO) {
       return NextResponse.json({ error: 'Minimum investment is ₦1,000' }, { status: 400 })
     }
 
-    // KYC gate (also enforced in the RPC) — clean message before any debit.
-    const { data: profile } = await supabase.from('profiles').select('kyc_status').eq('id', user.id).single()
-    if (profile?.kyc_status !== 'verified') {
-      return NextResponse.json({ error: 'Complete identity verification (KYC) to invest.' }, { status: 403 })
+    // Identity gate before any debit — SAME policy as the live tokenized-stock flow
+    // (/api/invest/equity): Strails BVN onboarding is enough to invest; full 'verified'
+    // also passes. Also enforced in the RPC.
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('kyc_status, strails_onboard_status, strails_va_account_number')
+      .eq('id', user.id)
+      .single()
+    const identityOk = profile?.kyc_status === 'verified'
+      || profile?.strails_onboard_status === 'completed'
+      || !!profile?.strails_va_account_number
+    if (!identityOk) {
+      return NextResponse.json({ error: 'Add your BVN to set up your account, then you can invest.' }, { status: 403 })
     }
 
-    // Not switched on yet (testnet) → surface clearly and DO NOT debit. This is
-    // what keeps the route safe to deploy before the migration is applied.
+    // Not switched on yet → surface clearly and DO NOT debit. This is what keeps the
+    // route safe to deploy before the migration is applied.
     if (!GETEQUITY_ENABLED || !token) {
       return NextResponse.json(
         { status: 'coming_soon', message: 'Regulated investments are launching soon.' },
@@ -143,12 +189,37 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Atomic cNGN debit + pending order (via the user's session → auth.uid()).
+    // Split the committed amount into PawaSave's fee (revenue) and the net that buys
+    // the asset on-chain. The wallet is debited net+fee; the fee is booked to revenue
+    // only when the buy fills, and fully refunded with the net if it fails.
+    const { fee, net } = splitFee(amount)
+
+    // Enforce GetEquity's minimum lot (default 10 units) BEFORE any debit — the NET
+    // (what actually buys) must cover the cost of the minimum units at the live price.
+    // Quoting also confirms the asset is priceable right now.
+    try {
+      const minCost = (await quoteBuy(token, GETEQUITY_MIN_UNITS * 10n ** 18n)).totalCost
+      if (net < minCost) {
+        // Gross the user must commit so NET (= gross − our fee) still covers the minimum.
+        const minGross = (minCost * 10_000n) / BigInt(10_000 - FEE_BPS)
+        const minNaira = Math.ceil(Number(minGross) / 1e6)
+        return NextResponse.json(
+          { error: `Minimum purchase is ${GETEQUITY_MIN_UNITS} units — about ₦${minNaira.toLocaleString('en-NG')}.` },
+          { status: 400 },
+        )
+      }
+    } catch (e) {
+      console.error('[invest/getequity] min-units quote failed:', e instanceof Error ? e.message : e)
+      return NextResponse.json({ error: 'Could not price this investment right now — please try again.' }, { status: 502 })
+    }
+
+    // Atomic cNGN debit (net + fee) + pending order (via the user's session → auth.uid()).
     const { data: orderId, error: placeErr } = await supabase.rpc('place_getequity_order', {
       p_user_id: user.id,
       p_symbol: symbol,
       p_token: token,
-      p_amount_cngn_micro: amount.toString(),
+      p_amount_cngn_micro: net.toString(),
+      p_fee_cngn_micro: fee.toString(),
     })
     if (placeErr || !orderId) {
       const msg = /insufficient/i.test(placeErr?.message || '') ? 'Insufficient cNGN balance' : 'Could not place order'
@@ -157,11 +228,12 @@ export async function POST(request: NextRequest) {
 
     const admin = serviceClient()
     try {
-      // Under the lease. This signs with custody, and failing to get it lands in the
+      // Under the custody lease (serialises with every other custody signer). Buys
+      // with NET (committed amount minus PawaSave's fee); a lease failure lands in the
       // catch below, which refunds, which is right because nothing was bought.
       const { txHash, units } = await withLease(
         'custody:signer',
-        () => buyWithCngn(token, amount),
+        () => buyWithCngn(token, net),
         { holder: `getequity-buy ${symbol}`, waitMs: 25_000 },
       )
       await admin.rpc('settle_getequity_order', {
@@ -170,7 +242,10 @@ export async function POST(request: NextRequest) {
         p_units: units,
         p_tx_hash: txHash,
       })
-      return NextResponse.json({ status: 'filled', orderId, symbol, units, txHash })
+      return NextResponse.json({
+        status: 'filled', orderId, symbol, units, txHash,
+        feeCngnMicro: fee.toString(), netCngnMicro: net.toString(),
+      })
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'On-chain buy failed'
       // Refund the debited cNGN.

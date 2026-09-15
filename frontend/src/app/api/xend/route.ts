@@ -74,8 +74,10 @@ export async function POST(request: NextRequest) {
           countryCode: 'NG',
         })
 
-        // Store Xend memberId in profile
-        await supabase
+        // Store Xend memberId in profile. Service role: migration 080 removed the client
+        // UPDATE policy on profiles, since it also let a user set their own kyc_status and
+        // lift their withdrawal cap.
+        await serviceDb()
           .from('profiles')
           .update({ xend_member_id: result.data.memberId })
           .eq('id', user.id)

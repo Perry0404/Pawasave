@@ -36,6 +36,9 @@
 import { ethers } from 'ethers'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSecret } from './secrets'
+import {
+  custodyCngnBalance, custodyCngnBalanceFresh, cngnToShares, custodyLendShares, withdrawFromLend,
+} from './custody'
 
 export const GETEQUITY_ENABLED =
   !!process.env.GETEQUITY_ENABLED && !!process.env.GETEQUITY_MARKET_ADDRESS
@@ -249,6 +252,37 @@ export async function buyAsset(
  * is denominated in the asset's payout token. This assumes a single admin-set price
  * per asset (their docs), i.e. cost is linear in quantity.
  */
+/**
+ * Ensure the custody wallet holds `needMicro` of FREE cNGN before a buy. The reconcile
+ * sweeps idle custody cNGN into PawasaveLend for yield, so custody's free balance is
+ * usually ~0 — the working cNGN lives as psNGN shares in the pool. Redeem just enough
+ * (plus a 1% rounding buffer, capped at the shares custody holds) back to the wallet.
+ * Mirrors equity-broker's ensureFreeCngn so GetEquity buys draw from the SAME float
+ * instead of needing custody pre-funded. Throws on a real liquidity shortfall.
+ */
+async function ensureFreeCngn(needMicro: bigint): Promise<void> {
+  const free = await custodyCngnBalance()
+  if (free >= needMicro) return
+  const shortfall = needMicro - free
+  let shares = await cngnToShares(shortfall + shortfall / 100n)
+  const held = await custodyLendShares()
+  if (shares > held) shares = held
+  if (shares <= 0n) {
+    throw new Error(`Insufficient cNGN liquidity: pool holds no redeemable shares, need ₦${(Number(needMicro) / 1e6).toFixed(0)}`)
+  }
+  const { cngnMicro } = await withdrawFromLend(shares)
+  if (cngnMicro > 0n) {
+    if (free + cngnMicro < needMicro) {
+      throw new Error(`Insufficient cNGN liquidity: redeemed ₦${(Number(free + cngnMicro) / 1e6).toFixed(0)}, need ₦${(Number(needMicro) / 1e6).toFixed(0)}`)
+    }
+    return
+  }
+  const after = await custodyCngnBalanceFresh()
+  if (after < needMicro) {
+    throw new Error(`Insufficient cNGN liquidity: custody has ~₦${(Number(after) / 1e6).toFixed(0)} after pool withdraw, need ₦${(Number(needMicro) / 1e6).toFixed(0)}`)
+  }
+}
+
 export async function buyWithCngn(
   token: string,
   cngnMicroBudget: bigint,
@@ -271,6 +305,10 @@ export async function buyWithCngn(
   if (unitsBase < GETEQUITY_MIN_UNITS * ONE) {
     throw new Error(`Minimum purchase is ${GETEQUITY_MIN_UNITS} units`)
   }
+
+  // Custody's working cNGN lives in the PawasaveLend pool (the reconcile sweeps it there
+  // for yield), so redeem enough back to the wallet to cover this buy before spending.
+  await ensureFreeCngn(cngnMicroBudget)
 
   // Approve the payout token to the Market once (MAX), then buy with the budget cap.
   const rwaRead = new ethers.Contract(token, RWA_ABI, signer)

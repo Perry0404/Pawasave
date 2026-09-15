@@ -333,40 +333,16 @@ export async function lockSavings(usdcMicro: number, kobo: number, durationDays:
 }
 
 export async function withdrawLock(lockId: string, early: boolean = false) {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-
-  // If early withdrawal, record the forfeiture
-  if (early) {
-    // Fetch lock details to calculate forfeited interest
-    const { data: lock } = await supabase
-      .from('savings_locks')
-      .select('id, amount_usdc_micro, effective_rate_at_creation, created_at')
-      .eq('id', lockId)
-      .single()
-    
-    if (lock) {
-      const daysHeld = Math.floor((Date.now() - new Date(lock.created_at).getTime()) / 86400000)
-      const rate = lock.effective_rate_at_creation || 50
-      const forfeited = Math.floor((lock.amount_usdc_micro * rate * daysHeld) / (100 * 365))
-      
-      if (forfeited > 0) {
-        await supabase.rpc('record_lock_forfeiture', {
-          p_lock_id: lockId,
-          p_user_id: user.id,
-          p_forfeited_interest_usdc_micro: forfeited,
-        })
-      }
-    }
-  }
-
-  const { data: ok, error } = await supabase.rpc('withdraw_lock', {
-    p_user_id: user.id,
-    p_lock_id: lockId,
-    p_early: early,
+  // Server route, not an RPC. The forfeited interest on an early exit has to be worked out
+  // from the stored lock, and the withdrawal has to follow it in the same request, or a
+  // caller can simply skip the forfeiture and keep the interest.
+  const res = await fetch('/api/savings/forfeit-withdraw', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind: 'lock', lockId, early }),
   })
-  if (error) throw error
-  if (!ok) throw new Error('Lock not found or already withdrawn')
+  const out = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(out?.error || 'Could not withdraw this lock')
 }
 
 export async function getPlatformSettings(): Promise<PlatformSetting[]> {
@@ -415,32 +391,10 @@ export async function getApySettings(): Promise<ApySettings> {
   }
 }
 
-// ── Admin (uses service role via API) ──
-
-export async function getAdminFeeSummary(): Promise<AdminFeeSummary | null> {
-  const { data, error } = await supabase.rpc('admin_fee_summary')
-  if (error || !data || data.length === 0) return null
-  return data[0]
-}
-
-export async function getAdminUserStats(): Promise<AdminUserStats | null> {
-  const { data, error } = await supabase.rpc('admin_user_stats')
-  if (error || !data || data.length === 0) return null
-  return data[0]
-}
-
-export async function getAdminTxVolume(): Promise<AdminTxVolume | null> {
-  const { data, error } = await supabase.rpc('admin_tx_volume')
-  if (error || !data || data.length === 0) return null
-  return data[0]
-}
-
-export async function getAdminRecentFees(limit = 50): Promise<PlatformFee[]> {
-  const { data, error } = await supabase.rpc('admin_recent_fees', { p_limit: limit })
-  if (error) return []
-  return data || []
-}
-
+// ── Admin ────────────────────────────────────────────────────────────────────
+// The fee summary, user stats, tx volume and recent fees helpers used to live here and
+// called their RPCs straight from the browser. They had no callers, and those functions
+// are now service-role only. /api/admin/dashboard is the way in.
 export async function isAdmin(): Promise<boolean> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user?.email) return false
@@ -454,15 +408,9 @@ export async function isAdmin(): Promise<boolean> {
   return emails.includes(user.email.toLowerCase())
 }
 
-export async function updateTransactionPin(userId: string, pin: string) {
-  if (!/^\d{4}$/.test(pin)) throw new Error('PIN must be exactly 4 digits')
-  const pinHash = await hashValue(pin)
-  const { error } = await supabase
-    .from('profiles')
-    .update({ transaction_pin_hash: pinHash, pin_set_at: new Date().toISOString() })
-    .eq('id', userId)
-  if (error) throw error
-}
+// updateTransactionPin was removed. It wrote profiles.transaction_pin_hash directly from
+// the browser, had no callers, and migration 045's trigger rejects that write anyway.
+// Use /api/security/pin, which hashes server-side under the service role.
 
 // ── Savings Goals ────────────────────────────────────────────────────────────
 
@@ -570,36 +518,21 @@ export async function completeSavingsGoal(goalId: string): Promise<number> {
 }
 
 export async function breakSavingsGoal(goalId: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-
-  // Fetch goal details to calculate forfeited interest
-  const { data: goal } = await supabase
-    .from('savings_goals')
-    .select('id, saved_usdc_micro, started_at')
-    .eq('id', goalId)
-    .single()
-  
-  if (goal) {
-    const daysHeld = Math.floor((Date.now() - new Date(goal.started_at).getTime()) / 86400000)
-    const forfeited = Math.floor((goal.saved_usdc_micro * 50 * daysHeld) / (100 * 365))
-    
-    if (forfeited > 0) {
-      await supabase.rpc('record_goal_forfeiture', {
-        p_goal_id: goalId,
-        p_user_id: user.id,
-        p_forfeited_interest_usdc_micro: forfeited,
-      })
-    }
-  }
-
-  const { error } = await supabase.rpc('break_savings_goal', {
-    p_goal_id: goalId,
-    p_user_id: user.id,
+  // Server route for the same reason as withdrawLock: the forfeiture is computed from the
+  // stored goal and applied before the goal is broken.
+  const res = await fetch('/api/savings/forfeit-withdraw', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind: 'goal', goalId }),
   })
-  if (error) throw error
+  const out = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(out?.error || 'Could not break this goal')
 }
 
+// No callers right now, and please don't delete it as dead code. The only UI that
+// used it was goals-view, which was unreachable and has been removed — which means
+// a user can currently start recurring contributions and has no way to stop them.
+// This is the function the pause control needs. See spec frontend-ux-elevation UX-48.
 export async function setGoalAutoContribute(goalId: string, enabled: boolean): Promise<void> {
   const { error } = await supabase.rpc('set_goal_auto_contribute', {
     p_goal_id: goalId,
@@ -611,55 +544,22 @@ export async function setGoalAutoContribute(goalId: string, enabled: boolean): P
 // ── Proxy Transfers ──────────────────────────────────────────────────────────
 // Admin function: Transfer funds between master wallet and proxy member wallets
 
-export async function proxyTransfer(
-  proxyMemberId: string,
-  action: 'CREDIT' | 'DEBIT',
-  amountUsdcMicro: number,
-  description?: string,
-): Promise<any> {
-  const { data, error } = await supabase.rpc('proxy_transfer', {
-    p_proxy_member_id: proxyMemberId,
-    p_action: action,
-    p_amount_usdc_micro: amountUsdcMicro,
-    p_description: description,
-  })
-  if (error) throw error
-  return data
-}
 
-export async function getProxyTransfers(limit = 50): Promise<any[]> {
-  const { data, error } = await supabase.rpc('get_proxy_transfers', {
-    p_limit: limit,
-  })
-  if (error) throw error
-  return data || []
-}
 
 // Register proxy member ID for automatic deposit routing
 export async function registerProxyMember(
   proxyMemberId: string,
   provider = 'xend',
 ): Promise<any> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-
-  const { data, error } = await supabase.rpc('register_proxy_member', {
-    p_user_id: user.id,
-    p_proxy_member_id: proxyMemberId,
-    p_provider: provider,
+  // Server route. register_proxy_member takes p_user_id, and from the browser that was the
+  // caller's to choose, so the route supplies it from the session instead.
+  const res = await fetch('/api/proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'register', proxyMemberId, provider }),
   })
-  if (error) throw error
-  return data
+  const out = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(out?.error || 'Could not register proxy member')
+  return out.result
 }
 
-// Get proxy member ID for current user
-export async function getUserProxyMember(): Promise<string | null> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-
-  const { data, error } = await supabase.rpc('get_proxy_member_for_user', {
-    p_user_id: user.id,
-  })
-  if (error) return null
-  return data as string | null
-}

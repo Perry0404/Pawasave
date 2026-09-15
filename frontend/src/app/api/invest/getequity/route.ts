@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { GETEQUITY_ENABLED, GETEQUITY_MIN_UNITS, listAssets, buyWithCngn, quoteBuy, type GetEquityAsset } from '@/lib/getequity'
+import { withLease } from '@/lib/custody-lease'
 
 /**
  * GET  /api/invest/getequity  → regulated Nigerian RWA products (T-bills, funds,
@@ -15,11 +16,11 @@ import { GETEQUITY_ENABLED, GETEQUITY_MIN_UNITS, listAssets, buyWithCngn, quoteB
  *   • Visible marketplace — the exact same products are ALSO listed here to buy
  *     directly (T-bill alongside the IPO etc.); the only difference is the yield.
  *
- * STATUS: GetEquity is on Base Sepolia testnet; mainnet pending. When
+ * STATUS: GetEquity's Market is LIVE on Base mainnet (settles in cNGN). When
  * GETEQUITY_ENABLED is off, the list is a static preview and buying returns 503
  * ("launching soon") with NO debit — same pattern as the equity broker. When it's
- * on, the list is read live from the chain. The buy path (atomic debit + custody
- * execution + ledger) lands with its migration on mainnet — see the plan doc.
+ * on, the list is read live from the chain and buys run under the custody lease.
+ * PawaSave charges GETEQUITY_FEE_BPS on top of GetEquity's on-chain vault fee.
  */
 export const dynamic = 'force-dynamic'
 
@@ -227,7 +228,14 @@ export async function POST(request: NextRequest) {
 
     const admin = serviceClient()
     try {
-      const { txHash, units } = await buyWithCngn(token, net)
+      // Under the custody lease (serialises with every other custody signer). Buys
+      // with NET (committed amount minus PawaSave's fee); a lease failure lands in the
+      // catch below, which refunds, which is right because nothing was bought.
+      const { txHash, units } = await withLease(
+        'custody:signer',
+        () => buyWithCngn(token, net),
+        { holder: `getequity-buy ${symbol}`, waitMs: 25_000 },
+      )
       await admin.rpc('settle_getequity_order', {
         p_order_id: orderId,
         p_status: 'filled',

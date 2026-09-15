@@ -7,8 +7,10 @@ import {
   equityProvider,
   supportedEquitySymbols,
   placeEquityOrder,
+  EquityBuyStockPending,
   type EquityAssetType,
 } from '@/lib/equity-broker'
+import { HyperFxEscrowStranded } from '@/lib/hyperfx'
 import { sendEquityBuyEmail } from '@/lib/notify-tx'
 
 /**
@@ -21,6 +23,9 @@ import { sendEquityBuyEmail } from '@/lib/notify-tx'
  * GET /api/invest/equity   → the caller's portfolio_holdings.
  */
 export const dynamic = 'force-dynamic'
+// The buy finishes in the background after we respond, and the solver auction plus two
+// swaps run past the default window. Bound it explicitly so the work is not cut mid-leg.
+export const maxDuration = 300
 
 const MIN_CNGN_MICRO = 1_000_000_000n // ₦1,000 minimum equity buy
 
@@ -160,8 +165,40 @@ export async function POST(request: NextRequest) {
         } catch (mailErr) { console.error('[invest/equity] buy email failed:', mailErr) }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Broker error'
+        // Leg 1 spent the cNGN but leg 2 did not buy the stock. Park it as 'settling' with
+        // the USDC recorded and do NOT refund, or the customer is paid out of float while
+        // custody sits on USDC. The reconcile cron finishes the buy.
+        if (e instanceof EquityBuyStockPending) {
+          await admin.rpc('mark_equity_buy_settling', {
+            p_order_id: orderId,
+            p_usdc_micro: e.usdcMicro.toString(),
+            p_broker_ref: null,
+            p_error: msg.slice(0, 500),
+          })
+          console.warn('[invest/equity] parked settling, cNGN spent and stock leg pending:', { orderId, msg })
+          return
+        }
         await admin.rpc('settle_equity_order', { p_order_id: orderId, p_status: 'failed', p_error: msg.slice(0, 500) })
         console.error('[invest/equity] broker failed, refunded:', msg)
+
+        // The refund above is right, the customer got no shares. But if leg 1 had already
+        // escrowed the cNGN then custody is short by that much, so write it down instead of
+        // letting it disappear into the float.
+        if (e instanceof HyperFxEscrowStranded) {
+          await admin.rpc('record_custody_divergence', {
+            p_kind: 'equity_buy_cngn_escrow_stranded',
+            p_asset: 'cngn',
+            p_amount_micro: e.amountInMicro.toString(),
+            p_ref_table: 'equity_orders',
+            p_ref_id: orderId,
+            p_user_id: user.id,
+            p_place_tx: e.placeTxHash,
+            p_detail: `customer refunded, cNGN escrowed in the intent gateway: ${msg}`.slice(0, 1000),
+          })
+          console.error('[invest/equity] cNGN stranded in gateway, recorded divergence', {
+            orderId, placeTx: e.placeTxHash, amountMicro: e.amountInMicro.toString(),
+          })
+        }
       }
     })()
 

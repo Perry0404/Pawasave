@@ -4,7 +4,7 @@ import {
   GETEQUITY_ENABLED, buyWithCngn, quoteSell, custodyAssetBalance, pendingPayout, claimPayout,
 } from '@/lib/getequity'
 import { custodyCngnBalance } from '@/lib/custody'
-import { acquireSupplyLock, releaseSupplyLock } from '@/lib/supply-lock'
+import { withLease, LeaseUnavailableError } from '@/lib/custody-lease'
 
 /**
  * GET /api/cron/getequity-yield
@@ -92,20 +92,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: true, skipped: 'getequity yield not configured' })
   }
 
-  if (!(await acquireSupplyLock())) {
-    return NextResponse.json({ ok: true, skipped: 'custody-supply lock held' })
-  }
-
   const routes: Record<string, unknown>[] = []
   try {
-    // TERM first (Fixed+Goals → NTBL), then FLEX (Ajo+Flexible → ARMNGF). Sequential
-    // so the second can't spend what the first deployed.
-    if (termOn) routes.push(await deployRoute('term:NTBL', TERM_TOKEN, TERM_CAP))
-    if (flexOn) routes.push(await deployRoute('flex:ARMNGF', FLEX_TOKEN, FLEX_CAP))
+    await withLease('custody:signer', async () => {
+      // TERM first (Fixed+Goals → NTBL), then FLEX (Ajo+Flexible → ARMNGF). Sequential
+      // so the second can't spend what the first deployed.
+      if (termOn) routes.push(await deployRoute('term:NTBL', TERM_TOKEN, TERM_CAP))
+      if (flexOn) routes.push(await deployRoute('flex:ARMNGF', FLEX_TOKEN, FLEX_CAP))
+    }, { holder: 'getequity-yield' })
   } catch (e) {
+    if (e instanceof LeaseUnavailableError) {
+      return NextResponse.json({ ok: true, skipped: e.message })
+    }
     routes.push({ error: e instanceof Error ? e.message : String(e) })
-  } finally {
-    await releaseSupplyLock()
   }
 
   console.info('[getequity-yield]', routes)

@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { STRAILS_ENABLED, listTransactions, getUserDetails, addExternalWallet, withdrawAsset } from '@/lib/strails'
 import { custodyAddress, custodyCngnBalance, cngnBalanceOf, supplyToLend } from '@/lib/custody'
-import { acquireSupplyLock, releaseSupplyLock } from '@/lib/supply-lock'
+import { withLease, LeaseUnavailableError } from '@/lib/custody-lease'
 import { sendDepositEmail } from '@/lib/notify-tx'
 import { depositFeeNgn } from '@/lib/deposit-fee'
 
@@ -168,22 +168,22 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Idle custody cNGN → PawasaveLend, so swept deposits actually earn. Guard with
-    // the shared custody-supply lock (migration 054) so this can't race sweep-deposits
-    // and both fire supply(idle) — the loser reverts "exceeds balance".
-    if (await acquireSupplyLock()) {
-      try {
+    // Idle custody cNGN into PawasaveLend, so swept deposits actually earn. Under the
+    // lease, otherwise this races sweep-deposits and the loser reverts "exceeds balance".
+    try {
+      await withLease('custody:signer', async () => {
         const idle = await custodyCngnBalance()
-        if (idle >= 1_000_000n) {
-          const { txHash, shares } = await supplyToLend(idle)
-          result.supplied = idle.toString()
-          console.info('[strails-reconcile] supplied to pool', { txHash, shares: shares.toString() })
-        }
-      } finally {
-        await releaseSupplyLock()
+        if (idle < 1_000_000n) return
+        const { txHash, shares } = await supplyToLend(idle)
+        result.supplied = idle.toString()
+        console.info('[strails-reconcile] supplied to pool', { txHash, shares: shares.toString() })
+      }, { holder: 'strails-reconcile' })
+    } catch (e) {
+      if (e instanceof LeaseUnavailableError) {
+        console.info('[strails-reconcile] skipped supply:', e.message)
+      } else {
+        throw e
       }
-    } else {
-      console.info('[strails-reconcile] skipped supply — custody-supply lock held')
     }
   } catch (e) {
     result.errors.push(`sweep phase: ${e instanceof Error ? e.message : e}`)

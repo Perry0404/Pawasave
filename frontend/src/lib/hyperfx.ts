@@ -39,6 +39,25 @@ import { cngnBalanceOf } from './custody'
 
 export const HYPERFX_ENABLED = process.env.HYPERFX_ENABLED === 'true'
 
+/**
+ * Thrown when the order was placed, so the input has left custody into the gateway escrow,
+ * and then no solver filled it. The input is recoverable only by cancelling the order, which
+ * needs the exact Order struct, so `placeTxHash` is the one thing that makes recovery cheap.
+ * Callers must record this as a custody shortfall rather than treat it as a plain failure.
+ */
+export class HyperFxEscrowStranded extends Error {
+  constructor(
+    message: string,
+    readonly direction: 'cngn->usdc' | 'usdc->cngn',
+    readonly amountInMicro: bigint,
+    readonly tokenIn: string,
+    readonly placeTxHash: string,
+  ) {
+    super(message)
+    this.name = 'HyperFxEscrowStranded'
+  }
+}
+
 const COPROCESSOR_WS = process.env.HYPERFX_COPROCESSOR_WS || 'wss://nexus.rpc.polytope.technology'
 const INDEXER_URL = process.env.HYPERFX_INDEXER_URL || 'https://nexus.indexer.polytope.technology'
 const AUCTION_MS = Number(process.env.HYPERFX_AUCTION_MS) || 15_000
@@ -199,6 +218,17 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
     throw new Error('HyperFX: order was not placed')
   }
 
+  // Past this line the input is escrowed in the gateway. Derive the placement hash from the
+  // raw signed tx so a failure downstream can name the order that needs cancelling.
+  const placeTxHash = ethers.keccak256(signed)
+  const stranded = (msg: string) =>
+    new HyperFxEscrowStranded(`HyperFX: ${msg}`, direction, quote.amountIn, tokenIn, placeTxHash)
+
+  // The solver fills in its own transaction, which we never see a hash for, so unlike the
+  // DEX legs there is no receipt to parse and this has to fall back to a wallet delta. That
+  // makes the number vulnerable to anything else crediting custody in the same window, and
+  // an on-ramp deposit is exactly that. The clamp after the loop bounds the damage.
+  //
   // Treat the on-chain OUTPUT BALANCE as the source of truth, not the status stream.
   // In practice the solver settles the fill on-chain (custody receives the output) and
   // the SDK then tears its status streams down WITHOUT ever emitting FILLED — so a plain
@@ -224,11 +254,24 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
   while (Date.now() < deadline) {
     received = (await tokenBalance(tokenOut, account.address)) - before
     if (statusFilled || received >= threshold) break
-    if (expired) throw new Error('HyperFX: order expired (no solver filled)')
+    if (expired) throw stranded('order expired (no solver filled)')
     await new Promise((r) => setTimeout(r, 4_000))
   }
   received = (await tokenBalance(tokenOut, account.address)) - before
-  if (received <= 0n) throw new Error('HyperFX: order did not fill (no output received)')
+  if (received <= 0n) throw stranded('order did not fill (no output received)')
+
+  // A solver delivers the output the order asked for and no more, so a delta above that is
+  // something else that landed in custody, most likely an on-ramp deposit. Crediting it to
+  // this order would pay a customer with another customer's money and the deposit scanner
+  // would then credit the same funds again. Attribute only what the order was owed and
+  // leave the rest for whoever it belongs to.
+  if (received > quote.amountOut) {
+    console.warn('[hyperfx] custody received more than this order required, clamping', {
+      direction, received: received.toString(), orderOutput: quote.amountOut.toString(),
+      placeTx: placeTxHash,
+    })
+    return quote.amountOut
+  }
   return received
 }
 

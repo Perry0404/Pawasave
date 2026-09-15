@@ -36,9 +36,9 @@ import { ethers } from 'ethers'
 import { CONTRACTS, ERC20_ABI } from './contracts'
 import { getSecret } from './secrets'
 import { getWriteProvider, withBaseRead } from './rpc-provider'
-import { HYPERFX_ENABLED, convertCngnToUsdc, convertUsdcToCngn } from './hyperfx'
-import { custodyCngnBalance, custodyCngnBalanceFresh, cngnToShares, withdrawFromLend, custodyLendShares } from './custody'
-import { acquireSupplyLock, releaseSupplyLock } from './supply-lock'
+import { HYPERFX_ENABLED, convertCngnToUsdc, convertUsdcToCngn, HyperFxEscrowStranded } from './hyperfx'
+import { custodyCngnBalance, custodyCngnBalanceFresh, custodyUsdcBalanceFresh, cngnToShares, withdrawFromLend, custodyLendShares } from './custody'
+import { withLease } from './custody-lease'
 
 const BASE_CHAIN_ID = 8453
 
@@ -94,15 +94,54 @@ export interface EquitySale {
 export class EquitySellCngnPending extends Error {
   usdcMicro: bigint
   brokerRef: string
-  constructor(message: string, usdcMicro: bigint, brokerRef: string) {
+  /** Set when the USDC is escrowed in the gateway rather than sitting in custody. */
+  stranded?: HyperFxEscrowStranded
+  constructor(message: string, usdcMicro: bigint, brokerRef: string, stranded?: HyperFxEscrowStranded) {
     super(message)
     this.name = 'EquitySellCngnPending'
     this.usdcMicro = usdcMicro
     this.brokerRef = brokerRef
+    this.stranded = stranded
+  }
+}
+
+/**
+ * Thrown when leg 1 (cNGN → USDC) has already executed but leg 2 (USDC → stock) has not.
+ * The cNGN is GONE from custody, so the caller must NOT refund; it parks the order as
+ * 'settling' with the USDC now in custody and lets equity-buy-reconcile finish the buy.
+ * Refunding here would pay the customer out of float and hide that custody is short.
+ */
+export class EquityBuyStockPending extends Error {
+  usdcMicro: bigint
+  constructor(message: string, usdcMicro: bigint) {
+    super(message)
+    this.name = 'EquityBuyStockPending'
+    this.usdcMicro = usdcMicro
   }
 }
 
 const b = (v: unknown): bigint => BigInt((v as any) ?? 0)
+
+const TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)')
+
+/**
+ * Sum of `token` moved to `recipient` by this transaction, read from its own logs.
+ * A multi-hop route can credit the recipient more than once, so these are added up.
+ */
+function transferredTo(receipt: ethers.TransactionReceipt, token: string, recipient: string): bigint {
+  const wantToken = token.toLowerCase()
+  const wantTo = ethers.zeroPadValue(recipient, 32).toLowerCase()
+  let total = 0n
+  for (const log of receipt.logs) {
+    if (log.address.toLowerCase() !== wantToken) continue
+    if (log.topics[0] !== TRANSFER_TOPIC || log.topics.length < 3) continue
+    if (log.topics[2].toLowerCase() !== wantTo) continue
+    // A non-standard token could index the value, leaving data empty. Skip rather than throw.
+    if (!log.data || log.data === '0x') continue
+    total += BigInt(log.data)
+  }
+  return total
+}
 const MAX_UINT256 = (1n << 256n) - 1n
 const GAS = { approve: 120_000n, swap: 800_000n } as const
 const slippageBps = () => Number(process.env.EQUITY_SLIPPAGE_BPS) || 100
@@ -116,7 +155,16 @@ interface StockToken { address: string; decimals: number; fee?: number }
 // router; `fee` is only the Uniswap-V3 fallback hint. First 4 verified 2026-08-26.
 // Batch of 6 added 2026-09-04 with these USDC pool depths at enable time:
 //   AMZN ~$54.6k · SNDK ~$5.3k · SPCX ~$5.2k · MSFT ~$5.1k · MSTR ~$5.1k · TSLA ~$5.0k
-// The thin (~$5k) pools support normal retail buys; oversized buys refund via the
+//
+// CORRECTION (07 Sep 2026): those depths were measured on Uniswap V3 alone. Quoting
+// both venues shows every one of the ten pools holds price flat to within 0.2% at a
+// $3,000 order, because the real liquidity is on Aerodrome Slipstream. Treat the deep
+// pool note above as the accurate one and the ~$5k figures as a Uniswap-only artefact.
+//
+// The claim below is still wrong for a different reason: minOut is derived FROM the
+// quote, so it bounds quote-to-execution drift only, not the price impact already in
+// the quote. An oversized buy fills at whatever the curve gives, it does not refund.
+// The sell path passes a real market-relative floor; the buy path passes none.
 // slippage guard (EQUITY_SLIPPAGE_BPS) rather than filling badly.
 const DEFAULT_STOCKS: Record<string, StockToken> = {
   AAPL:  { address: '0xb200000000000000000000C2e324d24d7eEcd1fb', decimals: 8, fee: 3000 },
@@ -244,7 +292,10 @@ async function aeroBestQuote(tokenIn: string, tokenOut: string, amountIn: bigint
  * Slipstream, returning the amount actually received (on-chain balance delta). Both venues
  * are quoted; the one with the larger output wins, so a big buy routes to Aerodrome's deep
  * CL pool while a pair that only exists on one venue still works. The winning quote sets the
- * min-out slippage guard, so a thin route can only fail — never fill at a bad price.
+ * min-out slippage guard. Note that guard bounds quote-to-execution drift only, not the
+ * price impact already baked into the quote, so a thin route fills at a bad price rather
+ * than failing. Measured 07 Sep: all ten pools are flat to 0.2% at $3k, so this is not
+ * currently reachable, but the buy path still passes no fair-value floor the way sell does.
  */
 async function swapBestVenue(tokenIn: string, tokenOut: string, amountIn: bigint, preferFee?: number, minAcceptableOut?: bigint): Promise<{ received: bigint; txHash: string; venue: 'aerodrome' | 'univ3' }> {
   if (amountIn <= 0n) throw new Error('Zero swap amount')
@@ -283,6 +334,7 @@ async function swapBestVenue(tokenIn: string, tokenOut: string, amountIn: bigint
     await (await inC.approve(routerAddr, MAX_UINT256, { gasLimit: GAS.approve })).wait(1)
   }
 
+  // Kept only to cross-check the receipt below, not to attribute the fill.
   const before = b(await outC.balanceOf(owner))
   let tx
   if (useAero) {
@@ -301,8 +353,22 @@ async function swapBestVenue(tokenIn: string, tokenOut: string, amountIn: bigint
   }
   const receipt = await tx.wait()
   if (!receipt || receipt.status !== 1) throw new Error('Swap reverted')
-  const received = b(await outC.balanceOf(owner)) - before
+
+  // Attribute the fill from this transaction's own Transfer events, not from the wallet
+  // balance. A whole-wallet delta counts anything else that landed in the same window,
+  // and custody receives on-ramp deposits that no lease can hold back.
+  const received = transferredTo(receipt, tokenOut, owner)
   if (received <= 0n) throw new Error('Swap settled but no output received')
+
+  const walletDelta = b(await outC.balanceOf(owner)) - before
+  if (walletDelta !== received) {
+    // Not fatal, the receipt is authoritative. It does mean something else moved custody
+    // mid-swap, which is worth knowing about.
+    console.warn('[equity] custody moved during the swap', {
+      fromReceipt: received.toString(), walletDelta: walletDelta.toString(), tx: receipt.hash,
+    })
+  }
+
   console.info('[equity] swap filled', { venue: useAero ? 'aerodrome' : 'univ3', received: received.toString() })
   return { received, txHash: receipt.hash, venue: useAero ? 'aerodrome' : 'univ3' }
 }
@@ -362,30 +428,52 @@ export async function placeEquityOrder(params: EquityOrderParams): Promise<Equit
   if (equityProvider() !== 'base_dex') throw new Error(`Equity provider '${equityProvider()}' not implemented`)
   const token = resolveStock(params.symbol)
 
-  // Hold the custody-supply lock across free→escrow: without it, the idle-supply cron
-  // re-pools the cNGN we free during HyperFX's ~20s auction, so the escrow reverts
-  // "transfer amount exceeds balance". Retry a few times in case a cron briefly holds it.
-  let locked = false
-  for (let i = 0; i < 4 && !locked; i++) {
-    locked = await acquireSupplyLock()
-    if (!locked) await new Promise((r) => setTimeout(r, 1500))
-  }
-  let released = false
-  const release = async () => { if (locked && !released) { released = true; await releaseSupplyLock() } }
+  // Hold the lease across both legs. Freeing cNGN and escrowing it needs exclusivity or
+  // the idle-supply cron re-pools it during HyperFX's ~20s auction and the escrow reverts.
+  // Leg 2 needs it too: it signs with the same wallet, and a concurrent signer means two
+  // txs share a nonce.
+  return withLease('custody:signer', async (lease) => {
+    await ensureFreeCngn(params.amountCngnMicro)
+    const usdcMicro = await convertCngnToUsdc(params.amountCngnMicro) // leg 1, cNGN into HyperFX escrow
 
-  let usdcMicro: bigint
-  try {
-    await ensureFreeCngn(params.amountCngnMicro)                        // free cNGN from the pool if needed
-    usdcMicro = await convertCngnToUsdc(params.amountCngnMicro)         // leg 1 — cNGN escrowed into HyperFX
-    await release()                                                    // escrowed → the supply cron may resume
-  } finally {
-    await release()
-  }
-  const { received, txHash } = await swapBestVenue(CONTRACTS.USDC, token.address, usdcMicro, token.fee) // leg 2
+    // Past this point the cNGN has left custody, so every failure has to come back as
+    // EquityBuyStockPending. A plain throw makes the caller refund cNGN we no longer hold.
+    if (lease.lost) {
+      throw new EquityBuyStockPending('Lost the custody lease after the cNGN leg', usdcMicro)
+    }
 
-  const shares = Number(received) / 10 ** token.decimals
-  if (!(shares > 0)) throw new Error('Filled zero shares')
-  return { brokerRef: txHash, usdcMicro, shares }
+    try {
+      const { received, txHash } = await swapBestVenue(CONTRACTS.USDC, token.address, usdcMicro, token.fee) // leg 2
+      const shares = Number(received) / 10 ** token.decimals
+      if (!(shares > 0)) throw new Error('Filled zero shares')
+      return { brokerRef: txHash, usdcMicro, shares }
+    } catch (e) {
+      throw new EquityBuyStockPending(
+        e instanceof Error ? e.message : 'USDC→stock swap pending', usdcMicro,
+      )
+    }
+  }, { holder: `equity-buy ${params.symbol}`, waitMs: 20_000 })
+}
+
+/**
+ * Leg 2 on its own, for a buy parked as 'settling' with USDC already in custody.
+ * Caller must confirm custody still holds usdcMicro first, otherwise this spends USDC
+ * belonging to another order.
+ */
+export async function completeEquityBuyFromUsdc(
+  symbol: string,
+  usdcMicro: bigint,
+): Promise<{ brokerRef: string; shares: number }> {
+  if (!isEquityBrokerLive()) throw new Error('Equity broker not configured')
+  if (usdcMicro <= 0n) throw new Error('Zero USDC amount')
+  const token = resolveStock(symbol)
+
+  return withLease('custody:signer', async () => {
+    const { received, txHash } = await swapBestVenue(CONTRACTS.USDC, token.address, usdcMicro, token.fee)
+    const shares = Number(received) / 10 ** token.decimals
+    if (!(shares > 0)) throw new Error('Filled zero shares')
+    return { brokerRef: txHash, shares }
+  }, { holder: `equity-buy-retry ${symbol}`, waitMs: 15_000 })
 }
 
 /**
@@ -406,43 +494,62 @@ export async function sellEquity(symbol: string, sharesToSell: number, minUsdcOu
   // one unit more than custody holds reverts the whole swap "insufficient custody balance".
   // Selling min(requested, held) lets a full exit always go through; the reserve already
   // decremented the ledger by the requested amount, so a full exit lands the holding at 0.
-  const custodyHeld = await custodyStockBalance(token.address)
-  if (custodyHeld < tokenBase) tokenBase = custodyHeld
-  if (tokenBase <= 0n) throw new Error('No custody balance to sell for this stock')
+  // Under the lease for the whole sale. Both legs sign with custody, and the balance
+  // clamp below is only meaningful if nothing else moves custody's stock in between.
+  return withLease('custody:signer', async (lease) => {
+    const custodyHeld = await custodyStockBalance(token.address)
+    if (custodyHeld < tokenBase) tokenBase = custodyHeld
+    if (tokenBase <= 0n) throw new Error('No custody balance to sell for this stock')
 
-  // minUsdcOutMicro (optional) = fair-value floor for the stock→USDC leg, so a large
-  // sell can't be dumped into a thin pool far below the stock's market price. Below the
-  // floor the swap refuses and the caller restores the shares (see settle_equity_sell).
-  const sold = await swapBestVenue(token.address, CONTRACTS.USDC, tokenBase, token.fee, minUsdcOutMicro) // stock → USDC
+    // minUsdcOutMicro (optional) = fair-value floor for the stock→USDC leg, so a large
+    // sell can't be dumped into a thin pool far below the stock's market price. Below the
+    // floor the swap refuses and the caller restores the shares (see settle_equity_sell).
+    const sold = await swapBestVenue(token.address, CONTRACTS.USDC, tokenBase, token.fee, minUsdcOutMicro) // stock → USDC
 
-  // Leg 2: USDC → cNGN via HyperFX. The stock is now SOLD (irreversible), so a transient
-  // no-solver auction must not lose the proceeds. Retry a couple of times; if still unfilled,
-  // throw EquitySellCngnPending so the caller parks the sale as 'settling' (USDC recorded,
-  // shares NOT restored) for the reconcile cron to finish — never a false 'failed'/restore.
-  let cngnGrossMicro = 0n
-  let lastErr: unknown
-  const attempts = Math.max(1, Number(process.env.EQUITY_SELL_CNGN_RETRIES) || 2)
-  for (let i = 0; i < attempts; i++) {
-    try {
-      cngnGrossMicro = await convertUsdcToCngn(sold.received)
-      if (cngnGrossMicro > 0n) break
-    } catch (e) {
-      lastErr = e
-      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 5_000))
+    // Past this point the stock is sold and cannot be unsold, so every failure has to come
+    // back as EquitySellCngnPending. A plain throw makes the caller restore shares that no
+    // longer exist.
+    if (lease.lost) {
+      throw new EquitySellCngnPending('Lost the custody lease after the stock leg', sold.received, sold.txHash)
     }
-  }
-  if (cngnGrossMicro <= 0n) {
-    throw new EquitySellCngnPending(
-      lastErr instanceof Error ? lastErr.message : 'USDC→cNGN conversion pending (no solver)',
-      sold.received, sold.txHash,
-    )
-  }
-  return {
-    brokerRef: sold.txHash,
-    usdcMicro: sold.received,
-    cngnGrossMicro,
-    shares: Number(tokenBase) / 10 ** token.decimals,
-  }
+
+    // Leg 2: USDC → cNGN via HyperFX. A transient no-solver auction must not lose the
+    // proceeds, so retry, then park the sale as 'settling' with the USDC recorded and the
+    // shares left alone for the reconcile cron to finish.
+    let cngnGrossMicro = 0n
+    let lastErr: unknown
+    const attempts = Math.max(1, Number(process.env.EQUITY_SELL_CNGN_RETRIES) || 2)
+    for (let i = 0; i < attempts; i++) {
+      // A failed conversion leaves the USDC escrowed in the intent gateway, so retrying
+      // blind spends custody's own float on top of the proceeds. Only retry while the
+      // USDC is provably still here.
+      if (i > 0 && (await custodyUsdcBalanceFresh()) < sold.received) {
+        lastErr = new Error('proceeds are escrowed in the intent gateway, not retrying')
+        break
+      }
+      try {
+        cngnGrossMicro = await convertUsdcToCngn(sold.received)
+        if (cngnGrossMicro > 0n) break
+      } catch (e) {
+        lastErr = e
+        if (i < attempts - 1) await new Promise((r) => setTimeout(r, 5_000))
+      }
+    }
+    if (cngnGrossMicro <= 0n) {
+      throw new EquitySellCngnPending(
+        lastErr instanceof Error ? lastErr.message : 'USDC→cNGN conversion pending (no solver)',
+        sold.received, sold.txHash,
+        // Carry the placement hash through so the caller can record which order to cancel.
+        lastErr instanceof HyperFxEscrowStranded ? lastErr : undefined,
+      )
+    }
+    return {
+      brokerRef: sold.txHash,
+      usdcMicro: sold.received,
+      cngnGrossMicro,
+      shares: Number(tokenBase) / 10 ** token.decimals,
+    }
+  }, { holder: `equity-sell ${symbol}`, waitMs: 20_000 })
 }
 
 /** cNGN/stock (base units) of a token currently held by the custody wallet (read-only). */

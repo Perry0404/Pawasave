@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { formatNaira, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
 import { siteBaseUrl } from '@/lib/site-url'
-import { Loader2, Copy, Check } from 'lucide-react'
+import { CircleNotch, Copy, Check, Crown, ArrowUp, Users, CaretRight } from '@phosphor-icons/react'
 import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -243,11 +243,15 @@ export default function GroupsView({ user, wallet }: Props) {
         {selected.owner_id === user?.id && (
           <div style={{ margin: '0 0 14px' }}>
             {inviteCode ? (
-              <div style={{ background: 'var(--card, #12140f)', border: '1px solid var(--line, #20261f)', borderRadius: 12, padding: '12px 14px' }}>
-                <div style={{ fontSize: 11, color: 'var(--sub, #8a9a90)' }}>Member code (no smartphone)</div>
-                <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '.04em', margin: '2px 0 6px' }}>{inviteCode}</div>
-                <div style={{ fontSize: 11, color: 'var(--sub, #8a9a90)', lineHeight: 1.4 }}>
-                  Give this code to the member. They dial <b style={{ color: 'var(--ink, #fff)' }}>*111*{inviteCode}#</b>, enter their BVN, and are onboarded &amp; added to this circle.
+              /* Was styled with var(--card) and var(--sub), neither of which exists, so the
+                 fallbacks painted a near-black panel while --ink resolved to near-black text
+                 — the code was invisible in light mode. This is `.info`, which is exactly
+                 this component. */
+              <div className="info">
+                <div className="l">Member code (no smartphone)</div>
+                <div className="num" style={{ fontSize: 'var(--t-xl)', fontWeight: 'var(--w-bold)', letterSpacing: '.04em', margin: '2px 0 6px', color: 'var(--ink)' }}>{inviteCode}</div>
+                <div style={{ fontSize: 'var(--t-2xs)', fontWeight: 'var(--w-medium)', color: 'var(--muted)', lineHeight: 1.4 }}>
+                  Give this code to the member. They dial <b style={{ color: 'var(--ink)' }}>*111*{inviteCode}#</b>, enter their BVN, and are onboarded &amp; added to this circle.
                 </div>
                 <button className="cyclechip" style={{ border: 0, cursor: 'pointer', marginTop: 8 }}
                   onClick={() => { navigator.clipboard?.writeText(inviteCode); setInviteCode(inviteCode) }}>Copy code</button>
@@ -286,7 +290,18 @@ export default function GroupsView({ user, wallet }: Props) {
         </div>
 
         {selected.owner_id === user?.id && selected.creator_incentive_percent > 0 && (
-          <div className="turnbar"><span className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 20h20L12 4z" /></svg></span><div className="mid"><div className="nm">You&apos;re the circle manager</div><div className="sub">Earning {selected.creator_incentive_percent}% of every payout</div></div></div>
+          /* Was className="turnbar", which no rule defines — and with no `.turnbar .ic svg`
+             size rule either, the inline SVG rendered at full intrinsic width. Rebuilt on
+             `.rows`/`.row`, same shape and it sizes its own icon. */
+          <div className="rows" style={{ marginBottom: 'var(--s-3)' }}>
+            <div className="row" style={{ cursor: 'default' }}>
+              <span className="dot"><Crown /></span>
+              <div className="mid">
+                <div className="nm">You&apos;re the circle manager</div>
+                <div className="sub">Earning {selected.creator_incentive_percent}% of every payout</div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Payment method */}
@@ -369,7 +384,7 @@ export default function GroupsView({ user, wallet }: Props) {
           <div className="feedcard">
             {contributions.map((c) => (
               <div key={c.id} className="tx">
-                <span className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg></span>
+                <span className="ic"><ArrowUp /></span>
                 <div className="mid"><div className="nm">Cycle {c.cycle_number}</div><div className="sub">{timeAgo(c.paid_at)}</div></div>
                 <div className="rt"><div className="amt pos num">{formatNaira(c.amount_kobo)}</div></div>
               </div>
@@ -425,7 +440,7 @@ export default function GroupsView({ user, wallet }: Props) {
       </div>
 
       {loading ? (
-        <div style={{ display: 'grid', placeItems: 'center', padding: '48px 0' }}><Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--muted)' }} /></div>
+        <div style={{ display: 'grid', placeItems: 'center', padding: '48px 0' }}><CircleNotch className="w-6 h-6 animate-spin" style={{ color: 'var(--muted)' }} /></div>
       ) : groups.length === 0 ? (
         <div className="empty" style={{ marginTop: 14 }}>
           <div className="eh">No circles yet</div>
@@ -436,9 +451,9 @@ export default function GroupsView({ user, wallet }: Props) {
         <div className="rows" style={{ marginTop: 8 }}>
           {groups.map((g) => (
             <button key={g.id} className="opt" onClick={() => openGroup(g)}>
-              <span className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg></span>
+              <span className="ic"><Users /></span>
               <div className="mid"><div className="nm">{g.name}</div><div className="sub">{formatNaira(g.contribution_amount_kobo)} / {g.cycle_period} · {g.member_count}/{g.max_members} members</div></div>
-              <span className="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></span>
+              <span className="chev"><CaretRight /></span>
             </button>
           ))}
         </div>

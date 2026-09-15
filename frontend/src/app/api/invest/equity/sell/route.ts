@@ -14,6 +14,8 @@ import { sendEquitySellEmail } from '@/lib/notify-tx'
  *   Buying is free; the ₦500 flat fee is charged only here, as platform revenue.
  */
 export const dynamic = 'force-dynamic'
+// Same reason as the buy route: both legs run after we respond and outlive the default.
+export const maxDuration = 300
 
 const FLAT_FEE_MICRO = 500_000_000n // ₦500
 
@@ -136,6 +138,25 @@ export async function POST(request: NextRequest) {
             p_sale_id: saleId, p_usdc_micro: e.usdcMicro.toString(), p_broker_ref: e.brokerRef,
           })
           console.warn('[invest/equity/sell] leg2 pending, parked settling:', { saleId, symbol, msg: e.message })
+
+          // The parked sale claims custody holds this USDC. When leg 2 escrowed it into the
+          // gateway that is not true, so record the gap and the order that has to be
+          // cancelled to close it. Without this the reconciler just retries forever.
+          if (e.stranded) {
+            await admin.rpc('record_custody_divergence', {
+              p_kind: 'equity_sell_usdc_escrow_stranded',
+              p_asset: 'usdc',
+              p_amount_micro: e.stranded.amountInMicro.toString(),
+              p_ref_table: 'equity_sales',
+              p_ref_id: saleId,
+              p_user_id: user.id,
+              p_place_tx: e.stranded.placeTxHash,
+              p_detail: `sale parked settling, USDC escrowed in the intent gateway: ${e.message}`.slice(0, 1000),
+            })
+            console.error('[invest/equity/sell] USDC stranded in gateway, recorded divergence', {
+              saleId, placeTx: e.stranded.placeTxHash, amountMicro: e.stranded.amountInMicro.toString(),
+            })
+          }
           return
         }
         // Leg 1 never executed (or a fair-value/liquidity guard fired before it): the stock

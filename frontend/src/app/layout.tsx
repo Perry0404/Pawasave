@@ -1,10 +1,25 @@
 import type { Metadata, Viewport } from 'next'
-import { Inter } from 'next/font/google'
+import localFont from 'next/font/local'
 import './globals.css'
 import { ConfirmProvider } from '@/components/confirm-dialog'
 import ServiceWorkerRegister from '@/components/service-worker-register'
 
-const inter = Inter({ subsets: ['latin'] })
+// Vendored rather than pulled from Google at build time. next/font/google fetches
+// during the build and, if it can't reach fonts.googleapis.com, prints a warning
+// and ships a fallback font while still exiting 0 — so a network blip in the Docker
+// build would silently ship the wrong typeface. The file is the Inter latin variable
+// axis (100-900, 48KB) from @fontsource-variable/inter, OFL-1.1, see Inter-LICENSE.txt.
+//
+// `variable` exposes it to CSS: next/font registers a generated family name, never the
+// literal "Inter", and globals.css asks for the variable by name.
+const inter = localFont({
+  src: './fonts/inter-latin-variable.woff2',
+  weight: '100 900',
+  style: 'normal',
+  display: 'swap',
+  variable: '--font-inter',
+  fallback: ['ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+})
 
 export const metadata: Metadata = {
   title: 'PawaSave — Save Smarter for Your Business',
@@ -44,7 +59,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       </head>
-      <body className={inter.className}><ConfirmProvider>{children}</ConfirmProvider><ServiceWorkerRegister /></body>
+      <body className={inter.variable}><ConfirmProvider>{children}</ConfirmProvider><ServiceWorkerRegister /></body>
     </html>
   )
 }

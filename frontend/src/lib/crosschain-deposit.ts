@@ -28,6 +28,8 @@ import { custodyAddress } from './custody'
 import { getSecret } from './secrets'
 import { depositCrossChainToCngn } from './hyperfx'
 import { depositFeeNgn } from './deposit-fee'
+import { sendDepositEmail } from './notify-tx'
+import { sendPushToUser } from './push-send'
 
 const ERC20_ABI = [
   'function balanceOf(address) view returns (uint256)',
@@ -170,11 +172,27 @@ async function settleOne(db: SupabaseClient, chain: SourceChain, assets: ChainAs
 
   // 3. credit the user, net of the deposit fee (free under ₦50k, flat ₦30 above)
   const grossNgn = Number(cngnGross) / 1e6
-  const feeMicro = BigInt(Math.round(depositFeeNgn(grossNgn) * 1e6))
-  await db.rpc('credit_crosschain_deposit', {
+  const feeNgn = depositFeeNgn(grossNgn)
+  const feeMicro = BigInt(Math.round(feeNgn * 1e6))
+  const { data: didCredit } = await db.rpc('credit_crosschain_deposit', {
     p_id: row.id, p_cngn_gross_micro: cngnGross.toString(), p_fee_micro: feeMicro.toString(),
     p_base_fill_ref: `ccdep:${chain.key}:${row.id}`,
   })
+
+  // Notify the user (email + push) on a fresh credit — mirrors the Strails deposit flow.
+  // Isolated so a notification failure can never affect the credited balance.
+  if (didCredit === true) {
+    const netNgn = Math.max(0, grossNgn - feeNgn)
+    const label = `${row.token_symbol} on ${chain.name}`
+    sendDepositEmail(row.user_id, {
+      amountNgn: netNgn, channel: label, reference: `ccdep:${chain.key}:${row.id}`,
+    }).catch(() => {})
+    sendPushToUser(row.user_id, {
+      title: 'Deposit received',
+      body: `₦${netNgn.toLocaleString('en-NG')} has landed in your PawaSave balance.`,
+      url: '/', tag: 'deposit',
+    }).catch(() => {})
+  }
 }
 
 async function depositIndexFor(db: SupabaseClient, userId: string): Promise<number> {

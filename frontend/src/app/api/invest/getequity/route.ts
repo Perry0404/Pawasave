@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { GETEQUITY_ENABLED, GETEQUITY_MIN_UNITS, listAssets, buyWithCngn, quoteBuy, type GetEquityAsset } from '@/lib/getequity'
 import { withLease } from '@/lib/custody-lease'
+import { sendInvestmentBuyEmail } from '@/lib/notify-tx'
 
 /**
  * GET  /api/invest/getequity  → regulated Nigerian RWA products (T-bills, funds,
@@ -242,6 +243,17 @@ export async function POST(request: NextRequest) {
         p_units: units,
         p_tx_hash: txHash,
       })
+      // Buy receipt — isolated so an email failure can't affect the filled order.
+      try {
+        await sendInvestmentBuyEmail(user.id, {
+          name: PRODUCT_META[symbol]?.name || symbol,
+          symbol,
+          units,
+          investedNgn: Number(net) / 1e6,
+          feeNgn: Number(fee) / 1e6,
+          reference: txHash || `getequity_${orderId}`,
+        })
+      } catch (mailErr) { console.error('[invest/getequity] buy email failed:', mailErr) }
       return NextResponse.json({
         status: 'filled', orderId, symbol, units, txHash,
         feeCngnMicro: fee.toString(), netCngnMicro: net.toString(),

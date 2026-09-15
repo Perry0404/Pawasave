@@ -4,13 +4,14 @@
 -- held on-chain in PawaSave custody (pooled) and mirrored to the user's ledger,
 -- exactly like the equity portfolio (032) — same debit→settle→refund safety.
 --
--- Money safety: place_getequity_order debits cNGN AND writes a 'pending' order in
--- one transaction; settlement fills it (records on-chain units + tx hash) or fails
--- it (refunds the cNGN). The API only calls this when GETEQUITY_ENABLED is set.
--- KYC ('verified') required. Idempotent: safe to run more than once.
+-- Money safety: place_getequity_order debits cNGN (net + PawaSave fee) AND writes a
+-- 'pending' order in one transaction; settlement fills it (records on-chain units +
+-- tx hash, books the fee to revenue) or fails it (refunds net + fee). The API only
+-- calls this when GETEQUITY_ENABLED is set. Idempotent: safe to run more than once.
 --
--- NOTE: GetEquity is on Base Sepolia testnet; this ships DARK. Nothing writes here
--- until the integration is switched on (see docs/getequity-integration.md).
+-- Identity: Strails BVN onboarding is sufficient to invest (same as the live
+-- tokenized-stock flow); full KYC 'verified' also passes. GetEquity's Market is LIVE
+-- on Base mainnet (settles in cNGN) — see docs/getequity-integration.md.
 
 -- Reuse portfolio_holdings (032) for the position ledger — widen its asset_type
 -- check to admit regulated RWAs. Provider 'getequity' keeps them from colliding

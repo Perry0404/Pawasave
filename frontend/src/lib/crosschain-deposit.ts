@@ -38,6 +38,13 @@ const ERC20_ABI = [
 const SCAN_MAX_SPAN = 2_000_000       // Alchemy transfers API has no range cap
 const MAX_SETTLE_PER_RUN = 5          // bound on-chain work per cron tick
 
+// Optional PawaSave margin on cross-chain deposits (bps of the cNGN received), ON TOP of
+// recovering the HyperFX relayer fee. Default 0 = pure cost-recovery, no extra markup.
+const CROSSCHAIN_FEE_BPS = (() => {
+  const n = Number(process.env.CROSSCHAIN_DEPOSIT_FEE_BPS)
+  return Number.isFinite(n) && n >= 0 && n <= 1000 ? Math.floor(n) : 0
+})()
+
 function admin(): SupabaseClient {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
     auth: { persistSession: false },
@@ -163,26 +170,31 @@ async function settleOne(db: SupabaseClient, chain: SourceChain, assets: ChainAs
   }
 
   // 2. custody places the cross-chain intent: source token → cNGN on Base
-  const cngnGross = await depositCrossChainToCngn({
+  const { cngnReceived, relayerFeeCngn } = await depositCrossChainToCngn({
     source: { key: chain.key, chainId: chain.chainId, stateMachineId: chain.stateMachineId, rpc: rpcUrlFor(chain), bundler: bundlerUrlFor(chain) },
     tokenInAddr: asset.address,
     amountIn,
     beneficiaryBase: await custodyAddress(),
   })
 
-  // 3. credit the user, net of the deposit fee (free under ₦50k, flat ₦30 above)
-  const grossNgn = Number(cngnGross) / 1e6
-  const feeNgn = depositFeeNgn(grossNgn)
-  const feeMicro = BigInt(Math.round(feeNgn * 1e6))
+  // 3. credit the user, net of ALL costs so custody never subsidises a deposit:
+  //    (a) the HyperFX relayer fee custody paid on the source chain (cost recovery),
+  //    (b) an optional PawaSave cross-chain margin (CROSSCHAIN_DEPOSIT_FEE_BPS), and
+  //    (c) the standard deposit fee (free under ₦50k, flat ₦30 above).
+  // The deducted cNGN stays in custody, offsetting the fee it fronted. Floors at 0.
+  const grossNgn = Number(cngnReceived) / 1e6
+  const pawaFeeMicro = BigInt(Math.round(depositFeeNgn(grossNgn) * 1e6))
+  const bpsFeeMicro = (cngnReceived * BigInt(CROSSCHAIN_FEE_BPS)) / 10_000n
+  const feeMicro = relayerFeeCngn + bpsFeeMicro + pawaFeeMicro
   const { data: didCredit } = await db.rpc('credit_crosschain_deposit', {
-    p_id: row.id, p_cngn_gross_micro: cngnGross.toString(), p_fee_micro: feeMicro.toString(),
+    p_id: row.id, p_cngn_gross_micro: cngnReceived.toString(), p_fee_micro: feeMicro.toString(),
     p_base_fill_ref: `ccdep:${chain.key}:${row.id}`,
   })
 
   // Notify the user (email + push) on a fresh credit — mirrors the Strails deposit flow.
   // Isolated so a notification failure can never affect the credited balance.
   if (didCredit === true) {
-    const netNgn = Math.max(0, grossNgn - feeNgn)
+    const netNgn = Math.max(0, grossNgn - Number(feeMicro) / 1e6)
     const label = `${row.token_symbol} on ${chain.name}`
     sendDepositEmail(row.user_id, {
       amountNgn: netNgn, channel: label, reference: `ccdep:${chain.key}:${row.id}`,

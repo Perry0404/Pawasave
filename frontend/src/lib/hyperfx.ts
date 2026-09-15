@@ -320,7 +320,7 @@ export async function depositCrossChainToCngn(params: {
   tokenInAddr: string
   amountIn: bigint
   beneficiaryBase: string
-}): Promise<bigint> {
+}): Promise<{ cngnReceived: bigint; relayerFeeCngn: bigint }> {
   if (!HYPERFX_ENABLED) throw new Error('HyperFX is disabled (HYPERFX_ENABLED not set)')
   if (params.amountIn <= 0n) throw new Error('HyperFX: zero amount')
 
@@ -423,5 +423,17 @@ export async function depositCrossChainToCngn(params: {
   }
   received = (await cngnBalanceOf(params.beneficiaryBase)) - before
   if (received <= 0n) throw new Error('HyperFX: cross-chain order did not fill (no cNGN received on Base)')
-  return received
+
+  // The relayer/protocol fee custody paid (order.fees) is on top of the escrowed input.
+  // Express it in cNGN via this fill's rate (received cNGN per escrowed USDC) so the caller
+  // can pass it on to the user instead of custody subsidising it. Precise when the fee is
+  // charged in the input token (the usual case for these stablecoin routes); otherwise 0
+  // (custody absorbs it — logged), since converting an arbitrary fee token needs a price.
+  let relayerFeeCngn = 0n
+  if (fees > 0n && feeToken && feeToken.toLowerCase() === tokenIn.toLowerCase() && quote.amountIn > 0n) {
+    relayerFeeCngn = (fees * received) / quote.amountIn
+  } else if (fees > 0n) {
+    console.warn('[hyperfx] cross-chain fee in non-input token, not deducted:', { feeToken, fees: fees.toString() })
+  }
+  return { cngnReceived: received, relayerFeeCngn }
 }

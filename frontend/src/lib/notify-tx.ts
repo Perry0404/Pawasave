@@ -241,6 +241,45 @@ export async function sendEquityBuyEmail(userId: string, b: EquityBuyNotice): Pr
   })
 }
 
+export interface InvestmentBuyNotice {
+  name: string          // human product name, e.g. "Dangote Refinery IPO"
+  symbol: string        // on-chain symbol, e.g. "DPRI"
+  units: number         // token units bought
+  investedNgn: number   // net cNGN that bought the asset
+  feeNgn?: number       // PawaSave platform fee (if any)
+  reference?: string | null
+  dateISO?: string
+}
+
+/** Buy receipt for a GetEquity regulated investment (IPO / T-bill / fund). */
+export async function sendInvestmentBuyEmail(userId: string, b: InvestmentBuyNotice): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(userId)
+  if (!r) return
+  const rows: [string, string][] = [
+    ['Investment', b.name],
+    ['Symbol', b.symbol],
+    ['Units', fmtShares(b.units)],
+    ['Invested', naira(b.investedNgn)],
+  ]
+  if (b.feeNgn && b.feeNgn > 0) rows.push(['Fee', naira(b.feeNgn)])
+  rows.push(['Date', when(b.dateISO)], ['Reference', b.reference || ''])
+  const html = shell({
+    heading: `You invested in ${esc(b.name)} 🎉`,
+    sub: `Nice one, ${r.name}! Your order filled and the position is now in your PawaSave portfolio.`,
+    amount: `${fmtShares(b.units)} ${esc(b.symbol)}`,
+    amountColor: '#0A6B42',
+    rows,
+    note: 'Track your holding any time in the Invest tab. 📈',
+  })
+  await sendMail({
+    to: r.email,
+    subject: `🎉 You invested in ${b.name}`,
+    html,
+    text: `Congrats ${r.name}! You invested ${naira(b.investedNgn)} in ${b.name} (${fmtShares(b.units)} ${b.symbol}) on PawaSave. Ref ${b.reference || ''}.`,
+  })
+}
+
 export interface EquitySellNotice {
   symbol: string
   shares: number

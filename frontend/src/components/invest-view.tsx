@@ -16,6 +16,7 @@ type Asset = {
   symbol: string; name: string; tv?: string
   // Naira/GetEquity assets carry these instead of a TradingView chart:
   blurb?: string; kind?: 'term' | 'fund' | 'equity'; token?: string | null; naira?: boolean
+  minCngn?: number // real minimum buy in ₦ (naira/GetEquity assets), from the live quote
 }
 // Buyable today (verified on-chain route) listed first; the rest launched on Base but have
 // no DEX liquidity yet, so they render as "Soon — verification pending" until we add a route.
@@ -56,6 +57,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
   const [nairaAssets, setNairaAssets] = useState<Asset[]>([])
   const [nairaLive, setNairaLive] = useState(false)
   const [nairaFeeBps, setNairaFeeBps] = useState(100) // PawaSave fee on GetEquity buys
+  const [nairaMinUnits, setNairaMinUnits] = useState(10) // GetEquity minimum lot
   const [selected, setSelected] = useState<Asset | null>(null)
   const [selectedHolding, setSelectedHolding] = useState<Holding | null>(null)
   const [sellBusy, setSellBusy] = useState(false)
@@ -78,9 +80,11 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
         if (!d) return
         setNairaAssets((d.assets || []).map((a: any) => ({
           symbol: a.symbol, name: a.name, blurb: a.blurb, kind: a.kind, token: a.token, naira: true,
+          minCngn: a.minCngnMicro ? Number(a.minCngnMicro) / 1e6 : undefined,
         })))
         setNairaLive(!!d.live)
         if (Number.isFinite(Number(d.feeBps))) setNairaFeeBps(Number(d.feeBps))
+        if (Number.isFinite(Number(d.minUnits))) setNairaMinUnits(Number(d.minUnits))
       })
       .catch(() => undefined)
 
@@ -143,7 +147,14 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
       return
     }
     const naira = parseFloat(amount)
-    if (!naira || naira < 1000) { flash('Minimum investment is ₦1,000'); return }
+    // Naira/GetEquity assets have a real per-asset floor (10-unit lot); everything else is ₦1,000.
+    const minNgn = selected?.naira && selected.minCngn ? Math.ceil(selected.minCngn) : 1000
+    if (!naira || naira < minNgn) {
+      flash(selected?.naira && selected.minCngn
+        ? `Minimum is ${nairaMinUnits} units — about ₦${minNgn.toLocaleString()}`
+        : 'Minimum investment is ₦1,000')
+      return
+    }
     // Identity check for investing: BVN onboarding via Strails IS the verification (it's
     // required to get a NUBAN), so a completed onboarding is enough. Full Sense biometric
     // is only needed to lift withdrawal caps — not to buy. Sense-verified also passes.
@@ -337,10 +348,14 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
 
         <label className="lab" style={{ marginTop: 14 }}>Amount (cNGN)</label>
         <input className="field" type="number" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))} placeholder="0" autoFocus />
-        <p className="p" style={{ margin: '6px 3px 0' }}>Minimum ₦1,000 · Available ₦{((wallet?.usdc_balance_micro || 0) / 1_000_000).toLocaleString()}</p>
+        <p className="p" style={{ margin: '6px 3px 0' }}>
+          {selected.naira && selected.minCngn
+            ? `Minimum ${nairaMinUnits} units · ~₦${Math.ceil(selected.minCngn).toLocaleString()}`
+            : 'Minimum ₦1,000'} · Available ₦{((wallet?.usdc_balance_micro || 0) / 1_000_000).toLocaleString()}
+        </p>
 
         {/* Fee breakdown — the user sees exactly what PawaSave keeps and what gets invested. */}
-        {selected.naira && live && parseFloat(amount) >= 1000 && (() => {
+        {selected.naira && live && parseFloat(amount) > 0 && (() => {
           const gross = parseFloat(amount)
           const fee = Math.floor(gross * nairaFeeBps) / 10000
           const net = gross - fee

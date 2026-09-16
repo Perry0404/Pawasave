@@ -5,11 +5,14 @@ import { formatNaira, microUsdcToKobo, getRate, timeAgo, cleanDescription } from
 import { initiateDeposit, initiateWithdrawal, getBanks, resolveAccount, type RampResult, type Bank } from '@/lib/flint'
 import { talkback } from '@/lib/voice'
 // Bank aliased: `Bank` is already the bank-list type from @/lib/flint.
-import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard, CircleNotch, ArrowLeft, Copy, Check, CaretDown, FileText, Bank as BankIcon } from '@phosphor-icons/react'
+import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard, CircleNotch, ArrowLeft, Copy, Check, CaretDown, FileText, Bank as BankIcon, PaperPlaneTilt, Users } from '@phosphor-icons/react'
 import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
-type View = 'main' | 'deposit-choose' | 'deposit-naira' | 'deposit' | 'deposit-crypto' | 'deposit-info' | 'withdraw'
+type View = 'main' | 'deposit-choose' | 'deposit-naira' | 'deposit' | 'deposit-crypto' | 'deposit-info' | 'withdraw' | 'send-choose' | 'send-friend'
+
+type P2pPendingOut = { id: number; toEmail: string; amountNgn: number; note?: string | null; expiresAt?: string | null }
+type P2pPendingIn = { id: number; fromName: string; amountNgn: number; note?: string | null; expiresAt?: string | null }
 
 /** Live availability of each deposit rail (from /api/ramp/status). */
 type RampStatus = { naira: { available: boolean; reason?: string }; crypto?: { available: boolean } }
@@ -53,6 +56,15 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   const [resolvingName, setResolvingName] = useState(false)
   const [nameResolved, setNameResolved] = useState(false)
   const [resolveError, setResolveError] = useState('')
+
+  // Send-to-a-person (P2P) state
+  const [p2pEmail, setP2pEmail] = useState('')
+  const [p2pAmount, setP2pAmount] = useState('')
+  const [p2pNote, setP2pNote] = useState('')
+  const [p2pResult, setP2pResult] = useState<{ kind: 'direct' | 'claim'; amountNgn: number; toEmail: string; expiresAt?: string } | null>(null)
+  const [p2pOut, setP2pOut] = useState<P2pPendingOut[]>([])
+  const [p2pIn, setP2pIn] = useState<P2pPendingIn[]>([])
+  const [claiming, setClaiming] = useState(false)
 
   useEffect(() => {
     if (view === 'withdraw' && banks.length === 0) {
@@ -145,6 +157,15 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Pending peer-to-peer transfers: money waiting for me to claim, and my unclaimed sends.
+  const loadP2pPending = () => {
+    fetch('/api/p2p/pending')
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => { if (data) { setP2pIn(data.incoming || []); setP2pOut(data.outgoing || []) } })
+      .catch(() => undefined)
+  }
+  useEffect(() => { loadP2pPending() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
+
   if (!wallet) return <div className="flex items-center justify-center py-20"><CircleNotch size={24} className="animate-spin" style={{ color: 'var(--faint)' }} /></div>
 
   const rate = liveRate
@@ -156,9 +177,65 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
 
   const flash = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(''), 4000) }
 
-  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setBankSearch(''); setAccountNumber(''); setAccountHolderName(''); setCopied(false) }
+  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setBankSearch(''); setAccountNumber(''); setAccountHolderName(''); setCopied(false); setP2pEmail(''); setP2pAmount(''); setP2pNote(''); setP2pResult(null) }
 
   const goBack = () => { resetForm(); setView('main') }
+
+  // --- Send to a person (P2P) ---
+  const handleP2pSend = async () => {
+    const amountNgn = parseFloat(p2pAmount)
+    const email = p2pEmail.trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { flash('Enter a valid email'); return }
+    if (!amountNgn || amountNgn < 100) { flash('Minimum is ₦100'); return }
+    if (email === (user?.email || '').toLowerCase()) { flash("You can't send money to yourself"); return }
+    setBusy(true)
+    try {
+      const res = await fetch('/api/p2p/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, amountNgn, note: p2pNote.trim() || undefined }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { flash(data?.error || 'Could not send'); return }
+      setP2pResult({ kind: data.kind, amountNgn, toEmail: email, expiresAt: data.expiresAt })
+      setP2pAmount(''); setP2pNote(''); setP2pEmail('')
+      refresh(); loadP2pPending()
+    } catch (e: any) {
+      flash(e?.message || 'Could not send')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleClaim = async () => {
+    setClaiming(true)
+    try {
+      const res = await fetch('/api/p2p/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { flash(data?.error || 'Could not claim'); return }
+      if (data.claimed > 0) { flash(`Claimed ${formatNaira(Math.round(data.totalNgn * 100))} 🎉`); refresh() }
+      loadP2pPending()
+    } catch (e: any) {
+      flash(e?.message || 'Could not claim')
+    } finally {
+      setClaiming(false)
+    }
+  }
+
+  const handleCancelSend = async (id: number) => {
+    setBusy(true)
+    try {
+      const res = await fetch('/api/p2p/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transferId: id }) })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { flash(data?.error || 'Could not cancel'); return }
+      flash('Transfer cancelled — money returned')
+      refresh(); loadP2pPending()
+    } catch (e: any) {
+      flash(e?.message || 'Could not cancel')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const handleDeposit = async () => {
     const val = parseFloat(amount)
@@ -632,13 +709,165 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   }
 
   // --- Withdraw form ---
-  if (view === 'withdraw') {
+  // --- Send: pick a destination (a person, or a bank) ---
+  if (view === 'send-choose') {
     return (
       <div className="b">
         <button onClick={goBack} className="back">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <h2 className="h2">Send Money</h2>
+        <p className="p">Send instantly to another person, or cash out to a bank account.</p>
+
+        {feedback && <div className="flash err" style={{ marginTop: 0, marginBottom: 'var(--s-3)' }}>{feedback}</div>}
+
+        <button
+          onClick={() => { setP2pResult(null); setView('send-friend') }}
+          className="rows" style={{ marginBottom: 'var(--s-3)', display: 'block', textAlign: 'left', width: '100%', border: '1px solid var(--line)', cursor: 'pointer' }}
+        >
+          <div className="dot">
+            <PaperPlaneTilt size={20} style={{ color: 'var(--green)' }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="nm">To a person <span style={{ fontSize: 'var(--t-2xs)', fontWeight: 'var(--w-semi)', color: 'var(--green)', background: 'var(--green-soft)', borderRadius: 'var(--r-full)', padding: '1px 8px', marginLeft: 6 }}>Free</span></p>
+            <p className="sub">Send to anyone by email. Instant if they’re on PawaSave — otherwise they get a link to claim it.</p>
+          </div>
+        </button>
+
+        <button
+          onClick={() => setView('withdraw')}
+          className="rows" style={{ display: 'block', textAlign: 'left', width: '100%', border: '1px solid var(--line)', cursor: 'pointer' }}
+        >
+          <div className="dot">
+            <BankIcon size={20} style={{ color: 'var(--green)' }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="nm">To a bank account</p>
+            <p className="sub">Cash out to any Nigerian bank account.</p>
+          </div>
+        </button>
+      </div>
+    )
+  }
+
+  // --- Send: to a person by email (P2P) ---
+  if (view === 'send-friend') {
+    const amt = parseFloat(p2pAmount)
+    return (
+      <div className="b">
+        <button onClick={() => setView('send-choose')} className="back">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <h2 className="h2">Send to a person</h2>
+        <p className="p">Free, instant transfers to anyone by email — no bank details needed.</p>
+
+        {p2pResult ? (
+          <div className="info" style={{ marginTop: 'var(--s-2)' }}>
+            <p className="l" style={{ color: 'var(--green)' }}>
+              {p2pResult.kind === 'direct' ? 'Sent ✓' : 'On its way ⏳'}
+            </p>
+            <p className="hint" style={{ marginTop: 4 }}>
+              {p2pResult.kind === 'direct'
+                ? `${formatNaira(Math.round(p2pResult.amountNgn * 100))} landed in ${p2pResult.toEmail}'s PawaSave balance instantly.`
+                : `We’ve emailed ${p2pResult.toEmail} to claim ${formatNaira(Math.round(p2pResult.amountNgn * 100))}. If they don’t claim it${p2pResult.expiresAt ? ` by ${new Date(p2pResult.expiresAt).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}` : ' in time'}, it’s returned to you automatically.`}
+            </p>
+            <button
+              onClick={() => setP2pResult(null)}
+              style={{ marginTop: 12, fontSize: 'var(--t-xs)', fontWeight: 'var(--w-semi)', background: 'var(--green)', color: '#fff', border: 0, padding: '8px 14px', borderRadius: 'var(--r-sm)', cursor: 'pointer' }}
+            >
+              Send another
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <label className="lab">Recipient email</label>
+              <input
+                type="email"
+                inputMode="email"
+                autoCapitalize="none"
+                value={p2pEmail}
+                onChange={e => setP2pEmail(e.target.value)}
+                placeholder="them@example.com"
+                className="field"
+                autoFocus
+              />
+              <p className="hint tight">Already on PawaSave? They get it instantly. New? They’ll get an email to claim it.</p>
+            </div>
+
+            <div>
+              <label className="lab">Amount (₦)</label>
+              <input
+                type="number"
+                inputMode="numeric"
+                value={p2pAmount}
+                onChange={e => setP2pAmount(e.target.value)}
+                placeholder="e.g. 5000"
+                className="field num" style={{ fontSize: 'var(--t-lg)' }}
+              />
+              {amt >= 100 && <p className="hint tight">{formatNaira(Math.round(amt * 100))} will leave your balance{' '}· free</p>}
+            </div>
+
+            <div>
+              <label className="lab">Note (optional)</label>
+              <input
+                type="text"
+                maxLength={140}
+                value={p2pNote}
+                onChange={e => setP2pNote(e.target.value)}
+                placeholder="What’s it for?"
+                className="field"
+              />
+            </div>
+
+            {feedback && <div className="flash err">{feedback}</div>}
+
+            <button
+              onClick={handleP2pSend}
+              disabled={busy || !p2pEmail || !(amt >= 100)}
+              className="cta" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+            >
+              {busy ? <CircleNotch className="w-4 h-4 animate-spin" /> : <PaperPlaneTilt className="w-4 h-4" />}
+              Send {amt >= 100 ? formatNaira(Math.round(amt * 100)) : 'money'}
+            </button>
+          </div>
+        )}
+
+        {/* My unclaimed sends — cancellable */}
+        {p2pOut.length > 0 && (
+          <div style={{ marginTop: 'var(--s-6)' }}>
+            <div className="sect"><span className="h">Awaiting claim</span></div>
+            <div className="feedcard rise">
+              {p2pOut.map((o) => (
+                <div key={o.id} className="tx" style={{ alignItems: 'center' }}>
+                  <span className="ic"><PaperPlaneTilt /></span>
+                  <div className="mid">
+                    <div className="nm">{o.toEmail}</div>
+                    <div className="sub">{formatNaira(Math.round(o.amountNgn * 100))}{o.expiresAt ? ` · returns ${new Date(o.expiresAt).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}` : ''}</div>
+                  </div>
+                  <button
+                    onClick={() => handleCancelSend(o.id)}
+                    disabled={busy}
+                    style={{ fontSize: 'var(--t-2xs)', fontWeight: 'var(--w-semi)', color: 'var(--neg)', background: 'transparent', border: '1px solid var(--line)', padding: '5px 10px', borderRadius: 'var(--r-full)', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (view === 'withdraw') {
+    return (
+      <div className="b">
+        <button onClick={() => setView('send-choose')} className="back">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <h2 className="h2">Send to a bank</h2>
         <p className="p">Send naira from your cNGN balance to any Nigerian bank account.</p>
 
         {profile?.kyc_status !== 'verified' && (
@@ -872,7 +1101,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           <div><div className="l">Savings</div><div className="v num">{formatNaira(savingsKobo + cngnKobo)}</div></div>
         </div>
         <div className="acct-actions">
-          <button className="ab" onClick={() => setView('withdraw')}>
+          <button className="ab" onClick={() => setView('send-choose')}>
             <ArrowUpRight className="w-4 h-4" /> Send
           </button>
           <button className="ab solid" onClick={() => setView('deposit-choose')}>
@@ -880,6 +1109,35 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           </button>
         </div>
       </div>
+
+      {/* Money waiting to be claimed */}
+      {p2pIn.length > 0 && (() => {
+        const totalNgn = p2pIn.reduce((s, r) => s + r.amountNgn, 0)
+        const one = p2pIn.length === 1
+        return (
+          <div className="acct rise" style={{ background: 'var(--green-soft)', border: '1px solid color-mix(in srgb,var(--green) 30%,transparent)', color: 'var(--ink)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className="dot" style={{ flexShrink: 0 }}><Users size={20} style={{ color: 'var(--green)' }} /></div>
+              <div className="flex-1 min-w-0">
+                <div className="nm" style={{ fontWeight: 'var(--w-semi)' }}>You’ve got money 🎉</div>
+                <div className="sub">
+                  {one
+                    ? `${p2pIn[0].fromName} sent you ${formatNaira(Math.round(p2pIn[0].amountNgn * 100))}`
+                    : `${p2pIn.length} people sent you ${formatNaira(Math.round(totalNgn * 100))}`}
+                </div>
+              </div>
+              <button
+                onClick={handleClaim}
+                disabled={claiming}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--t-xs)', fontWeight: 'var(--w-semi)', background: 'var(--green)', color: '#fff', border: 0, padding: '9px 16px', borderRadius: 'var(--r-full)', cursor: 'pointer', flexShrink: 0 }}
+              >
+                {claiming ? <CircleNotch className="w-4 h-4 animate-spin" /> : null}
+                Claim
+              </button>
+            </div>
+          </div>
+        )
+      })()}
 
       {feedback && <div className="flash ok">{feedback}</div>}
 

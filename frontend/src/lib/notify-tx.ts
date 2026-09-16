@@ -12,6 +12,7 @@
  */
 import { createClient } from '@supabase/supabase-js'
 import { sendMail, mailerConfigured } from '@/lib/mailer'
+import { siteBaseUrl } from '@/lib/site-url'
 
 let _admin: any = null
 function admin() {
@@ -313,5 +314,145 @@ export async function sendEquitySellEmail(userId: string, s: EquitySellNotice): 
     subject: `💚 You sold ${s.symbol} — ${naira(s.netNgn)} credited`,
     html,
     text: `Nice, ${r.name}! You sold ${fmtShares(s.shares)} ${s.symbol} on PawaSave. ${naira(s.netNgn)} credited (after ${naira(s.feeNgn)} fee). Ref ${s.reference || ''}.`,
+  })
+}
+
+// ── Peer-to-peer transfers ───────────────────────────────────────────────────
+
+export interface P2pSentNotice {
+  amountNgn: number
+  toLabel: string          // recipient name or email
+  kind: 'direct' | 'claim'
+  note?: string | null
+  expiresAt?: string | null // claim only
+  reference?: string | null
+  dateISO?: string
+}
+
+/** Receipt to the SENDER when they send money to a person. */
+export async function sendP2pSentEmail(userId: string, p: P2pSentNotice): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(userId)
+  if (!r) return
+  const claim = p.kind === 'claim'
+  const html = shell({
+    heading: claim ? 'Money sent — awaiting claim ⏳' : 'Money sent 💸',
+    sub: claim
+      ? `Hi ${r.name}, we've emailed ${esc(p.toLabel)} to claim it. If they don't claim it by the date below, it's returned to your balance automatically.`
+      : `Hi ${r.name}, your transfer to ${esc(p.toLabel)} went through instantly.`,
+    amount: '−' + naira(p.amountNgn),
+    amountColor: '#131A15',
+    rows: [
+      ['To', p.toLabel],
+      ['Type', claim ? 'Pending claim' : 'PawaSave friend'],
+      ...(p.note ? [['Note', p.note] as [string, string]] : []),
+      ...(claim && p.expiresAt ? [['Returns if unclaimed', when(p.expiresAt)] as [string, string]] : []),
+      ['Date', when(p.dateISO)],
+      ['Reference', p.reference || ''],
+    ],
+    note: claim ? 'You can cancel a pending transfer any time before it’s claimed to get your money back instantly.' : undefined,
+  })
+  await sendMail({
+    to: r.email,
+    subject: claim ? `You sent ${naira(p.amountNgn)} to ${p.toLabel} (awaiting claim)` : `You sent ${naira(p.amountNgn)} to ${p.toLabel}`,
+    html,
+    text: `You sent ${naira(p.amountNgn)} to ${p.toLabel} on PawaSave${claim ? ' — awaiting claim' : ''}. Ref ${p.reference || ''}.`,
+  })
+}
+
+export interface P2pReceivedNotice {
+  amountNgn: number
+  fromLabel: string        // sender name
+  note?: string | null
+  reference?: string | null
+  dateISO?: string
+}
+
+/** Receipt to an EXISTING user who received money (direct transfer, or a completed claim). */
+export async function sendP2pReceivedEmail(userId: string, p: P2pReceivedNotice): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(userId)
+  if (!r) return
+  const html = shell({
+    heading: 'You got money 🎉',
+    sub: `Hi ${r.name}, ${esc(p.fromLabel)} sent you money on PawaSave. It’s in your balance now.`,
+    amount: '+' + naira(p.amountNgn),
+    amountColor: '#0A6B42',
+    rows: [
+      ['From', p.fromLabel],
+      ...(p.note ? [['Note', p.note] as [string, string]] : []),
+      ['Date', when(p.dateISO)],
+      ['Reference', p.reference || ''],
+    ],
+  })
+  await sendMail({
+    to: r.email,
+    subject: `You received ${naira(p.amountNgn)} on PawaSave`,
+    html,
+    text: `${p.fromLabel} sent you ${naira(p.amountNgn)} on PawaSave. Ref ${p.reference || ''}.`,
+  })
+}
+
+export interface P2pClaimInviteNotice {
+  toEmail: string
+  amountNgn: number
+  senderName: string
+  note?: string | null
+  expiresAt?: string | null
+}
+
+/**
+ * Invite email to a recipient who has NO account yet — the "money to your email" hook.
+ * Deliberately NOT a one-click auto-credit link (that pattern is the #1 fintech phishing
+ * vector): it points them to sign up / log in with THIS email, and the claim is only granted
+ * server-side once their address is verified. No claim token in the URL.
+ */
+export async function sendP2pClaimInviteEmail(p: P2pClaimInviteNotice): Promise<void> {
+  if (!mailerConfigured()) return
+  const url = siteBaseUrl()
+  const html = shell({
+    heading: 'Someone sent you money 💚',
+    sub: `${esc(p.senderName)} sent you money on PawaSave. Create a free PawaSave account with this email address (${esc(p.toEmail)}) to claim it — it lands straight in your balance.`,
+    amount: '+' + naira(p.amountNgn),
+    amountColor: '#0A6B42',
+    rows: [
+      ['From', p.senderName],
+      ...(p.note ? [['Note', p.note] as [string, string]] : []),
+      ...(p.expiresAt ? [['Claim before', when(p.expiresAt)] as [string, string]] : []),
+    ],
+    note: `Claim it at ${url} — sign up or log in with ${p.toEmail}. If you don’t claim it in time, it’s safely returned to the sender. PawaSave will never ask for your password or PIN by email.`,
+  })
+  await sendMail({
+    to: p.toEmail,
+    subject: `${p.senderName} sent you ${naira(p.amountNgn)} on PawaSave 💚`,
+    html,
+    text: `${p.senderName} sent you ${naira(p.amountNgn)} on PawaSave. Create an account with ${p.toEmail} at ${url} to claim it${p.expiresAt ? ` before ${when(p.expiresAt)}` : ''}. Unclaimed money is returned to the sender.`,
+  })
+}
+
+/** Tell the sender their unclaimed transfer was returned (expiry) or their cancel refunded. */
+export async function sendP2pRevertedEmail(userId: string, p: { amountNgn: number; toLabel: string; reason: 'expired' | 'cancelled'; reference?: string | null }): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(userId)
+  if (!r) return
+  const expired = p.reason === 'expired'
+  const html = shell({
+    heading: expired ? 'Transfer returned ↩️' : 'Transfer cancelled ↩️',
+    sub: expired
+      ? `Hi ${r.name}, ${esc(p.toLabel)} didn’t claim your transfer in time, so we’ve returned it to your balance.`
+      : `Hi ${r.name}, you cancelled your pending transfer to ${esc(p.toLabel)}. It’s back in your balance.`,
+    amount: '+' + naira(p.amountNgn),
+    amountColor: '#0A6B42',
+    rows: [
+      ['Was going to', p.toLabel],
+      ['Reason', expired ? 'Unclaimed — expired' : 'Cancelled by you'],
+      ['Reference', p.reference || ''],
+    ],
+  })
+  await sendMail({
+    to: r.email,
+    subject: expired ? `Your ${naira(p.amountNgn)} transfer was returned` : `Your ${naira(p.amountNgn)} transfer was cancelled`,
+    html,
+    text: `Your ${naira(p.amountNgn)} transfer to ${p.toLabel} was ${expired ? 'returned (unclaimed)' : 'cancelled'} on PawaSave. Ref ${p.reference || ''}.`,
   })
 }

@@ -32,13 +32,36 @@ const IconCheck = () => <Check size={12} weight="bold" />
 
 export default function ProfileView({ user, profile, wallet, theme, onThemeChange, onRefreshProfile, onStartKyc, onSignOut }: Props) {
   const confirm = useConfirm()
-  const [open, setOpen] = useState<null | 'pin' | 'bank' | 'personal' | 'support'>(null)
+  const [open, setOpen] = useState<null | 'pin' | 'bank' | 'personal' | 'support' | 'tag'>(null)
 
   // PIN change (server-verified via /api/security/pin — current PIN required when set)
   const [pin, setPin] = useState('')
   const [pinConfirm, setPinConfirm] = useState('')
   const [pinCurrent, setPinCurrent] = useState('')
   const [pinMsg, setPinMsg] = useState('')
+
+  // PawaSave @tag (the P2P handle)
+  const [tagInput, setTagInput] = useState('')
+  const [tagMsg, setTagMsg] = useState('')
+  const [tagBusy, setTagBusy] = useState(false)
+
+  const saveTag = async () => {
+    setTagMsg('')
+    const t = tagInput.replace(/^@+/, '').trim().toLowerCase()
+    if (!/^[a-z0-9_]{3,20}$/.test(t)) { setTagMsg('3–20 letters, numbers or underscores'); return }
+    setTagBusy(true)
+    try {
+      const res = await fetch('/api/p2p/tag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tag: t }) })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { setTagMsg(data?.error || 'Could not update tag'); return }
+      setTagMsg('Tag updated ✓')
+      onRefreshProfile?.()
+    } catch {
+      setTagMsg('Could not update tag')
+    } finally {
+      setTagBusy(false)
+    }
+  }
 
   // Support
   const [supportMessage, setSupportMessage] = useState('')
@@ -99,7 +122,7 @@ export default function ProfileView({ user, profile, wallet, theme, onThemeChang
     }
   }
 
-  const toggle = (k: 'pin' | 'bank' | 'personal' | 'support') => setOpen(open === k ? null : k)
+  const toggle = (k: 'pin' | 'bank' | 'personal' | 'support' | 'tag') => setOpen(open === k ? null : k)
 
   return (
     <div className="b">
@@ -130,6 +153,34 @@ export default function ProfileView({ user, profile, wallet, theme, onThemeChang
             <p className="p" style={{ margin: '10px 0 0' }}>Name: {name}</p>
             <p className="p" style={{ margin: '2px 0 0' }}>KYC: {profile?.kyc_status || 'pending'}</p>
             {!verified && kycAvailable && <button className="cta" onClick={onStartKyc} style={{ marginTop: 10 }}>Verify identity</button>}
+          </div>
+        )}
+
+        <button className="row" onClick={() => { setTagInput(p?.tag || ''); setTagMsg(''); toggle('tag') }}>
+          <span className="dot"><IconUser /></span>
+          <div className="mid"><div className="nm">PawaSave tag</div><div className="sub">{p?.tag ? '@' + p.tag : 'Set your @tag'}</div></div>
+          <span className="chev"><Chevron /></span>
+        </button>
+        {open === 'tag' && (
+          <div style={{ padding: '4px 15px 15px', borderTop: '1px solid var(--line)' }}>
+            <p className="p" style={{ margin: '10px 0 6px' }}>People can send you money instantly with your @tag — no bank details or email needed.</p>
+            <label className="lab">Your tag</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontWeight: 'var(--w-semi)', color: 'var(--muted)' }}>@</span>
+              <input
+                className="field"
+                type="text"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                maxLength={20}
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase())}
+                placeholder="yourname"
+              />
+            </div>
+            {tagMsg && <p className="hint tight" style={{ color: tagMsg.includes('✓') ? 'var(--green)' : 'var(--neg)', marginTop: 6 }}>{tagMsg}</p>}
+            <button className="cta" onClick={saveTag} disabled={tagBusy || !tagInput.trim()} style={{ marginTop: 10 }}>{tagBusy ? 'Saving…' : 'Save tag'}</button>
           </div>
         )}
 

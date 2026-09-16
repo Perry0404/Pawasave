@@ -57,14 +57,17 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   const [nameResolved, setNameResolved] = useState(false)
   const [resolveError, setResolveError] = useState('')
 
-  // Send-to-a-person (P2P) state
-  const [p2pEmail, setP2pEmail] = useState('')
+  // Send-to-a-person (P2P) state — `p2pTo` is a @tag or an email
+  const [p2pTo, setP2pTo] = useState('')
   const [p2pAmount, setP2pAmount] = useState('')
   const [p2pNote, setP2pNote] = useState('')
-  const [p2pResult, setP2pResult] = useState<{ kind: 'direct' | 'claim'; amountNgn: number; toEmail: string; expiresAt?: string } | null>(null)
+  const [p2pResult, setP2pResult] = useState<{ kind: 'direct' | 'claim'; amountNgn: number; toLabel: string; expiresAt?: string } | null>(null)
+  const [p2pPreview, setP2pPreview] = useState<{ found: boolean; type: string; name?: string; tag?: string | null; instant?: boolean } | null>(null)
   const [p2pOut, setP2pOut] = useState<P2pPendingOut[]>([])
   const [p2pIn, setP2pIn] = useState<P2pPendingIn[]>([])
   const [claiming, setClaiming] = useState(false)
+  const [myTag, setMyTag] = useState<string | null>((profile as any)?.tag ?? null)
+  const [tagCopied, setTagCopied] = useState(false)
 
   useEffect(() => {
     if (view === 'withdraw' && banks.length === 0) {
@@ -166,6 +169,28 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   }
   useEffect(() => { loadP2pPending() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
 
+  // The caller's own @tag (for the "share your tag to get paid" prompt).
+  useEffect(() => {
+    if (myTag) return
+    fetch('/api/p2p/tag').then((r) => r.ok ? r.json() : null).then((d) => { if (d?.tag) setMyTag(d.tag) }).catch(() => undefined)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Live recipient preview while typing a tag/email in the send box (debounced).
+  useEffect(() => {
+    if (view !== 'send-friend') return
+    const q = p2pTo.trim()
+    if (!q) { setP2pPreview(null); return }
+    const id = setTimeout(() => {
+      fetch(`/api/p2p/resolve?to=${encodeURIComponent(q)}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => setP2pPreview(d))
+        .catch(() => setP2pPreview(null))
+    }, 350)
+    return () => clearTimeout(id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p2pTo, view])
+
   if (!wallet) return <div className="flex items-center justify-center py-20"><CircleNotch size={24} className="animate-spin" style={{ color: 'var(--faint)' }} /></div>
 
   const rate = liveRate
@@ -177,28 +202,31 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
 
   const flash = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(''), 4000) }
 
-  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setBankSearch(''); setAccountNumber(''); setAccountHolderName(''); setCopied(false); setP2pEmail(''); setP2pAmount(''); setP2pNote(''); setP2pResult(null) }
+  const resetForm = () => { setAmount(''); setDepositInfo(null); setBankCode(''); setBankSearch(''); setAccountNumber(''); setAccountHolderName(''); setCopied(false); setP2pTo(''); setP2pAmount(''); setP2pNote(''); setP2pResult(null); setP2pPreview(null) }
 
   const goBack = () => { resetForm(); setView('main') }
 
   // --- Send to a person (P2P) ---
   const handleP2pSend = async () => {
     const amountNgn = parseFloat(p2pAmount)
-    const email = p2pEmail.trim().toLowerCase()
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { flash('Enter a valid email'); return }
+    const to = p2pTo.trim()
+    const isEmail = to.includes('@') && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.toLowerCase())
+    const isTag = !to.includes('@') || (to.startsWith('@') && !to.slice(1).includes('@'))
+    if (!isEmail && !(isTag && /^[a-z0-9_]{3,20}$/.test(to.replace(/^@+/, '').toLowerCase()))) { flash('Enter a @tag or an email'); return }
     if (!amountNgn || amountNgn < 100) { flash('Minimum is ₦100'); return }
-    if (email === (user?.email || '').toLowerCase()) { flash("You can't send money to yourself"); return }
+    if (isEmail && to.toLowerCase() === (user?.email || '').toLowerCase()) { flash("You can't send money to yourself"); return }
+    const toLabel = isEmail ? to.toLowerCase() : `@${to.replace(/^@+/, '').toLowerCase()}`
     setBusy(true)
     try {
       const res = await fetch('/api/p2p/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, amountNgn, note: p2pNote.trim() || undefined }),
+        body: JSON.stringify({ to, amountNgn, note: p2pNote.trim() || undefined }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) { flash(data?.error || 'Could not send'); return }
-      setP2pResult({ kind: data.kind, amountNgn, toEmail: email, expiresAt: data.expiresAt })
-      setP2pAmount(''); setP2pNote(''); setP2pEmail('')
+      setP2pResult({ kind: data.kind, amountNgn, toLabel, expiresAt: data.expiresAt })
+      setP2pAmount(''); setP2pNote(''); setP2pTo(''); setP2pPreview(null)
       refresh(); loadP2pPending()
     } catch (e: any) {
       flash(e?.message || 'Could not send')
@@ -730,7 +758,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           </div>
           <div className="flex-1 min-w-0">
             <p className="nm">To a person <span style={{ fontSize: 'var(--t-2xs)', fontWeight: 'var(--w-semi)', color: 'var(--green)', background: 'var(--green-soft)', borderRadius: 'var(--r-full)', padding: '1px 8px', marginLeft: 6 }}>Free</span></p>
-            <p className="sub">Send to anyone by email. Instant if they’re on PawaSave — otherwise they get a link to claim it.</p>
+            <p className="sub">Send by @tag if they’re on PawaSave (instant) — or by email, and they get a link to claim it.</p>
           </div>
         </button>
 
@@ -759,7 +787,23 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <h2 className="h2">Send to a person</h2>
-        <p className="p">Free, instant transfers to anyone by email — no bank details needed.</p>
+        <p className="p">Free, instant transfers by @tag — or by email to someone not on PawaSave yet.</p>
+
+        {myTag && (
+          <div className="info" style={{ marginTop: 0, marginBottom: 'var(--s-4)', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="flex-1 min-w-0">
+              <p className="l">Your tag</p>
+              <p className="num" style={{ fontSize: 'var(--t-md)', fontWeight: 'var(--w-semi)', color: 'var(--green)' }}>@{myTag}</p>
+              <p className="hint tight">Share it so people can pay you.</p>
+            </div>
+            <button
+              onClick={() => { try { navigator.clipboard.writeText('@' + myTag); setTagCopied(true); setTimeout(() => setTagCopied(false), 1500) } catch {} }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--t-2xs)', fontWeight: 'var(--w-semi)', color: 'var(--green)', background: 'transparent', border: '1px solid var(--line)', padding: '6px 11px', borderRadius: 'var(--r-full)', cursor: 'pointer', flexShrink: 0 }}
+            >
+              {tagCopied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
+            </button>
+          </div>
+        )}
 
         {p2pResult ? (
           <div className="info" style={{ marginTop: 'var(--s-2)' }}>
@@ -768,8 +812,8 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
             </p>
             <p className="hint" style={{ marginTop: 4 }}>
               {p2pResult.kind === 'direct'
-                ? `${formatNaira(Math.round(p2pResult.amountNgn * 100))} landed in ${p2pResult.toEmail}'s PawaSave balance instantly.`
-                : `We’ve emailed ${p2pResult.toEmail} to claim ${formatNaira(Math.round(p2pResult.amountNgn * 100))}. If they don’t claim it${p2pResult.expiresAt ? ` by ${new Date(p2pResult.expiresAt).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}` : ' in time'}, it’s returned to you automatically.`}
+                ? `${formatNaira(Math.round(p2pResult.amountNgn * 100))} landed in ${p2pResult.toLabel}'s PawaSave balance instantly.`
+                : `We’ve emailed ${p2pResult.toLabel} to claim ${formatNaira(Math.round(p2pResult.amountNgn * 100))}. If they don’t claim it${p2pResult.expiresAt ? ` by ${new Date(p2pResult.expiresAt).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}` : ' in time'}, it’s returned to you automatically.`}
             </p>
             <button
               onClick={() => setP2pResult(null)}
@@ -781,18 +825,33 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
         ) : (
           <div className="space-y-4">
             <div>
-              <label className="lab">Recipient email</label>
+              <label className="lab">To (@tag or email)</label>
               <input
-                type="email"
+                type="text"
                 inputMode="email"
                 autoCapitalize="none"
-                value={p2pEmail}
-                onChange={e => setP2pEmail(e.target.value)}
-                placeholder="them@example.com"
+                autoCorrect="off"
+                spellCheck={false}
+                value={p2pTo}
+                onChange={e => setP2pTo(e.target.value)}
+                placeholder="@tag or them@example.com"
                 className="field"
                 autoFocus
               />
-              <p className="hint tight">Already on PawaSave? They get it instantly. New? They’ll get an email to claim it.</p>
+              {p2pTo.trim() && p2pPreview && (
+                p2pPreview.found && p2pPreview.type === 'user' ? (
+                  <p className="hint tight" style={{ color: 'var(--green)', fontWeight: 'var(--w-medium)' }}>→ {p2pPreview.name}{p2pPreview.tag ? ` (@${p2pPreview.tag})` : ''} · instant</p>
+                ) : p2pPreview.type === 'email-new' ? (
+                  <p className="hint tight">Not on PawaSave yet — they’ll get an email to claim it.</p>
+                ) : p2pPreview.type === 'self' ? (
+                  <p className="hint tight" style={{ color: 'var(--amber)' }}>That’s you 🙂</p>
+                ) : p2pPreview.type === 'tag-missing' ? (
+                  <p className="hint tight" style={{ color: 'var(--amber)' }}>No PawaSave user with that tag.</p>
+                ) : p2pPreview.type === 'invalid' ? (
+                  <p className="hint tight">Enter a valid @tag or email.</p>
+                ) : null
+              )}
+              {!p2pTo.trim() && <p className="hint tight">On PawaSave? Use their @tag — instant. New to PawaSave? Use their email.</p>}
             </div>
 
             <div>
@@ -824,7 +883,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
 
             <button
               onClick={handleP2pSend}
-              disabled={busy || !p2pEmail || !(amt >= 100)}
+              disabled={busy || !p2pTo.trim() || !(amt >= 100) || p2pPreview?.type === 'self' || p2pPreview?.type === 'tag-missing'}
               className="cta" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
             >
               {busy ? <CircleNotch className="w-4 h-4 animate-spin" /> : <PaperPlaneTilt className="w-4 h-4" />}

@@ -23,7 +23,7 @@ import {
   enabledChains, rpcUrlFor, bundlerUrlFor, resolveChainAssets,
   type SourceChain, type ChainAsset,
 } from './deposit-chains'
-import { deriveDepositSigner, depositWalletConfigured } from './deposit-wallet'
+import { deriveDepositAddress, deriveDepositSigner, depositWalletConfigured } from './deposit-wallet'
 import { custodyAddress } from './custody'
 import { getSecret } from './secrets'
 import { depositCrossChainToCngn } from './hyperfx'
@@ -65,8 +65,17 @@ async function addressMap(db: SupabaseClient): Promise<Map<string, { userId: str
   if (error) throw new Error(`load wallets: ${error.message}`)
   const map = new Map<string, { userId: string; address: string }>()
   for (const w of (data ?? []) as WalletRow[]) {
-    if (w.deposit_index == null || !w.deposit_address) continue
-    map.set(w.deposit_address.toLowerCase(), { userId: w.user_id, address: w.deposit_address })
+    if (w.deposit_index == null) continue
+    // Derive the address from the index (the authoritative HD address) so a user is watched
+    // even if the stored deposit_address column was never persisted — that gap silently
+    // dropped real deposits (a user sent to the address the app showed, but the scanner,
+    // which only read the stored column, never saw it). Fall back to the column if derivation
+    // fails for any reason.
+    let address: string | null = null
+    try { address = await deriveDepositAddress(Number(w.deposit_index)) }
+    catch { address = w.deposit_address ?? null }
+    if (!address) continue
+    map.set(address.toLowerCase(), { userId: w.user_id, address })
   }
   return map
 }

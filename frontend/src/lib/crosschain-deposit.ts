@@ -141,14 +141,20 @@ async function sweepToCustody(chain: SourceChain, depositIndex: number, tokenAdd
 
   const GAS_LIMIT = 120_000n
   const fee = await provider.getFeeData()
-  const gasPrice = fee.maxFeePerGas ?? fee.gasPrice ?? 1_000_000n
-  const needed = (GAS_LIMIT * gasPrice * 13n) / 10n
-  const have = await provider.getBalance(await signer.getAddress())
+  const maxFee = fee.maxFeePerGas ?? fee.gasPrice ?? 1_000_000n
+  const maxPriority = fee.maxPriorityFeePerGas ?? maxFee
+  // Provision 3x the transfer's max gas cost so a base-fee bump between funding and send
+  // can't strand it ("insufficient funds for intrinsic transaction cost" — the bug that
+  // dropped a real deposit), and send the transfer with EXPLICIT fees so its cost is
+  // deterministic and always <= what we just funded.
+  const needed = GAS_LIMIT * maxFee * 3n
+  const depositAddr = await signer.getAddress()
+  const have = await provider.getBalance(depositAddr)
   if (have < needed) {
-    await (await funder.sendTransaction({ to: await signer.getAddress(), value: needed - have })).wait()
+    await (await funder.sendTransaction({ to: depositAddr, value: needed - have })).wait()
   }
   const token = new ethers.Contract(tokenAddr, ERC20_ABI, signer)
-  const tx = await token.transfer(custody, bal, { gasLimit: GAS_LIMIT })
+  const tx = await token.transfer(custody, bal, { gasLimit: GAS_LIMIT, maxFeePerGas: maxFee, maxPriorityFeePerGas: maxPriority })
   await tx.wait()
   return { amount: bal, txHash: tx.hash }
 }

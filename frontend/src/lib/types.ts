@@ -2,6 +2,7 @@ export interface Profile {
   id: string
   phone: string | null
   display_name: string
+  tag: string | null
   kyc_status: 'pending' | 'submitted' | 'verified' | 'rejected'
   kyc_type: 'bvn' | 'nin' | null
   kyc_submitted_at: string | null

@@ -25,8 +25,10 @@ export const maxDuration = 30
 const DAY_MS = 86_400_000
 const MIN_NGN = Number(process.env.P2P_MIN_NGN || 100)
 const EXPIRY_DAYS = Number(process.env.P2P_CLAIM_EXPIRY_DAYS || 7)
-const CAP_LITE_NGN = Number(process.env.P2P_DAILY_CAP_LITE_NGN || 50_000)
-const CAP_FULL_NGN = Number(process.env.P2P_DAILY_CAP_FULL_NGN || 1_000_000)
+// KYC tiers: 'lite' = Tier 1 (BVN + NUBAN) — same standing as the ₦3M/day bank-withdrawal tier;
+// 'full' = Sense-verified, higher headroom. ('none' can't send at all — gated below.)
+const CAP_LITE_NGN = Number(process.env.P2P_DAILY_CAP_LITE_NGN || 3_000_000)
+const CAP_FULL_NGN = Number(process.env.P2P_DAILY_CAP_FULL_NGN || 10_000_000)
 
 function serviceDb() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY

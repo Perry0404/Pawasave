@@ -218,11 +218,46 @@ export async function listTransactions(): Promise<any[]> {
 
 // ── Off-ramp (cNGN → NGN bank payout) ──────────────────────────────────────────
 
+/** Strails' own bank list — 6-digit NIBSS institution codes (e.g. OPAY=100004, GTBank=000013),
+ * which differ from the 3-digit Paystack/CBN codes the app's bank picker uses. Cached. */
+let _strailsBanks: { at: number; list: { name: string; code: string }[] } | null = null
+async function getStrailsBanks(): Promise<{ name: string; code: string }[]> {
+  if (_strailsBanks && Date.now() - _strailsBanks.at < 24 * 3600_000) return _strailsBanks.list
+  const d = await call('/getbankscode', {})
+  const raw = (d as any)?.banks ?? (Array.isArray(d) ? d : [])
+  const list = (raw as any[])
+    .map((b) => ({ name: String(b?.bank_name || b?.name || ''), code: String(b?.bank_code || b?.code || '') }))
+    .filter((b) => b.name && b.code)
+  if (list.length) _strailsBanks = { at: Date.now(), list }
+  return list
+}
+
+const normBank = (s: string) =>
+  String(s || '').toUpperCase().replace(/\b(PLC|LIMITED|LTD|BANK|DIGITAL SERVICES|MICROFINANCE|MFB|NIGERIA)\b/g, '').replace(/[^A-Z0-9]/g, '')
+
+/**
+ * Translate the app's bank code/name to the 6-digit NIBSS code Strails expects.
+ * If `code` is already a 6-digit NIBSS code, it's used as-is; otherwise we match by bank name
+ * against Strails' /getbankscode list. Returns null when no confident match (caller should fail
+ * cleanly BEFORE debiting, so it can fall back / show an error).
+ */
+export async function resolveStrailsBankCode(bankName: string, code?: string): Promise<string | null> {
+  if (code && /^\d{6}$/.test(code)) return code
+  const target = normBank(bankName)
+  if (!target) return null
+  const banks = await getStrailsBanks().catch(() => [])
+  // Exact normalized match first, then a contains-match either direction.
+  const exact = banks.find((b) => normBank(b.name) === target)
+  if (exact) return exact.code
+  const partial = banks.find((b) => { const n = normBank(b.name); return n && (n.includes(target) || target.includes(n)) })
+  return partial?.code ?? null
+}
+
 export async function cngnOfframp(input: {
   userId: string
   amount: number          // NGN
   accountNumber: string
-  bankCode: string
+  bankCode: string        // must be the 6-digit NIBSS code (see resolveStrailsBankCode)
   ticker?: string         // default CNGN
 }): Promise<{ reference?: string; status?: string; raw: any }> {
   const d = await call('/cngnofframp', { ticker: 'CNGN', ...input })

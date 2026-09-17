@@ -14,7 +14,7 @@ import {
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
 import { sendCngn, cngnToShares, withdrawFromLend, custodyCngnBalance, custodyAddress } from '@/lib/custody'
 import { withLease } from '@/lib/custody-lease'
-import { STRAILS_ENABLED, cngnOfframp as strailsCngnOfframp, getUserDetails as strailsGetUserDetails } from '@/lib/strails'
+import { STRAILS_ENABLED, cngnOfframp as strailsCngnOfframp, getUserDetails as strailsGetUserDetails, resolveStrailsBankCode } from '@/lib/strails'
 import { createClient } from '@supabase/supabase-js'
 import { verifyPin } from '@/lib/pin-hash'
 import { pinLockGuard, recordPinResult } from '@/lib/pin-lockout'
@@ -1015,6 +1015,11 @@ async function runStrailsOfframp(
   const smartWallet = details?.evmWallet
   if (!smartWallet) throw new Error('could not resolve Strails Smart Wallet address')
 
+  // Our bank picker uses 3-digit Paystack/CBN codes; Strails needs 6-digit NIBSS codes.
+  // Resolve BEFORE debiting so an unmatched bank fails cleanly (no charge, caller can error/fall back).
+  const strailsBankCode = await resolveStrailsBankCode(bankName || '', bankCode)
+  if (!strailsBankCode) throw new Error(`bank "${bankName || bankCode}" not matched to a Strails NIBSS code`)
+
   // Recipient gets `amount`; our 1.5% is added ON TOP (same gross-up model as Flipeet, minus
   // Flipeet's rate spread). amount_kobo on the row = the TOTAL debited so every refund path
   // (here + reconcilers) returns the full debit.
@@ -1080,7 +1085,7 @@ async function runStrailsOfframp(
 
   // cNGN is now in the user's Strails Smart Wallet. Trigger the fiat payout.
   try {
-    const payout = await strailsCngnOfframp({ userId: strailsUserId, amount, accountNumber, bankCode })
+    const payout = await strailsCngnOfframp({ userId: strailsUserId, amount, accountNumber, bankCode: strailsBankCode })
     await (adminDb() ?? supabase)
       .from('transactions')
       .update({ status: 'completed', paychant_tx_id: payout.reference || null, description: `Sent via Strails — on-chain: ${onChainTxHash}` })

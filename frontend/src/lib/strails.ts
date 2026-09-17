@@ -10,7 +10,7 @@
  *    issued aesKey is NOT used for request/response — reserved, likely webhooks).
  *  - The issued key is a SANDBOX key: valid on beta.stablesrail.io, 401 on prod.
  *  - Every call must come from a PRE-ALLOWLISTED server IP (/manageipallowlist),
- *    so this must run from a fixed-egress path (Vercel dedicated IP).
+ *    so this runs from the VPS's fixed egress IP (49.12.35.192), registered there.
  *  - Failures come back HTTP 4xx with `{ status: "Failed", response_code, message }`.
  *
  * Response FIELD NAMES below are read defensively (multiple candidates) because the
@@ -19,7 +19,13 @@
  */
 import crypto from 'crypto'
 
-const BASE = (process.env.STRAILS_BASE_URL || 'https://beta.stablesrail.io/v1').replace(/\/$/, '')
+const RAW_BASE = (process.env.STRAILS_BASE_URL || '').replace(/\/$/, '')
+// Strails API base. We call Strails DIRECTLY from the VPS's fixed, allowlisted egress IP — the
+// old Render relay is retired. If STRAILS_BASE_URL still points at that relay host
+// (…onrender.com), ignore it and go direct: otherwise we'd send our x-api-key to the relay
+// (which speaks x-relay-secret) and 401 every call. Set it to the prod base (api.strails.io/v1)
+// when prod keys are issued — any non-relay URL is honoured as-is.
+const BASE = (!RAW_BASE || /onrender\.com/i.test(RAW_BASE)) ? 'https://beta.stablesrail.io/v1' : RAW_BASE
 const KEY = process.env.STRAILS_API_KEY || ''
 
 /** Master switch — the whole integration stays dark until this is 'true'. */
@@ -42,19 +48,15 @@ function pick(obj: any, ...keys: string[]): string | undefined {
 }
 
 /**
- * Strails allowlists a single caller IP, but Vercel egresses from a rotating pool
- * (proven: a registered IP still got IP_NOT_ALLOWED on the next call). So in
- * production we route through strails-relay, a fixed-IP hop that holds the API key.
- * When STRAILS_RELAY_SECRET is set, STRAILS_BASE_URL points at the relay and we
- * authenticate to it instead of sending the Strails key from here.
+ * We call Strails DIRECTLY from the VPS's fixed egress IP, registered in Strails' IP allowlist
+ * (POST /manageipallowlist — itself allowlist-exempt). This retires the old Render "strails-relay"
+ * hop: that only existed because Vercel egressed from a rotating IP pool, and Render's own egress
+ * turned out to rotate too (it caused the 2026-09-17 IP_NOT_ALLOWED outage). A dedicated VPS IP
+ * never rotates, so direct is the durable path.
  */
-const RELAY_SECRET = process.env.STRAILS_RELAY_SECRET || ''
-
 async function call<T = any>(path: string, body?: unknown, method: 'POST' | 'GET' = 'POST'): Promise<T> {
-  if (!KEY && !RELAY_SECRET) throw new StrailsError('STRAILS_API_KEY not configured', 0)
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (RELAY_SECRET) headers['x-relay-secret'] = RELAY_SECRET
-  else headers['x-api-key'] = KEY
+  if (!KEY) throw new StrailsError('STRAILS_API_KEY not configured', 0)
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'x-api-key': KEY }
   let res: Response
   try {
     res = await fetch(`${BASE}${path}`, {

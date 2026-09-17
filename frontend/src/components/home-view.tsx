@@ -116,7 +116,9 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
       try {
         const res = await fetch('/api/strails/onboard-status')
         const data = await res.json().catch(() => ({}))
-        if (!cancelled && data?.ready) await refresh()
+        // Refresh on success OR on a failed BVN — both flip us off the "processing" screen
+        // (failed → the profile becomes 'failed' and the BVN form reappears with the reason).
+        if (!cancelled && (data?.ready || data?.status === 'failed')) await refresh()
       } catch { /* transient — keep polling */ }
     }
     tick()
@@ -490,6 +492,12 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
           </div>
         ) : (
           <>
+            {p?.strails_onboard_status === 'failed' && (
+              <div className="flash err" style={{ marginTop: 0, marginBottom: 'var(--s-4)' }}>
+                BVN verification failed — the details didn’t match your bank records. Double-check your
+                11-digit BVN and try again. (Dial *565*0# on the phone linked to your BVN to see it.)
+              </div>
+            )}
             <p className="p">
               Get your own dedicated Naira account. Enter your BVN — we use it only to verify your
               identity with your bank and never store it. This unlocks tier 1 (up to ₦20,000).

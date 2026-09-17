@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
-import { STRAILS_ENABLED, getUserDetails } from '@/lib/strails'
+import { STRAILS_ENABLED, getUserDetails, onboardStatus, StrailsError } from '@/lib/strails'
 
 /**
  * GET /api/strails/onboard-status
@@ -37,7 +37,7 @@ export async function GET(_request: NextRequest) {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('strails_user_id, strails_onboard_status, strails_va_account_number, strails_va_bank_name, strails_va_account_name')
+    .select('strails_user_id, strails_onboard_request_id, strails_onboard_status, strails_va_account_number, strails_va_bank_name, strails_va_account_name')
     .eq('id', user.id)
     .single()
 
@@ -64,19 +64,45 @@ export async function GET(_request: NextRequest) {
     return NextResponse.json({ ready: false, status: 'processing' })
   }
 
+  const admin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    { auth: { persistSession: false } },
+  )
+
+  // First ask Strails what actually happened to the onboarding request. getUserDetails alone
+  // can't tell "still processing" from "the BVN failed" — both look like an error — which left
+  // users whose BVN was REJECTED stuck on "Creating your account…" forever. onboardstatus is
+  // authoritative: it reports a failed BVN validation (retryable:false) vs still-processing.
+  let lookupId = String(p.strails_user_id)
+  if (p?.strails_onboard_request_id) {
+    try {
+      const st = await onboardStatus(String(p.strails_onboard_request_id))
+      if (st.verified && st.strailsUserId) lookupId = st.strailsUserId // freshest id
+      // not verified yet + no error thrown → genuinely still processing; fall through
+    } catch (e) {
+      // A failed registration (e.g. BVN mismatch / "Record not found") throws here. Record it
+      // and surface an actionable message so the UI shows the BVN form again for a retry.
+      const body: any = e instanceof StrailsError ? e.body : null
+      const details = body?.data?.details
+      const failed = details?.status === 'failed' || /registration failed|bvn/i.test(String((e as any)?.message || ''))
+      if (failed) {
+        const userMsg = details?.error?.userMessage || details?.userMessage
+          || 'BVN verification failed. Check your BVN details and try again.'
+        await admin.from('profiles').update({ strails_onboard_status: 'failed' }).eq('id', user.id)
+        return NextResponse.json({ ready: false, status: 'failed', error: userMsg })
+      }
+      // else transient onboardstatus error → keep polling below
+    }
+  }
+
   // Ask Strails directly for the permanent account. It arrives ~2 min after onboard.
   try {
-    const details = await getUserDetails(String(p.strails_user_id))
+    const details = await getUserDetails(lookupId)
     const acctNumber = details.account.accountNumber
     if (!acctNumber) {
       return NextResponse.json({ ready: false, status: 'processing' })
     }
-
-    const admin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY,
-      { auth: { persistSession: false } },
-    )
     // Direct write, not the set_strails_account RPC — that function isn't in
     // PostgREST's schema cache, so RPC-based onboarding writes silently no-op.
     await admin

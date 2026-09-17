@@ -14,6 +14,7 @@ import {
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
 import { sendCngn, cngnToShares, withdrawFromLend, custodyCngnBalance, custodyAddress } from '@/lib/custody'
 import { withLease } from '@/lib/custody-lease'
+import { STRAILS_ENABLED, cngnOfframp as strailsCngnOfframp, getUserDetails as strailsGetUserDetails } from '@/lib/strails'
 import { createClient } from '@supabase/supabase-js'
 import { verifyPin } from '@/lib/pin-hash'
 import { pinLockGuard, recordPinResult } from '@/lib/pin-lockout'
@@ -57,9 +58,13 @@ const XEND_CONFIGURED = Boolean(
 const FLIPEET_CONFIGURED = Boolean(
   process.env.FLIPEET_API_KEY && FLIPEET_CUSTODY_ADDRESS,
 )
+// Strails as a SECOND off-ramp rail (failover when Flipeet is down). Dark until validated:
+// needs STRAILS_ENABLED + STRAILS_OFFRAMP_ENABLED=true. See runStrailsOfframp for the model
+// (custody sends cNGN to the user's Strails Smart Wallet, then /cngnofframp pays the bank).
+const STRAILS_OFFRAMP_CONFIGURED = STRAILS_ENABLED && process.env.STRAILS_OFFRAMP_ENABLED === 'true'
 
 type RampType = 'on' | 'off'
-type Provider = 'flint' | 'xend' | 'flipeet'
+type Provider = 'flint' | 'xend' | 'flipeet' | 'strails'
 
 type ProviderResult = {
   provider: Provider
@@ -967,6 +972,147 @@ async function runFlipeet(
   }
 }
 
+/**
+ * Off-ramp via Strails — the failover rail for when Flipeet is down.
+ *
+ * Model (from Strails docs): /cngnofframp debits cNGN from the USER'S Strails Smart Wallet and
+ * pays their bank. Our users' cNGN lives in custody (we sweep it out on deposit), so we first
+ * send `amount` cNGN from custody TO the user's Strails Smart Wallet, then call /cngnofframp.
+ * Mirrors runFlipeet's money-safety exactly: debit-before-send, custody lease + pool redemption,
+ * settlement marker, single-refund guard.
+ *
+ * DARK until STRAILS_OFFRAMP_ENABLED=true. VALIDATE before enabling: (1) whether Strails deducts
+ * its own fee from the payout (if so the recipient gets < amount), (2) that bankCode is the NIBSS
+ * code Strails expects, (3) one real test withdrawal end-to-end.
+ */
+async function runStrailsOfframp(
+  request: NextRequest,
+  supabase: any,
+  userId: string,
+  type: RampType,
+  amount: number,
+  bankCode?: string,
+  accountNumber?: string,
+  holderName?: string,
+  bankName?: string,
+): Promise<ProviderResult> {
+  if (!STRAILS_OFFRAMP_CONFIGURED) throw new Error('Strails off-ramp unavailable')
+  if (type !== 'off') throw new Error('Strails supports off-ramp only')
+  if (!bankCode || !accountNumber) throw new Error('bank details required')
+
+  const reference = generateRef()
+  const feePercent = await getNumberSetting(supabase, 'ramp_fee_percent', DEFAULT_FEE_PERCENT)
+  const pawaFeeNaira = Math.round((amount * feePercent) / 100)
+  const pawaFeeKobo = Math.round(pawaFeeNaira * 100)
+
+  // Resolve the user's Strails Smart Wallet BEFORE any debit, so a user without a Strails
+  // account fails cleanly with nothing charged (and the caller can fall back / error out).
+  const { data: prof } = await supabase
+    .from('profiles').select('strails_user_id').eq('id', userId).single()
+  const strailsUserId = prof?.strails_user_id
+  if (!strailsUserId) throw new Error('user has no Strails wallet for off-ramp')
+  const details = await strailsGetUserDetails(strailsUserId)
+  const smartWallet = details?.evmWallet
+  if (!smartWallet) throw new Error('could not resolve Strails Smart Wallet address')
+
+  // Recipient gets `amount`; our 1.5% is added ON TOP (same gross-up model as Flipeet, minus
+  // Flipeet's rate spread). amount_kobo on the row = the TOTAL debited so every refund path
+  // (here + reconcilers) returns the full debit.
+  const totalNaira = amount + pawaFeeNaira
+  const debitMicro = Math.floor(totalNaira * 1_000_000)
+  const sendMicro = BigInt(Math.floor(amount * 1_000_000))
+
+  // Debit BEFORE moving money, so we never pay out for an underfunded user.
+  await supabase.from('transactions').insert({
+    user_id: userId,
+    type: 'withdrawal',
+    direction: 'debit',
+    amount_kobo: Math.round(totalNaira * 100),
+    platform_fee_kobo: pawaFeeKobo,
+    description: `Sent via Strails — ₦${amount.toLocaleString()} to bank (₦${pawaFeeNaira.toLocaleString()} fee)`,
+    reference,
+    status: 'pending',
+    metadata: { provider: 'strails', bank_name: bankName || null, account_name: holderName || null, account_number: accountNumber || null, net_naira: amount, fee_naira: pawaFeeNaira },
+  })
+  const debitError = await maybeDebitForWithdrawal(supabase, userId, totalNaira, reference)
+  if (debitError) throw new Error('INSUFFICIENT_BALANCE')
+
+  // Send cNGN from custody to the user's Strails Smart Wallet (lease + pool redemption +
+  // settlement marker, identical safety to Flipeet). Refunds and throws if nothing was sent.
+  let onChainTxHash: string
+  try {
+    onChainTxHash = await withLease('custody:signer', async (lease) => {
+      let available = await custodyCngnBalance()
+      if (available < sendMicro) {
+        const custShares = await custodyLendShares()
+        if (custShares > 0n) {
+          const wantShares = await cngnToShares(sendMicro - available)
+          const redeem = wantShares < custShares ? wantShares : custShares
+          if (redeem > 0n) {
+            try { await withdrawFromLend(redeem) } catch (poolErr) {
+              console.warn('Strails off-ramp: pool redemption failed, using raw custody cNGN', { reference, err: poolErr instanceof Error ? poolErr.message : String(poolErr) })
+            }
+            available = await custodyCngnBalance()
+          }
+        }
+      }
+      if (available < sendMicro) {
+        await moneyDb().rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: debitMicro })
+        await markTxFailed(supabase, reference, `custody cNGN shortfall, need ${sendMicro} have ${available}`)
+        const e: any = new Error(`Not enough settled cNGN to cover this withdrawal. Your balance was refunded.`)
+        e.onChainFail = true; e.alreadyRefunded = true
+        throw e
+      }
+      const marked = await commitSettlementMarker(supabase, reference, smartWallet)
+      if (!marked) throw new Error('could not record settlement marker before send, aborted, nothing sent')
+      lease.assertHeld()
+      return sendCngn(smartWallet, sendMicro)
+    }, { holder: `offramp-strails ${reference}`, waitMs: 25_000 })
+  } catch (sendErr: any) {
+    // Nothing left custody on these paths unless alreadyRefunded is set (shortfall guard).
+    if (!sendErr?.alreadyRefunded) {
+      await moneyDb().rpc('credit_wallet', { p_user_id: userId, p_naira_kobo: 0, p_usdc_micro: debitMicro })
+      await markTxFailed(supabase, reference, sendErr)
+    }
+    // Clean pre-send failure (refunded) → let the caller fall back to another provider.
+    throw sendErr
+  }
+
+  // cNGN is now in the user's Strails Smart Wallet. Trigger the fiat payout.
+  try {
+    const payout = await strailsCngnOfframp({ userId: strailsUserId, amount, accountNumber, bankCode })
+    await (adminDb() ?? supabase)
+      .from('transactions')
+      .update({ status: 'completed', paychant_tx_id: payout.reference || null, description: `Sent via Strails — on-chain: ${onChainTxHash}` })
+      .eq('reference', reference)
+    sendWithdrawalEmail(userId, { amountNgn: amount, bankName, accountName: holderName, accountNumber, reference }).catch(() => {})
+  } catch (payoutErr: any) {
+    // Point of no return: the cNGN already left custody into the user's Strails wallet, so we do
+    // NOT refund (that would double-pay). Mark for manual/reconcile follow-up. Do NOT fall back.
+    console.error('Strails off-ramp: cNGN sent but payout call failed — needs reconcile', { reference, smartWallet, onChainTxHash, err: payoutErr instanceof Error ? payoutErr.message : String(payoutErr) })
+    await markTxFailed(supabase, reference, `payout call failed after on-chain send (${onChainTxHash}); cNGN in user Strails wallet ${smartWallet}`)
+    const e: any = new Error(`Withdrawal is being settled — if it doesn't complete shortly, contact support.`)
+    e.onChainFail = true // money moved: caller must not fall back or refund
+    throw e
+  }
+
+  await recordPlatformFee(supabase, userId, reference, 'ramp_offramp', Math.round(totalNaira * 100), pawaFeeKobo, feePercent)
+
+  return {
+    provider: 'strails',
+    transactionId: reference,
+    reference,
+    bankName, bankCode, accountNumber, accountName: holderName,
+    amount: Math.round(amount),
+    currency: 'cngn',
+    network: 'base',
+    pawaFee: pawaFeeNaira,
+    providerFee: 0,
+    totalFee: pawaFeeNaira,
+    feePercent,
+  }
+}
+
 // Lite-tier (BVN-only, no biometric KYC) WITHDRAWAL cap. Unverified users can deposit
 // any amount, but can only off-ramp up to this per withdrawal — bigger cash-out needs
 // full (Sense) KYC. "Full" is exactly kyc_status='verified' (see migration 058), so we
@@ -1132,6 +1278,8 @@ export async function POST(request: NextRequest) {
     if (FLINT_CONFIGURED && type === 'on' && depositCurrency === 'NGN') availableProviders.push('flint')
     if (XEND_CONFIGURED && depositCurrency === 'NGN') availableProviders.push('xend')
     if (FLIPEET_CONFIGURED && type === 'off') availableProviders.push('flipeet')
+    // Strails is the off-ramp FAILOVER (kept after Flipeet). Dark until STRAILS_OFFRAMP_ENABLED.
+    if (STRAILS_OFFRAMP_CONFIGURED && type === 'off') availableProviders.push('strails')
 
     if (availableProviders.length === 0) {
       const reason =
@@ -1152,23 +1300,16 @@ export async function POST(request: NextRequest) {
       Number(flipeetRate?.rate) > 0 ? 0 : DEFAULT_FLIPEET_ESTIMATED_FEE,
     )
 
-    const orderedProviders = [...availableProviders].sort((a, b) => {
-      const feeA = a === 'flint'
-        ? estimatedFlint
-        : a === 'xend'
-          ? estimatedXend
-          : estimatedFlipeet
-      const feeB = b === 'flint'
-        ? estimatedFlint
-        : b === 'xend'
-          ? estimatedXend
-          : estimatedFlipeet
-      return feeA - feeB
-    })
+    // Strails sorts just after Flipeet so Flipeet stays primary and Strails is the failover.
+    const estimatedStrails = estimatedFlipeet + 1
+    const feeOf = (p: Provider) =>
+      p === 'flint' ? estimatedFlint : p === 'xend' ? estimatedXend : p === 'strails' ? estimatedStrails : estimatedFlipeet
+    const orderedProviders = [...availableProviders].sort((a, b) => feeOf(a) - feeOf(b))
 
     const run = async (provider: Provider) => {
       if (provider === 'flint') return runFlint(request, supabase, user.id, type, amount)
       if (provider === 'flipeet') return runFlipeet(request, supabase, user.id, type, amount, bankCode, accountNumber, holderName, bankName, depositCurrency)
+      if (provider === 'strails') return runStrailsOfframp(request, supabase, user.id, type, amount, bankCode, accountNumber, holderName, bankName)
       return runXend(supabase, user.id, type, amount, bankCode, accountNumber, holderName)
     }
 
@@ -1181,17 +1322,38 @@ export async function POST(request: NextRequest) {
       if (primaryErr?.isValidation) {
         return NextResponse.json({ error: primaryErr.message }, { status: 400 })
       }
-      // Never fall back for off-ramps: every run*() debits the user's balance before
-      // calling the provider and refunds on failure. A fallback would debit a second time.
+      // Off-ramp fallback is SAFE only on a clean pre-send failure: every run*() debits before
+      // calling the provider and refunds before throwing a plain error, so the balance is whole
+      // again and a second provider can debit once. We must NOT fall back when money has moved or
+      // was already finally refunded (onChainFail) or on insufficient balance — those would risk
+      // a double-debit or double-pay.
       if (type === 'off') {
         if (primaryErr?.message === 'INSUFFICIENT_BALANCE') {
           return NextResponse.json({ error: 'Insufficient balance for this withdrawal.' }, { status: 400 })
         }
-        // On-chain settlement failures are our OWN custody errors (not a provider
-        // secret) and are actionable — surface the real reason instead of masking.
+        // On-chain settlement failure (or money already moved): actionable + final. Never retry.
         if (primaryErr?.onChainFail) {
           console.error('Ramp off-ramp on-chain failure', { message: primaryErr?.message })
           return NextResponse.json({ error: primaryErr.message }, { status: 422 })
+        }
+        // Clean pre-send provider outage (e.g. Flipeet API down) → fail over to the next
+        // off-ramp provider if one is configured (e.g. Strails). The primary already refunded.
+        const fb = orderedProviders[1]
+        if (fb) {
+          console.warn('Ramp off-ramp: primary failed pre-send, failing over', { from: orderedProviders[0], to: fb, message: primaryErr?.message })
+          try {
+            const result = await run(fb)
+            return NextResponse.json({ ...result, selectedBy: 'fallback' })
+          } catch (fbErr: any) {
+            if (fbErr?.message === 'INSUFFICIENT_BALANCE') {
+              return NextResponse.json({ error: 'Insufficient balance for this withdrawal.' }, { status: 400 })
+            }
+            if (fbErr?.onChainFail) {
+              return NextResponse.json({ error: fbErr.message }, { status: 422 })
+            }
+            console.error('Ramp off-ramp failover failed', { providers: orderedProviders, primaryErr, fbErr })
+            return NextResponse.json({ error: formatProviderError(fb, fbErr) }, { status: 422 })
+          }
         }
         const errMsg = formatProviderError(orderedProviders[0], primaryErr)
         console.error('Ramp off-ramp failure', { provider: orderedProviders[0], primaryErr })

@@ -430,6 +430,31 @@ export async function sendP2pClaimInviteEmail(p: P2pClaimInviteNotice): Promise<
   })
 }
 
+/** Onboarding: tell the user their BVN verification failed, with how to fix + retry. */
+export async function sendBvnFailedEmail(userId: string, reason?: string | null): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(userId)
+  if (!r) return
+  const url = siteBaseUrl()
+  const html = shell({
+    heading: 'BVN verification didn’t go through',
+    sub: `Hi ${r.name}, we couldn’t verify your BVN to create your Naira account — the details didn’t match your bank records.`,
+    amount: 'Action needed',
+    amountColor: '#B45309',
+    rows: [
+      ['Reason', reason || 'BVN didn’t match your bank records'],
+      ['What to do', 'Re-check and re-enter your 11-digit BVN'],
+    ],
+    note: `Dial *565*0# on the phone linked to your BVN to see the correct number, then try again at ${url}. We never store your BVN. If it keeps failing, just reply to this email and we’ll help.`,
+  })
+  await sendMail({
+    to: r.email,
+    subject: 'Your BVN verification didn’t go through — quick fix',
+    html,
+    text: `Hi ${r.name}, your BVN verification didn’t go through (${reason || 'details didn’t match your bank records'}). Re-check your 11-digit BVN (dial *565*0#) and try again at ${url}.`,
+  })
+}
+
 /** Tell the sender their unclaimed transfer was returned (expiry) or their cancel refunded. */
 export async function sendP2pRevertedEmail(userId: string, p: { amountNgn: number; toLabel: string; reason: 'expired' | 'cancelled'; reference?: string | null }): Promise<void> {
   if (!mailerConfigured()) return

@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { STRAILS_ENABLED, getUserDetails, onboardStatus, StrailsError } from '@/lib/strails'
+import { sendBvnFailedEmail } from '@/lib/notify-tx'
 
 /**
  * GET /api/strails/onboard-status
@@ -60,6 +61,12 @@ export async function GET(_request: NextRequest) {
     return NextResponse.json({ ready: false, status: 'none' })
   }
 
+  // Already known-failed → return the retry state without re-calling Strails or re-emailing
+  // (the failure email is sent once, on the transition below).
+  if (p?.strails_onboard_status === 'failed') {
+    return NextResponse.json({ ready: false, status: 'failed', error: 'BVN verification failed. Check your BVN details and try again.' })
+  }
+
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return NextResponse.json({ ready: false, status: 'processing' })
   }
@@ -90,6 +97,8 @@ export async function GET(_request: NextRequest) {
         const userMsg = details?.error?.userMessage || details?.userMessage
           || 'BVN verification failed. Check your BVN details and try again.'
         await admin.from('profiles').update({ strails_onboard_status: 'failed' }).eq('id', user.id)
+        // First time we learn it failed (we early-returned above if already 'failed') → email once.
+        sendBvnFailedEmail(user.id, userMsg).catch(() => {})
         return NextResponse.json({ ready: false, status: 'failed', error: userMsg })
       }
       // else transient onboardstatus error → keep polling below

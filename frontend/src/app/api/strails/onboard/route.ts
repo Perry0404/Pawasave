@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { STRAILS_ENABLED, onboardUser, StrailsError } from '@/lib/strails'
+import { sendBvnFailedEmail } from '@/lib/notify-tx'
 
 /**
  * POST /api/strails/onboard  { bvn: "12345678901" }
@@ -91,6 +92,9 @@ export async function POST(request: NextRequest) {
         p_user_id: user.id, p_request_id: null, p_strails_uid: null, p_status: 'failed', p_bvn_hash: bvnHash,
       })
     } catch { /* best-effort status write */ }
+    // Email the reason too — a synchronous rejection here (vs the async path in onboard-status)
+    // still deserves a record the user can act on later.
+    sendBvnFailedEmail(user.id, msg).catch(() => {})
     // BVN validation failures are actionable; surface them.
     return NextResponse.json({ error: msg }, { status: 422 })
   }

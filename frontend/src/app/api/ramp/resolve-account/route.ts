@@ -2,6 +2,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { NextRequest, NextResponse } from 'next/server'
 import { lookupFlipeetAccount, FlipeetApiError } from '@/lib/flipeet'
+import { STRAILS_ENABLED, resolveStrailsAccountName } from '@/lib/strails'
 
 /**
  * GET /api/ramp/resolve-account?bank=<code>&account=<10 digits>
@@ -17,6 +18,7 @@ import { lookupFlipeetAccount, FlipeetApiError } from '@/lib/flipeet'
  */
 export async function GET(req: NextRequest) {
   const bank = (req.nextUrl.searchParams.get('bank') || '').trim()
+  const bankName = (req.nextUrl.searchParams.get('name') || '').trim()
   const account = (req.nextUrl.searchParams.get('account') || '').replace(/\D/g, '')
 
   if (!bank || !/^\d{10}$/.test(account)) {
@@ -33,25 +35,27 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
+  // Try Flipeet first (same provider/codes as its payout). If it's a 4xx the details are
+  // genuinely wrong; if it's an outage (like Flipeet being down), fall back to Strails.
+  let flipeetUserError = false
   try {
     const data = await lookupFlipeetAccount({ bankCode: bank, accountNumber: account })
     const name = data?.account_name
-    if (name) return NextResponse.json({ accountName: String(name) })
-    return NextResponse.json(
-      { error: 'We couldn’t find that account. Check the number and bank.' },
-      { status: 422 },
-    )
+    if (name) return NextResponse.json({ accountName: String(name), source: 'flipeet' })
   } catch (e) {
-    // A 4xx from Flipeet means the account/bank couldn't be resolved (user-fixable);
-    // anything else is a provider/outage error the user can't do anything about.
-    const status = e instanceof FlipeetApiError && e.status >= 400 && e.status < 500 ? 422 : 502
-    return NextResponse.json(
-      {
-        error: status === 422
-          ? 'We couldn’t find that account. Check the number and bank.'
-          : 'Account lookup is temporarily unavailable.',
-      },
-      { status },
-    )
+    flipeetUserError = e instanceof FlipeetApiError && e.status >= 400 && e.status < 500
   }
+
+  // Strails name-enquiry fallback (works while Flipeet is down). Needs the bank NAME to map the
+  // app's 3-digit code to Strails' NIBSS code.
+  if (STRAILS_ENABLED && bankName) {
+    const strailsName = await resolveStrailsAccountName(account, bankName, bank).catch(() => null)
+    if (strailsName) return NextResponse.json({ accountName: strailsName, source: 'strails' })
+  }
+
+  // A definite Flipeet 4xx means the details are wrong (user-fixable); otherwise it's an outage.
+  return NextResponse.json(
+    { error: flipeetUserError ? 'We couldn’t find that account. Check the number and bank.' : 'Account lookup is temporarily unavailable.' },
+    { status: flipeetUserError ? 422 : 502 },
+  )
 }

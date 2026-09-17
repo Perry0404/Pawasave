@@ -63,6 +63,15 @@ const FLIPEET_CONFIGURED = Boolean(
 // (custody sends cNGN to the user's Strails Smart Wallet, then /cngnofframp pays the bank).
 const STRAILS_OFFRAMP_CONFIGURED = STRAILS_ENABLED && process.env.STRAILS_OFFRAMP_ENABLED === 'true'
 
+// Circuit breaker: after Flipeet fails with a network/outage error, skip waiting on it for a few
+// minutes and prefer the Strails off-ramp, so repeat withdrawals during a Flipeet outage are fast
+// instead of eating the connect timeout every time. Self-heals — after the window Flipeet is
+// re-probed first again. Module-level (per container); a false hit just tries the other rail.
+let flipeetDownUntil = 0
+const FLIPEET_DOWN_TTL_MS = 5 * 60_000
+const flipeetLikelyDown = () => Date.now() < flipeetDownUntil
+const isFlipeetOutage = (e: any) => !(e instanceof FlipeetApiError) || (e?.status ?? 500) >= 500
+
 type RampType = 'on' | 'off'
 type Provider = 'flint' | 'xend' | 'flipeet' | 'strails'
 
@@ -1310,6 +1319,10 @@ export async function POST(request: NextRequest) {
     const feeOf = (p: Provider) =>
       p === 'flint' ? estimatedFlint : p === 'xend' ? estimatedXend : p === 'strails' ? estimatedStrails : estimatedFlipeet
     const orderedProviders = [...availableProviders].sort((a, b) => feeOf(a) - feeOf(b))
+    // If Flipeet just failed (outage window), put Strails first so we don't wait on Flipeet again.
+    if (type === 'off' && flipeetLikelyDown() && orderedProviders.includes('strails')) {
+      orderedProviders.sort((a, b) => (a === 'strails' ? -1 : b === 'strails' ? 1 : 0))
+    }
 
     const run = async (provider: Provider) => {
       if (provider === 'flint') return runFlint(request, supabase, user.id, type, amount)
@@ -1341,6 +1354,8 @@ export async function POST(request: NextRequest) {
           console.error('Ramp off-ramp on-chain failure', { message: primaryErr?.message })
           return NextResponse.json({ error: primaryErr.message }, { status: 422 })
         }
+        // Trip the breaker if Flipeet was the one that failed with an outage error.
+        if (orderedProviders[0] === 'flipeet' && isFlipeetOutage(primaryErr)) flipeetDownUntil = Date.now() + FLIPEET_DOWN_TTL_MS
         // Clean pre-send provider outage (e.g. Flipeet API down) → fail over to the next
         // off-ramp provider if one is configured (e.g. Strails). The primary already refunded.
         const fb = orderedProviders[1]
@@ -1350,6 +1365,7 @@ export async function POST(request: NextRequest) {
             const result = await run(fb)
             return NextResponse.json({ ...result, selectedBy: 'fallback' })
           } catch (fbErr: any) {
+            if (fb === 'flipeet' && isFlipeetOutage(fbErr)) flipeetDownUntil = Date.now() + FLIPEET_DOWN_TTL_MS
             if (fbErr?.message === 'INSUFFICIENT_BALANCE') {
               return NextResponse.json({ error: 'Insufficient balance for this withdrawal.' }, { status: 400 })
             }

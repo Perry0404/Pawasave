@@ -92,10 +92,14 @@ function getHeaders() {
 }
 
 async function request<T>(path: string, payload: Record<string, unknown>): Promise<T> {
+  // Bound the wait: with no timeout, an unreachable Flipeet host hangs ~10s (Node's default
+  // connect timeout) before we can fail over to another provider or fall back to manual name
+  // entry. 8s is ample for a slow-but-up API while making an outage fail fast.
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(8000),
   })
 
   const json = (await res.json().catch(() => null)) as FlipeetEnvelope<T> | null

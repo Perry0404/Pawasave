@@ -253,6 +253,23 @@ export async function resolveStrailsBankCode(bankName: string, code?: string): P
   return partial?.code ?? null
 }
 
+/**
+ * Resolve an account holder name via Strails (name-enquiry fallback for the withdraw screen when
+ * Flipeet's lookup is down). Strails has no read-only enquiry, so this uses /addbankaccount, which
+ * verifies the account and returns verifiedAccountName. `code` may be the app's 3-digit code or a
+ * bank name — it's translated to the NIBSS code first. Returns null if it can't resolve.
+ */
+export async function resolveStrailsAccountName(accountNumber: string, bankName: string, code?: string): Promise<string | null> {
+  const nibss = await resolveStrailsBankCode(bankName, code).catch(() => null)
+  if (!nibss) return null
+  try {
+    const d = await call('/addbankaccount', { accountNumber, bankCode: nibss })
+    return pick(d, 'verifiedAccountName', 'accountName', 'account_name') ?? null
+  } catch {
+    return null
+  }
+}
+
 export async function cngnOfframp(input: {
   userId: string
   amount: number          // NGN

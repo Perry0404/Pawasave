@@ -74,10 +74,10 @@ export async function initiateWithdrawal(
  * resolved (unconfigured, wrong details, or provider down) so the caller can
  * fall back to manual entry.
  */
-export async function resolveAccount(bankCode: string, accountNumber: string): Promise<string | null> {
+export async function resolveAccount(bankCode: string, accountNumber: string, bankName?: string): Promise<string | null> {
   try {
     const res = await fetch(
-      `/api/ramp/resolve-account?bank=${encodeURIComponent(bankCode)}&account=${encodeURIComponent(accountNumber)}`,
+      `/api/ramp/resolve-account?bank=${encodeURIComponent(bankCode)}&account=${encodeURIComponent(accountNumber)}${bankName ? `&name=${encodeURIComponent(bankName)}` : ''}`,
     )
     if (!res.ok) return null
     const data = await res.json()

@@ -91,7 +91,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
     setNameResolved(false)
     setResolveError('')
     const t = setTimeout(async () => {
-      const name = await resolveAccount(bankCode, accountNumber)
+      const name = await resolveAccount(bankCode, accountNumber, banks.find(b => b.code === bankCode)?.name)
       if (cancelled) return
       setResolvingName(false)
       if (name) { setAccountHolderName(name); setNameResolved(true) }

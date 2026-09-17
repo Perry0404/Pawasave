@@ -48,7 +48,9 @@ Not secret — from your records / BaseScan. Several have safe fallbacks in `con
 Ramp tuning (`NGN_USD_RATE`, `LITE_KYC_CAP_NGN`, `BVN_DAILY_CAP_NGN`, `PAWA_DEPOSIT_FEE_PERCENT`,
 `RAMP_*`), sweep tuning (`DEPOSIT_SWEEP_*`, `CUSTODY_POOL_BUFFER_MICRO`, `*_RECONCILE_MINUTES`),
 rate-limit (`UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`), USSD (`USSD_ENABLED`,
-`USSD_GATEWAY_SECRET`), GetEquity (`GETEQUITY_*`), AWS Secrets Manager (`AWS_SECRETS_ID`, `AWS_REGION`).
+`USSD_GATEWAY_SECRET`), GetEquity (`GETEQUITY_*`), AWS Secrets Manager (`AWS_SECRETS_ID`, `AWS_REGION`),
+NGX market data (`NGNMARKET_API_KEY` — free key from ngnmarket.com; powers the Invest → NGX browse
+tab. Dark until set. Cached server-side ~20 min, so it uses a handful of the free 3k/mo calls/day).
 
 ## 8. Tokenized stocks (dark — flip on ONLY after Nigeria eligibility + a test fill)
 On-chain reality (verified Aug 2026): the B20 stock tokens have real **Uniswap V3** USDC

@@ -10,7 +10,8 @@ import { useStockQuotes, MarketCards, StockQuotePanel, ChangeBadge, Sparkline, S
  * The buy flow is real (POST /api/invest/equity); it surfaces "coming soon"
  * until the broker (Coinbase Tokenize) is enabled server-side.
  */
-type Cat = 'tokenized_stock' | 'pre_ipo' | 'naira'
+type Cat = 'tokenized_stock' | 'pre_ipo' | 'naira' | 'ngx'
+type NgxRow = { symbol: string; name: string; sector: string | null; price: number; changePct: number; logoUrl: string | null }
 
 type Asset = {
   symbol: string; name: string; tv?: string
@@ -47,6 +48,49 @@ interface Holding { symbol: string; asset_type: string; provider: string; invest
 interface Props { wallet: Wallet | null; profile: { kyc_status?: string; strails_onboard_status?: string | null; strails_va_account_number?: string | null } | null; refresh: () => void; onStartKyc: () => void }
 
 const IconLock = () => <Lock />
+
+/** NGX (Nigerian Exchange) browse list — live market data, no trading yet ("Soon"). */
+function NgxList({ stocks, asOf, enabled }: { stocks: NgxRow[]; asOf: number; enabled: boolean }) {
+  const time = asOf ? new Date(asOf).toLocaleTimeString('en-NG', { hour: 'numeric', minute: '2-digit' }) : ''
+  return (
+    <>
+      <div className="sect">
+        <span className="h">Nigerian stocks (NGX)</span>
+        {time && <span className="m">as of {time}</span>}
+      </div>
+      {!enabled ? (
+        <div className="note">Live NGX prices are being connected — check back shortly.</div>
+      ) : stocks.length === 0 ? (
+        <div className="rows">
+          <div className="coll" style={{ borderTop: 0, alignItems: 'center' }}>
+            <CircleNotch className="animate-spin" style={{ color: 'var(--faint)' }} />
+            <span className="sub" style={{ marginLeft: 8 }}>Loading NGX prices…</span>
+          </div>
+        </div>
+      ) : (
+        <div className="rows">
+          {stocks.map(s => {
+            const up = s.changePct >= 0
+            return (
+              <div key={s.symbol} className="coll" style={{ borderTop: '1px solid var(--line)' }}>
+                <StockLogo symbol={s.symbol} logoUrl={s.logoUrl} />
+                <div className="mid"><div className="nm">{s.name}</div><div className="sub">{s.sector || 'NGX'} · {s.symbol}</div></div>
+                <div style={{ textAlign: 'right', flex: 'none', minWidth: 80 }}>
+                  <div className="v num">₦{s.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: up ? 'var(--green)' : '#e5484d' }}>
+                    {s.changePct === 0 ? '—' : `${up ? '▲' : '▼'} ${Math.abs(s.changePct).toFixed(2)}%`}
+                  </div>
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', background: 'var(--surface-2)', padding: '3px 8px', borderRadius: 999, flex: 'none', marginLeft: 8 }}>Soon</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <p className="p" style={{ margin: '14px 3px 0' }}>Live NGX market data. Buying &amp; selling Nigerian stocks is coming soon.</p>
+    </>
+  )
+}
 
 export default function InvestView({ wallet, profile, refresh, onStartKyc }: Props) {
   const [cat, setCat] = useState<Cat>('naira')
@@ -88,7 +132,18 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
       })
       .catch(() => undefined)
 
+  const [ngx, setNgx] = useState<NgxRow[]>([])
+  const [ngxAsOf, setNgxAsOf] = useState(0)
+  const [ngxEnabled, setNgxEnabled] = useState(true)
+  const loadNgx = () =>
+    fetch('/api/invest/ngx')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d) { setNgx(d.stocks || []); setNgxAsOf(Number(d.asOf) || 0); setNgxEnabled(d.enabled !== false) } })
+      .catch(() => undefined)
+
   useEffect(() => { loadHoldings(); loadNaira() }, [])
+  // Lazy-load NGX prices the first time the tab is opened (keeps our free-tier quota tiny).
+  useEffect(() => { if (cat === 'ngx' && ngx.length === 0) loadNgx() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [cat])
 
   const list: Asset[] = cat === 'tokenized_stock' ? STOCKS : cat === 'pre_ipo' ? PREIPO : nairaAssets
   // A tokenized stock is buyable only if the broker verified an on-chain route for it.
@@ -393,11 +448,11 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
         <span className="apy">Buy with your cNGN · {cat === 'naira' ? 'regulated & on-chain' : 'backed 1:1'}</span>
       </div>
 
-      {cat !== 'naira' && !brokerLive && <div className="note">Tokenized stocks &amp; pre-IPO are launching soon. Browse and register interest now.</div>}
+      {(cat === 'tokenized_stock' || cat === 'pre_ipo') && !brokerLive && <div className="note">Tokenized stocks &amp; pre-IPO are launching soon. Browse and register interest now.</div>}
       {cat === 'naira' && !nairaLive && <div className="note">Regulated Naira investments (T-bills, funds, REITs) are launching soon. Browse and register interest now.</div>}
 
-      <div className="terms" style={{ gridTemplateColumns: '1fr 1fr 1fr', marginTop: 14 }}>
-        {([['naira', 'Naira assets'], ['tokenized_stock', 'Stocks'], ['pre_ipo', 'Pre-IPO']] as const).map(([id, label]) => (
+      <div className="terms" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginTop: 14 }}>
+        {([['naira', 'Naira'], ['ngx', 'NGX'], ['tokenized_stock', 'US'], ['pre_ipo', 'Pre-IPO']] as const).map(([id, label]) => (
           <button key={id} className={`term${cat === id ? ' on' : ''}`} onClick={() => setCat(id)}>{label}</button>
         ))}
       </div>
@@ -430,6 +485,10 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
         </>
       )}
 
+      {cat === 'ngx' ? (
+        <NgxList stocks={ngx} asOf={ngxAsOf} enabled={ngxEnabled} />
+      ) : (
+      <>
       <div className="sect"><span className="h">{cat === 'tokenized_stock' ? 'Stocks' : cat === 'pre_ipo' ? 'Pre-IPO companies' : 'Regulated Naira assets'}</span></div>
       <div className="rows">
         {list.map(a => {
@@ -458,6 +517,8 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
       </div>
 
       <p className="p" style={{ margin: '14px 3px 0' }}>Tokenized equities are backed 1:1 and require identity verification (KYC).</p>
+      </>
+      )}
     </div>
   )
 }

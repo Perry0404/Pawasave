@@ -132,12 +132,14 @@ const LOGO_LOCAL: Record<string, string> = {
  *   3. a 2-letter monogram
  * so a row always shows something legible even if an image is missing or a CDN is down.
  */
-export function StockLogo({ symbol, size = 36 }: { symbol: string; size?: number }) {
+export function StockLogo({ symbol, size = 36, logoUrl }: { symbol: string; size?: number; logoUrl?: string | null }) {
   const sym = String(symbol || '').toUpperCase()
   const domain = LOGO_DOMAINS[sym]
   const local = LOGO_LOCAL[sym]
   // Priority list of image URLs to try; onError advances to the next, then to the monogram.
+  // An explicit logoUrl (e.g. the NGX data feed's hosted logo) wins over everything.
   const sources: string[] = [
+    ...(logoUrl ? [logoUrl] : []),
     ...(local ? [`/stocks/${local}`] : []),
     ...(domain ? [`https://logo.clearbit.com/${domain}?size=72`] : []),
   ]

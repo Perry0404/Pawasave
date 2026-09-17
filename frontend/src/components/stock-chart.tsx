@@ -102,37 +102,58 @@ export function Sparkline({
   )
 }
 
-// Ticker → brand domain, for logos. Clearbit serves a clean logo per domain with no API
-// key; anything not mapped (or that 404s) gracefully falls back to the 2-letter monogram.
+// Ticker → brand domain, used ONLY as a fallback logo source (Clearbit, no API key).
+// Clearbit's free logo API is being wound down and NGX coverage is patchy, so a self-hosted
+// file in /public/stocks/<TICKER>.png is preferred (see LOGO_LOCAL) and always wins.
 const LOGO_DOMAINS: Record<string, string> = {
+  // US
   AAPL: 'apple.com', NVDA: 'nvidia.com', GOOGL: 'abc.xyz', META: 'meta.com',
   TSLA: 'tesla.com', MSFT: 'microsoft.com', AMZN: 'amazon.com', SNDK: 'sandisk.com',
   COIN: 'coinbase.com', INTC: 'intel.com', MSTR: 'strategy.com', SPY: 'ssga.com',
   SPCX: 'spacex.com', STRIPE: 'stripe.com', OPENAI: 'openai.com',
   ANTHROPIC: 'anthropic.com', DATABRICKS: 'databricks.com',
+  // Nigerian / GetEquity RWA (map more as NGX names are added)
+  DPRI: 'dangote.com', DANGCEM: 'dangotecement.com', MTNN: 'mtn.ng',
+  AIRTELAFRI: 'airtel.africa', BUAFOODS: 'buafoods.com', BUACEMENT: 'buacement.com',
+  SEPLAT: 'seplatenergy.com', GTCO: 'gtcogroup.com', ZENITHBANK: 'zenithbank.com',
+}
+
+// Ticker → self-hosted file under /public/stocks. This is the reliable source: bundled with the
+// app, no third-party dependency, works offline. To add a company image: drop the file in
+// frontend/public/stocks/ and add ONE line here (or just name the file <TICKER>.png — see below).
+const LOGO_LOCAL: Record<string, string> = {
+  // e.g. DPRI: 'DPRI.png', DANGCEM: 'dangcem.png',
 }
 
 /**
- * Round brand icon for a ticker (uses the shared `.dot` sizing). Renders the company
- * logo when we have a domain for it, falling back to a 2-letter monogram if there's no
- * mapping or the image fails to load — so a row always shows something legible.
+ * Round brand icon for a ticker (uses the shared `.dot` sizing). Tries, in order:
+ *   1. a self-hosted file (LOGO_LOCAL, or /public/stocks/<TICKER>.png by convention)
+ *   2. the Clearbit logo for its mapped domain (fallback)
+ *   3. a 2-letter monogram
+ * so a row always shows something legible even if an image is missing or a CDN is down.
  */
 export function StockLogo({ symbol, size = 36 }: { symbol: string; size?: number }) {
-  const [err, setErr] = useState(false)
   const sym = String(symbol || '').toUpperCase()
   const domain = LOGO_DOMAINS[sym]
-  // Self-sized (doesn't rely on the .dot CSS parent) so it works in list rows AND the
-  // Tailwind market cards alike.
+  const local = LOGO_LOCAL[sym]
+  // Priority list of image URLs to try; onError advances to the next, then to the monogram.
+  const sources: string[] = [
+    ...(local ? [`/stocks/${local}`] : []),
+    ...(domain ? [`https://logo.clearbit.com/${domain}?size=72`] : []),
+  ]
+  const [i, setI] = useState(0)
   const base: CSSProperties = {
     width: size, height: size, borderRadius: Math.round(size * 0.3), flex: 'none',
     display: 'grid', placeItems: 'center', overflow: 'hidden',
   }
-  if (domain && !err) {
+  const src = sources[i]
+  if (src) {
     return (
       <span style={{ ...base, background: '#fff', border: '1px solid var(--line)' }}>
         <img
-          src={`https://logo.clearbit.com/${domain}?size=72`} alt={sym} loading="lazy"
-          style={{ width: '80%', height: '80%', objectFit: 'contain' }} onError={() => setErr(true)}
+          src={src} alt={sym} loading="lazy"
+          style={{ width: '80%', height: '80%', objectFit: 'contain' }}
+          onError={() => setI((n) => n + 1)}
         />
       </span>
     )

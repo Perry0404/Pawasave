@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { checkCronAuth } from '@/lib/cron-auth'
-import { STRAILS_ENABLED, listTransactions, getUserDetails, addExternalWallet, withdrawAsset } from '@/lib/strails'
+import { STRAILS_ENABLED, listTransactions, getUserDetails, addExternalWallet, withdrawAsset, onboardStatus, StrailsError } from '@/lib/strails'
+import { sendBvnFailedEmail } from '@/lib/notify-tx'
 import { custodyAddress, custodyCngnBalance, cngnBalanceOf, supplyToLend } from '@/lib/custody'
 import { withLease, LeaseUnavailableError } from '@/lib/custody-lease'
 import { sendDepositEmail } from '@/lib/notify-tx'
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY,
     { auth: { persistSession: false } },
   )
-  const result = { credited: 0, creditedNgn: 0, onboarded: 0, swept: 0, sweptCngn: 0, supplied: '0', errors: [] as string[] }
+  const result = { credited: 0, creditedNgn: 0, onboarded: 0, onboardFailed: 0, swept: 0, sweptCngn: 0, supplied: '0', errors: [] as string[] }
 
   // ── 1. credit completed deposits the webhook didn't ────────────────────────
   let txs: any[] = []
@@ -113,11 +114,31 @@ export async function GET(request: NextRequest) {
     const dest = await custodyAddress()
     const { data: users } = await admin
       .from('profiles')
-      .select('id, strails_user_id, strails_va_account_number')
+      .select('id, strails_user_id, strails_va_account_number, strails_onboard_status, strails_onboard_request_id')
       .not('strails_user_id', 'is', null)
 
     for (const u of users ?? []) {
       try {
+        // Proactively catch a FAILED BVN onboarding (e.g. "Record not found") so the user is
+        // emailed + flipped to the retry state even if they never reopen the app. Only for a
+        // still-'processing' user with a request id; once marked 'failed' the guard skips it, so
+        // the email is sent exactly once.
+        if (!u.strails_va_account_number && (u as any).strails_onboard_status === 'processing' && (u as any).strails_onboard_request_id) {
+          try {
+            await onboardStatus(String((u as any).strails_onboard_request_id))
+          } catch (se) {
+            const body: any = se instanceof StrailsError ? se.body : null
+            const det = body?.data?.details
+            if (det?.status === 'failed' || /registration failed|bvn/i.test(String((se as any)?.message || ''))) {
+              await admin.from('profiles').update({ strails_onboard_status: 'failed' }).eq('id', u.id)
+              sendBvnFailedEmail(u.id, det?.error?.userMessage || det?.userMessage).catch(() => {})
+              result.onboardFailed++
+              console.info('[strails-reconcile] onboarding failed — user notified', { user: u.id })
+              continue
+            }
+          }
+        }
+
         const details = await getUserDetails(u.strails_user_id as string)
 
         // Back-fill the permanent NUBAN for anyone the `user.onboarded` webhook never

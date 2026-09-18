@@ -32,7 +32,7 @@ const IconCheck = () => <Check size={12} weight="bold" />
 
 export default function ProfileView({ user, profile, wallet, theme, onThemeChange, onRefreshProfile, onStartKyc, onSignOut }: Props) {
   const confirm = useConfirm()
-  const [open, setOpen] = useState<null | 'pin' | 'bank' | 'personal' | 'support' | 'tag'>(null)
+  const [open, setOpen] = useState<null | 'pin' | 'bank' | 'personal' | 'support' | 'tag' | 'sell'>(null)
 
   // PIN change (server-verified via /api/security/pin — current PIN required when set)
   const [pin, setPin] = useState('')
@@ -61,6 +61,58 @@ export default function ProfileView({ user, profile, wallet, theme, onThemeChang
     } finally {
       setTagBusy(false)
     }
+  }
+
+  // Pay with Pawa — seller mode + payment links (§3.6)
+  const [sellName, setSellName] = useState('')
+  const [sellEnabled, setSellEnabled] = useState(false)
+  const [sellMsg, setSellMsg] = useState('')
+  const [sellBusy, setSellBusy] = useState(false)
+  const [linkAmount, setLinkAmount] = useState('')
+  const [linkNote, setLinkNote] = useState('')
+  const [linkEscrow, setLinkEscrow] = useState(true)
+  const [linkUrl, setLinkUrl] = useState('')
+  const [linkCopied, setLinkCopied] = useState(false)
+
+  const openSell = () => {
+    setSellMsg(''); setLinkUrl(''); setLinkCopied(false)
+    fetch('/api/pawa/merchant').then((r) => r.json()).then((d) => {
+      setSellEnabled(Boolean(d?.enabled)); setSellName(d?.merchantName || '')
+    }).catch(() => {})
+    toggle('sell')
+  }
+
+  const saveMerchant = async (enabled: boolean) => {
+    setSellMsg(''); setSellBusy(true)
+    try {
+      const res = await fetch('/api/pawa/merchant', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled, merchantName: sellName || undefined }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) { setSellMsg(d?.error || 'Could not update'); return }
+      setSellEnabled(enabled); setSellMsg('Saved ✓')
+    } catch { setSellMsg('Could not update') } finally { setSellBusy(false) }
+  }
+
+  const createLink = async () => {
+    setSellMsg(''); setLinkUrl(''); setLinkCopied(false)
+    const amt = Number(linkAmount)
+    if (!(amt >= 100)) { setSellMsg('Enter an amount (min ₦100)'); return }
+    setSellBusy(true)
+    try {
+      const res = await fetch('/api/pawa/link', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amountNgn: amt, note: linkNote || undefined, escrow: linkEscrow }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) { setSellMsg(d?.error || 'Could not create link'); return }
+      setLinkUrl(d.url)
+    } catch { setSellMsg('Could not create link') } finally { setSellBusy(false) }
+  }
+
+  const copyLink = async () => {
+    try { await navigator.clipboard.writeText(linkUrl); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000) } catch { /* clipboard blocked */ }
   }
 
   // Support
@@ -122,7 +174,7 @@ export default function ProfileView({ user, profile, wallet, theme, onThemeChang
     }
   }
 
-  const toggle = (k: 'pin' | 'bank' | 'personal' | 'support' | 'tag') => setOpen(open === k ? null : k)
+  const toggle = (k: 'pin' | 'bank' | 'personal' | 'support' | 'tag' | 'sell') => setOpen(open === k ? null : k)
 
   return (
     <div className="b">
@@ -181,6 +233,48 @@ export default function ProfileView({ user, profile, wallet, theme, onThemeChang
             </div>
             {tagMsg && <p className="hint tight" style={{ color: tagMsg.includes('✓') ? 'var(--green)' : 'var(--neg)', marginTop: 6 }}>{tagMsg}</p>}
             <button className="cta" onClick={saveTag} disabled={tagBusy || !tagInput.trim()} style={{ marginTop: 10 }}>{tagBusy ? 'Saving…' : 'Save tag'}</button>
+          </div>
+        )}
+
+        <button className="row" onClick={openSell}>
+          <span className="dot"><CreditCard /></span>
+          <div className="mid"><div className="nm">Sell with Pawa</div><div className="sub">{p?.tag ? `Get paid at @${p.tag}` : 'Set a @tag to sell'}</div></div>
+          <span className="chev"><Chevron /></span>
+        </button>
+        {open === 'sell' && (
+          <div style={{ padding: '4px 15px 15px', borderTop: '1px solid var(--line)' }}>
+            {!p?.tag ? (
+              <p className="p" style={{ margin: '10px 0' }}>Set your PawaSave @tag first — it becomes your Pawa Tag, the handle buyers pay.</p>
+            ) : (
+              <>
+                <p className="p" style={{ margin: '10px 0 6px' }}>Take payments at <b>@{p.tag}</b>. Share a payment link in a DM, or let buyers pay your tag. Money is held in escrow until the buyer confirms — so no more “send proof of payment”.</p>
+
+                <label className="lab">Store name (optional)</label>
+                <input className="field" type="text" maxLength={60} value={sellName} onChange={(e) => setSellName(e.target.value)} placeholder="e.g. Adaeze Fashions" />
+                <button className="cta" onClick={() => saveMerchant(true)} disabled={sellBusy} style={{ marginTop: 10 }}>
+                  {sellBusy ? 'Saving…' : sellEnabled ? 'Update store' : 'Turn on selling'}
+                </button>
+
+                <div style={{ marginTop: 16, borderTop: '1px solid var(--line)', paddingTop: 12 }}>
+                  <label className="lab">Create a payment link</label>
+                  <input className="field" type="number" inputMode="decimal" value={linkAmount} onChange={(e) => setLinkAmount(e.target.value)} placeholder="Amount (₦)" style={{ marginTop: 4 }} />
+                  <input className="field" type="text" maxLength={200} value={linkNote} onChange={(e) => setLinkNote(e.target.value)} placeholder="What's it for? (optional)" style={{ marginTop: 8 }} />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13 }}>
+                    <input type="checkbox" checked={linkEscrow} onChange={(e) => setLinkEscrow(e.target.checked)} />
+                    Hold in escrow until the buyer confirms delivery
+                  </label>
+                  <button className="cta" onClick={createLink} disabled={sellBusy} style={{ marginTop: 10 }}>{sellBusy ? 'Creating…' : 'Create link'}</button>
+
+                  {linkUrl && (
+                    <div style={{ marginTop: 12, background: 'var(--card-2, #f3f6f4)', borderRadius: 12, padding: 12 }}>
+                      <p className="hint tight" style={{ wordBreak: 'break-all', marginBottom: 8 }}>{linkUrl}</p>
+                      <button className="cta" onClick={copyLink}>{linkCopied ? 'Copied ✓' : 'Copy link'}</button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+            {sellMsg && <p className="hint tight" style={{ color: sellMsg.includes('✓') ? 'var(--green)' : 'var(--neg)', marginTop: 8 }}>{sellMsg}</p>}
           </div>
         )}
 

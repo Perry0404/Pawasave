@@ -481,3 +481,118 @@ export async function sendP2pRevertedEmail(userId: string, p: { amountNgn: numbe
     text: `Your ${naira(p.amountNgn)} transfer to ${p.toLabel} was ${expired ? 'returned (unclaimed)' : 'cancelled'} on PawaSave. Ref ${p.reference || ''}.`,
   })
 }
+
+// ── Pay with Pawa (§3.6) receipts ─────────────────────────────────────────────
+
+export interface PawaPaidNotice {
+  amountNgn: number
+  counterparty: string      // the other party's name / @tag
+  escrow: boolean
+  note?: string | null
+  reference?: string | null
+}
+
+/** Seller: a buyer just paid. Into escrow (held until release) or instant, per `escrow`. */
+export async function sendPawaSellerPaidEmail(sellerId: string, p: PawaPaidNotice): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(sellerId)
+  if (!r) return
+  const held = p.escrow
+  const html = shell({
+    heading: held ? 'A buyer paid — held in escrow 🔒' : 'You got paid 💚',
+    sub: held
+      ? `Hi ${r.name}, ${esc(p.counterparty)} paid for an order. The money is held safely in escrow — ship the order, and it's released to you when the buyer confirms (or automatically after the window).`
+      : `Hi ${r.name}, ${esc(p.counterparty)} paid you. It's in your balance now.`,
+    amount: '+' + naira(p.amountNgn),
+    amountColor: '#0A6B42',
+    rows: [
+      ['From', p.counterparty],
+      ['Status', held ? 'In escrow — ship, then it releases' : 'Settled instantly'],
+      ...(p.note ? [['Order', p.note] as [string, string]] : []),
+      ['Reference', p.reference || ''],
+    ],
+  })
+  await sendMail({
+    to: r.email,
+    subject: held ? `${naira(p.amountNgn)} paid into escrow by ${p.counterparty}` : `You received ${naira(p.amountNgn)} on PawaSave`,
+    html,
+    text: `${p.counterparty} paid ${naira(p.amountNgn)}${held ? ' (held in escrow)' : ''} on PawaSave. Ref ${p.reference || ''}.`,
+  })
+}
+
+/** Buyer receipt for a Pay with Pawa order. */
+export async function sendPawaBuyerReceiptEmail(buyerId: string, p: PawaPaidNotice): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(buyerId)
+  if (!r) return
+  const held = p.escrow
+  const html = shell({
+    heading: held ? 'Payment held in escrow 🔒' : 'Payment sent 💸',
+    sub: held
+      ? `Hi ${r.name}, your payment to ${esc(p.counterparty)} is held safely in escrow. When your order arrives, confirm it in the app to release the money to the seller.`
+      : `Hi ${r.name}, your payment to ${esc(p.counterparty)} went through.`,
+    amount: '−' + naira(p.amountNgn),
+    amountColor: '#131A15',
+    rows: [
+      ['To', p.counterparty],
+      ['Status', held ? 'In escrow — confirm on delivery' : 'Paid'],
+      ...(p.note ? [['Order', p.note] as [string, string]] : []),
+      ['Reference', p.reference || ''],
+    ],
+    note: held ? 'Only release the money once you have received what you paid for. If something goes wrong, you can raise a dispute before the auto-release date.' : undefined,
+  })
+  await sendMail({
+    to: r.email,
+    subject: `You paid ${naira(p.amountNgn)} to ${p.counterparty}`,
+    html,
+    text: `You paid ${naira(p.amountNgn)} to ${p.counterparty}${held ? ' (held in escrow)' : ''} on PawaSave. Ref ${p.reference || ''}.`,
+  })
+}
+
+/** Seller: escrow released to you (buyer confirmed or auto-release). */
+export async function sendPawaReleasedEmail(sellerId: string, p: PawaPaidNotice & { auto?: boolean }): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(sellerId)
+  if (!r) return
+  const html = shell({
+    heading: 'Escrow released 🎉',
+    sub: `Hi ${r.name}, ${p.auto ? 'the escrow window elapsed' : `${esc(p.counterparty)} confirmed the order`}, so your payment has been released to your balance.`,
+    amount: '+' + naira(p.amountNgn),
+    amountColor: '#0A6B42',
+    rows: [
+      ['From', p.counterparty],
+      ['Released', p.auto ? 'Automatically (window elapsed)' : 'Buyer confirmed'],
+      ['Reference', p.reference || ''],
+    ],
+  })
+  await sendMail({
+    to: r.email,
+    subject: `${naira(p.amountNgn)} released to you`,
+    html,
+    text: `${naira(p.amountNgn)} released from escrow on PawaSave. Ref ${p.reference || ''}.`,
+  })
+}
+
+/** Buyer: refunded by the seller. */
+export async function sendPawaRefundEmail(buyerId: string, p: PawaPaidNotice): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(buyerId)
+  if (!r) return
+  const html = shell({
+    heading: 'You were refunded ↩️',
+    sub: `Hi ${r.name}, ${esc(p.counterparty)} refunded your payment. It's back in your balance.`,
+    amount: '+' + naira(p.amountNgn),
+    amountColor: '#0A6B42',
+    rows: [
+      ['From', p.counterparty],
+      ...(p.note ? [['Order', p.note] as [string, string]] : []),
+      ['Reference', p.reference || ''],
+    ],
+  })
+  await sendMail({
+    to: r.email,
+    subject: `You were refunded ${naira(p.amountNgn)}`,
+    html,
+    text: `${p.counterparty} refunded you ${naira(p.amountNgn)} on PawaSave. Ref ${p.reference || ''}.`,
+  })
+}

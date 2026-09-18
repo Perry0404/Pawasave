@@ -31,6 +31,14 @@ export const maxDuration = 60
 
 const SWEEP_MIN = Number(process.env.STRAILS_SWEEP_MIN_CNGN) || 500
 
+// How long after a Strails OFF-RAMP to leave that user's Strails Smart Wallet alone. The
+// off-ramp pre-funds the user's OWN wallet (details.evmWallet) with the payout cNGN, then
+// /cngnofframp drains it to the bank — but Strails settles that async, so the cNGN can sit
+// in the wallet for a while. The sweep reads the SAME wallet, so without this quarantine it
+// pulls that in-flight withdrawal back into custody and on into the lend pool: the user is
+// told the withdrawal "went" while the bank is never paid. 90 min covers a slow payout.
+const OFFRAMP_SWEEP_QUARANTINE_MS = (Number(process.env.STRAILS_OFFRAMP_SWEEP_QUARANTINE_MIN) || 90) * 60_000
+
 function num(v: unknown) { const n = Number(v); return Number.isFinite(n) ? n : 0 }
 
 export async function GET(request: NextRequest) {
@@ -168,6 +176,27 @@ export async function GET(request: NextRequest) {
 
         const wallet = details.evmWallet
         if (!wallet) continue
+
+        // QUARANTINE: never sweep a wallet that a Strails off-ramp just pre-funded for its bank
+        // payout. runStrailsOfframp sends the withdrawal's cNGN into THIS same wallet and lets
+        // /cngnofframp drain it async; if we sweep before the payout consumes it, the withdrawal
+        // lands back in the lend pool while the user was already told it "went" and the bank is
+        // never paid. Skip this user's sweep while any Strails withdrawal is pending, or completed
+        // within the quarantine window — the balance is off-ramp float, not a deposit to sweep.
+        const quarantineSince = new Date(Date.now() - OFFRAMP_SWEEP_QUARANTINE_MS).toISOString()
+        const { data: inflight } = await admin
+          .from('transactions')
+          .select('id, status, created_at')
+          .eq('user_id', u.id)
+          .eq('type', 'withdrawal')
+          .eq('metadata->>provider', 'strails')
+          .or(`status.eq.pending,and(status.eq.completed,created_at.gte.${quarantineSince})`)
+          .limit(1)
+        if (inflight && inflight.length) {
+          console.info('[strails-reconcile] skip sweep — recent/in-flight Strails off-ramp may still be draining this wallet', { user: u.id })
+          continue
+        }
+
         // Read the wallet's REAL cNGN balance on Base. getuserdetails returns no
         // balance field at all, so an earlier version read undefined -> 0 and never
         // swept, leaving the ledger credited but unbacked. The chain is the truth.

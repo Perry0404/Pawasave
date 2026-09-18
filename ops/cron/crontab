@@ -46,6 +46,9 @@ CRON_TZ=UTC
 0 */6 * * *   . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/loan-maintenance  "$HC_LOAN_MAINTENANCE"
 # Return unclaimed peer-to-peer transfers to the sender once past their expiry.
 0 */6 * * *   . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/revert-p2p-claims "$HC_REVERT_P2P_CLAIMS"
+# Release Pay-with-Pawa escrow to the seller once past auto_release_at (buyer never confirmed
+# and never disputed). Hourly so sellers aren't left waiting a long time after the window.
+0 * * * *     . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/pawa-auto-release "$HC_PAWA_AUTO_RELEASE"
 
 # ── daily (UTC) ──────────────────────────────────────────────────────────────
 0 0 * * *     . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/accrue-yield     "$HC_ACCRUE_YIELD"

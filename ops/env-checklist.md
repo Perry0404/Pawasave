@@ -53,7 +53,15 @@ NGX market data (`NGNMARKET_API_KEY` — free key from ngnmarket.com; powers the
 tab. Dark until set. Cached server-side ~20 min, so it uses a handful of the free 3k/mo calls/day),
 Strails off-ramp failover (`STRAILS_OFFRAMP_ENABLED=true` — routes withdrawals through Strails when
 Flipeet is down; needs STRAILS_ENABLED + a valid Strails key. DARK until validated with one real
-test withdrawal — see [[strails-ramp]] / ngx doc notes).
+test withdrawal — see [[strails-ramp]] / ngx doc notes),
+Strails off-ramp sweep quarantine (`STRAILS_OFFRAMP_SWEEP_QUARANTINE_MIN`, default 90 — how long the
+reconcile sweep leaves a user's Strails wallet alone after a Strails off-ramp, so an in-flight payout
+isn't swept back into the lend pool. Do NOT set below ~30),
+Pay with Pawa §3.6 (`PAWA_MIN_NGN` default 100, `PAWA_ESCROW_AUTO_RELEASE_DAYS` default 3,
+`PAWA_DAILY_CAP_LITE_NGN`/`PAWA_DAILY_CAP_FULL_NGN` default 3M/10M — all optional; the feature works
+on defaults once migration 086 is applied and the pawa-auto-release cron is installed),
+Circles §3.3 (`CIRCLE_MIN_CONTRIB_NGN` default 100 — optional; templated circles work once migration
+085 is applied).
 
 ## 8. Tokenized stocks (dark — flip on ONLY after Nigeria eligibility + a test fill)
 On-chain reality (verified Aug 2026): the B20 stock tokens have real **Uniswap V3** USDC

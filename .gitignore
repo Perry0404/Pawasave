@@ -18,5 +18,10 @@ private_key*
 public_key*
 .vercel
 .env*.local
+<<<<<<< HEAD
+/backend/
+/pawasave/
+.kiro
+=======
 .kiro
 PAWASAVE_AUDIT_2026-09_AND_PLAN.md

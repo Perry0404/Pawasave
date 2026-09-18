@@ -21,13 +21,13 @@ upload is needed — the dashboard reads straight from chain and anyone can veri
 > **Per-user data is NOT on-chain** (it lives in Supabase). Dune shows *aggregate* platform
 > activity only. That's actually the selling point: a verifiable proof-of-activity board.
 
-## The ONE input you must supply
+## Custody omnibus wallet (already filled in)
 
-Replace `0xYOUR_CUSTODY_WALLET` in every query with the custody omnibus address — the public
-address of `CUSTODY_PRIVATE_KEY` / `FLIPEET_CUSTODY_ADDRESS`. It's just a wallet address
-(safe to publish; the private key is never involved). Get it from:
-`await (new ethers.Wallet(CUSTODY_PRIVATE_KEY)).address`, or on BaseScan find the wallet
-holding the AAPL (`0xb200…eecd1fb`) token balance. Use it **lowercase**.
+Every query below is keyed on `0xabc8c660f6d217812d57c22db10c765fc63f4b5d` — the custody
+omnibus address (`FLIPEET_CUSTODY_ADDRESS`, i.e. the public address of `CUSTODY_PRIVATE_KEY`).
+It's just a wallet address, safe to publish; the private key is never involved. Verify it on
+BaseScan: https://basescan.org/address/0xabc8c660f6d217812d57c22db10c765fc63f4b5d — it's the
+wallet holding the AAPL/DPRI/etc. token balances. Nothing to replace; paste and run.
 
 ## Token registry (Base mainnet 8453)
 
@@ -54,7 +54,7 @@ cNGN (GetEquity payout, 6-dp): `0x46c85152bfe9f96829aa94755d9f915f9b10ef5f`
 ## Query 1 — Stocks: shares bought vs sold, per ticker (totals)
 
 ```sql
-WITH custody AS (SELECT 0xYOUR_CUSTODY_WALLET AS addr),
+WITH custody AS (SELECT 0xabc8c660f6d217812d57c22db10c765fc63f4b5d AS addr),
 tokens (contract_address, symbol, dec) AS (VALUES
   (0xb200000000000000000000c2e324d24d7eecd1fb, 'AAPL', 8),
   (0xb20000000000000000000078ee7ce2fe4908108c, 'NVDA', 8),
@@ -86,7 +86,7 @@ ORDER BY shares_bought DESC;
 ## Query 2 — Stocks: USD volume (values each swap by the USDC moved in the same tx)
 
 ```sql
-WITH custody AS (SELECT 0xYOUR_CUSTODY_WALLET AS addr),
+WITH custody AS (SELECT 0xabc8c660f6d217812d57c22db10c765fc63f4b5d AS addr),
 usdc AS (SELECT 0x833589fcd6edb6e08f4c7c32d4f71b54bda02913 AS addr),
 tokens (contract_address, symbol) AS (VALUES
   (0xb200000000000000000000c2e324d24d7eecd1fb,'AAPL'),(0xb20000000000000000000078ee7ce2fe4908108c,'NVDA'),
@@ -126,7 +126,7 @@ ORDER BY usd_bought DESC;
 ## Query 3 — IPO & T-Bills (GetEquity): units acquired + cNGN spent
 
 ```sql
-WITH custody AS (SELECT 0xYOUR_CUSTODY_WALLET AS addr),
+WITH custody AS (SELECT 0xabc8c660f6d217812d57c22db10c765fc63f4b5d AS addr),
 cngn AS (SELECT 0x46c85152bfe9f96829aa94755d9f915f9b10ef5f AS addr),
 assets (contract_address, symbol, kind) AS (VALUES
   (0xc68b460fe4c916fd17d6ab6b181a409c763002d9, 'DPRI',  'IPO (Dangote Refinery)'),
@@ -160,7 +160,7 @@ ORDER BY total_units DESC;
 ## Query 4 — Daily activity (time-series for a line/area chart)
 
 ```sql
-WITH custody AS (SELECT 0xYOUR_CUSTODY_WALLET AS addr),
+WITH custody AS (SELECT 0xabc8c660f6d217812d57c22db10c765fc63f4b5d AS addr),
 tokens (contract_address, symbol, kind, dec) AS (VALUES
   (0xb200000000000000000000c2e324d24d7eecd1fb,'AAPL','stock',8),
   (0xb20000000000000000000078ee7ce2fe4908108c,'NVDA','stock',8),

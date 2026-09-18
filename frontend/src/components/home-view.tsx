@@ -5,11 +5,12 @@ import { formatNaira, microUsdcToKobo, getRate, timeAgo, cleanDescription } from
 import { initiateDeposit, initiateWithdrawal, getBanks, resolveAccount, type RampResult, type Bank } from '@/lib/flint'
 import { talkback } from '@/lib/voice'
 // Bank aliased: `Bank` is already the bank-list type from @/lib/flint.
-import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard, CircleNotch, ArrowLeft, Copy, Check, CaretDown, FileText, Bank as BankIcon, PaperPlaneTilt, Users } from '@phosphor-icons/react'
+import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard, CircleNotch, ArrowLeft, Copy, Check, CaretDown, FileText, Bank as BankIcon, PaperPlaneTilt, Users, Storefront } from '@phosphor-icons/react'
+import PawaHub from './pawa-hub'
 import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
-type View = 'main' | 'deposit-choose' | 'deposit-naira' | 'deposit' | 'deposit-crypto' | 'deposit-info' | 'withdraw' | 'send-choose' | 'send-friend'
+type View = 'main' | 'deposit-choose' | 'deposit-naira' | 'deposit' | 'deposit-crypto' | 'deposit-info' | 'withdraw' | 'send-choose' | 'send-friend' | 'pawa'
 
 type P2pPendingOut = { id: number; toEmail: string; amountNgn: number; note?: string | null; expiresAt?: string | null }
 type P2pPendingIn = { id: number; fromName: string; amountNgn: number; note?: string | null; expiresAt?: string | null }
@@ -771,6 +772,19 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
         </button>
 
         <button
+          onClick={() => setView('pawa')}
+          className="rows" style={{ marginBottom: 'var(--s-3)', display: 'block', textAlign: 'left', width: '100%', border: '1px solid var(--line)', cursor: 'pointer' }}
+        >
+          <div className="dot">
+            <Storefront size={20} style={{ color: 'var(--green)' }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="nm">To a seller <span style={{ fontSize: 'var(--t-2xs)', fontWeight: 'var(--w-semi)', color: 'var(--green)', background: 'var(--green-soft)', borderRadius: 'var(--r-full)', padding: '1px 8px', marginLeft: 6 }}>Escrow</span></p>
+            <p className="sub">Pay any PawaSave seller by @tag — held in escrow until you confirm delivery.</p>
+          </div>
+        </button>
+
+        <button
           onClick={() => setView('withdraw')}
           className="rows" style={{ display: 'block', textAlign: 'left', width: '100%', border: '1px solid var(--line)', cursor: 'pointer' }}
         >
@@ -784,6 +798,11 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
         </button>
       </div>
     )
+  }
+
+  // --- Pay with Pawa (buyer + orders hub) ---
+  if (view === 'pawa') {
+    return <PawaHub onBack={() => setView('send-choose')} />
   }
 
   // --- Send: to a person by email (P2P) ---

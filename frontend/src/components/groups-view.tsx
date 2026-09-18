@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { formatNaira, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
 import { siteBaseUrl } from '@/lib/site-url'
-import { CircleNotch, Copy, Check, Crown, ArrowUp, Users, CaretRight } from '@phosphor-icons/react'
-import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType } from '@/lib/types'
+import { CircleNotch, Copy, Check, Crown, ArrowUp, Users, CaretRight, Gift, ChatCircleDots, PaperPlaneRight, CheckCircle } from '@phosphor-icons/react'
+import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType, CircleType, CirclePayoutMode } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
 const supabase = createClient()
@@ -16,6 +16,19 @@ interface Props {
 }
 
 const initialsOf = (n?: string) => (n || 'M').split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase()
+
+// §3.3 circle templates. Rotating ajo is the classic esusu; the rest are one-beneficiary
+// collections, plus the chama investment variant.
+const CIRCLE_TEMPLATES: { type: CircleType; label: string; emoji: string; desc: string; mode: CirclePayoutMode }[] = [
+  { type: 'rotating_ajo', label: 'Rotating Ajo', emoji: '🔄', desc: 'Everyone contributes; one member is paid each cycle.', mode: 'rotating' },
+  { type: 'aso_ebi',      label: 'Aso Ebi',      emoji: '👗', desc: 'Collect for event cloth; one person receives the pot.', mode: 'collection' },
+  { type: 'event_dues',   label: 'Event Dues',   emoji: '🎟️', desc: 'Collect dues toward one shared goal.', mode: 'collection' },
+  { type: 'harambee',     label: 'Harambee',     emoji: '🤝', desc: 'Raise a one-off fund for someone.', mode: 'collection' },
+  { type: 'group_buy',    label: 'Group Buy',    emoji: '🛍️', desc: 'Split one purchase; one settlement to the seller.', mode: 'collection' },
+  { type: 'chama',        label: 'Chama',        emoji: '📈', desc: 'Pool contributions toward a shared investment.', mode: 'investment' },
+]
+const templateOf = (t?: CircleType) => CIRCLE_TEMPLATES.find((x) => x.type === t) || CIRCLE_TEMPLATES[0]
+const isRotating = (g: Pick<EsusuGroup, 'payout_mode' | 'circle_type'>) => (g.payout_mode ?? (g.circle_type && g.circle_type !== 'rotating_ajo' ? 'collection' : 'rotating')) === 'rotating'
 
 export default function GroupsView({ user, wallet }: Props) {
   const [groups, setGroups] = useState<(EsusuGroup & { member_count: number })[]>([])
@@ -49,6 +62,19 @@ export default function GroupsView({ user, wallet }: Props) {
   const [formMax, setFormMax] = useState('5')
   const [formFreq, setFormFreq] = useState<EsusuGroup['cycle_period']>('monthly')
   const [formIncentive, setFormIncentive] = useState(0)
+  // §3.3 template create
+  const [formType, setFormType] = useState<CircleType>('rotating_ajo')
+  const [formPurpose, setFormPurpose] = useState('')
+  const [formGoal, setFormGoal] = useState('')
+  const [formBeneficiary, setFormBeneficiary] = useState('')
+
+  // Collection circle actions
+  const [contribAmount, setContribAmount] = useState('')
+
+  // Circle chat (§3.3 chat thread)
+  const [chat, setChat] = useState<{ id: number; body: string; author: string; mine: boolean; createdAt: string }[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatBusy, setChatBusy] = useState(false)
 
   const fetchGroups = useCallback(async () => {
     if (!user) return
@@ -72,21 +98,105 @@ export default function GroupsView({ user, wallet }: Props) {
 
   useEffect(() => { fetchGroups() }, [fetchGroups])
 
-  const createGroup = async () => {
-    if (!user || !formName || !formAmount) return
-    const amountKobo = Math.round(parseFloat(formAmount) * 100)
-    if (amountKobo < 10000) { setFeedback('Min ₦100 contribution'); return }
-    setBusy(true)
-    const { data: group, error } = await supabase.from('esusu_groups').insert({
-      name: formName, owner_id: user.id, contribution_amount_kobo: amountKobo,
-      cycle_period: formFreq, max_members: parseInt(formMax), current_cycle: 0, creator_incentive_percent: formIncentive,
-    }).select().single()
-    if (error) { setFeedback(error.message); setBusy(false); return }
-    await supabase.from('esusu_members').insert({ group_id: group.id, user_id: user.id, payout_position: 1 })
-    setBusy(false)
-    setShowCreate(false)
+  const resetCreateForm = () => {
     setFormName(''); setFormAmount(''); setFormMax('5'); setFormIncentive(0)
-    fetchGroups()
+    setFormType('rotating_ajo'); setFormPurpose(''); setFormGoal(''); setFormBeneficiary('')
+  }
+
+  const createGroup = async () => {
+    if (!user || !formName) return
+    const tpl = templateOf(formType)
+
+    // Rotating ajo keeps its classic direct-insert path (it carries the creator incentive the
+    // collection templates don't). The other templates go through /api/circles/create.
+    if (tpl.mode === 'rotating') {
+      if (!formAmount) { setFeedback('Set the contribution amount'); return }
+      const amountKobo = Math.round(parseFloat(formAmount) * 100)
+      if (amountKobo < 10000) { setFeedback('Min ₦100 contribution'); return }
+      setBusy(true)
+      const { data: group, error } = await supabase.from('esusu_groups').insert({
+        name: formName, owner_id: user.id, contribution_amount_kobo: amountKobo,
+        cycle_period: formFreq, max_members: parseInt(formMax), current_cycle: 0, creator_incentive_percent: formIncentive,
+        circle_type: 'rotating_ajo', payout_mode: 'rotating',
+      }).select().single()
+      if (error) { setFeedback(error.message); setBusy(false); return }
+      await supabase.from('esusu_members').insert({ group_id: group.id, user_id: user.id, payout_position: 1 })
+      setBusy(false); setShowCreate(false); resetCreateForm(); fetchGroups()
+      return
+    }
+
+    setBusy(true)
+    try {
+      const res = await fetch('/api/circles/create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: formName,
+          circleType: formType,
+          contributionAmountNgn: formAmount ? parseFloat(formAmount) : undefined,
+          maxMembers: parseInt(formMax) || 10,
+          goalNgn: formGoal ? parseFloat(formGoal) : undefined,
+          beneficiaryTag: formBeneficiary ? formBeneficiary.replace(/^@+/, '') : undefined,
+          purpose: formPurpose || undefined,
+        }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) { setFeedback(d?.error || 'Could not create circle'); setBusy(false); return }
+      setBusy(false); setShowCreate(false); resetCreateForm(); fetchGroups()
+    } catch { setFeedback('Could not create circle'); setBusy(false) }
+  }
+
+  // ── collection / investment circle actions ─────────────────────────────────
+  const loadChat = useCallback(async (groupId: string) => {
+    try {
+      const res = await fetch(`/api/circles/${groupId}/chat`)
+      const d = await res.json().catch(() => ({}))
+      if (res.ok) setChat(d.messages || [])
+    } catch { /* ignore */ }
+  }, [])
+
+  const sendChat = async () => {
+    if (!selected || !chatInput.trim()) return
+    setChatBusy(true)
+    try {
+      const res = await fetch(`/api/circles/${selected.id}/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: chatInput.trim() }),
+      })
+      if (res.ok) { setChatInput(''); await loadChat(selected.id) }
+    } finally { setChatBusy(false) }
+  }
+
+  const contributeCollection = async () => {
+    if (!user || !selected) return
+    const amt = Number(contribAmount || (selected.contribution_amount_kobo ? selected.contribution_amount_kobo / 100 : 0))
+    if (!(amt >= 100)) { setFeedback('Enter an amount (min ₦100)'); setTimeout(() => setFeedback(''), 3000); return }
+    setBusy(true)
+    try {
+      const res = await fetch('/api/circles/contribute', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId: selected.id, amountNgn: amt }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) { setFeedback(d?.error || 'Could not contribute') } else {
+        setFeedback('Contribution sent!'); setContribAmount(''); openGroup(selected)
+      }
+    } catch { setFeedback('Could not contribute') } finally { setBusy(false); setTimeout(() => setFeedback(''), 3000) }
+  }
+
+  const settleCircle = async () => {
+    if (!selected) return
+    setBusy(true)
+    try {
+      const res = await fetch('/api/circles/settle', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId: selected.id }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) { setFeedback(d?.error || 'Could not settle') } else {
+        setPayoutMsg('🎉 Pot paid out to the beneficiary!'); setTimeout(() => setPayoutMsg(''), 6000)
+        openGroup({ ...selected, status: 'settled' } as EsusuGroup)
+      }
+    } catch { setFeedback('Could not settle') } finally { setBusy(false); setTimeout(() => setFeedback(''), 3000) }
   }
 
   // Owner mints a code for a member who has NO smartphone. They dial *111*CODE#, add
@@ -164,6 +274,7 @@ export default function GroupsView({ user, wallet }: Props) {
     setMembers((m || []).map((x) => ({ ...x, profile_name: nameMap.get(x.user_id) || 'Member' })))
     const { data: c } = await supabase.from('esusu_contributions').select('*').eq('group_id', group.id).order('created_at', { ascending: false }).limit(30)
     setContributions(c || [])
+    setChat([]); loadChat(group.id)
     setTimeout(() => setSwept(true), 60)
   }
 
@@ -212,6 +323,128 @@ export default function GroupsView({ user, wallet }: Props) {
       }
     }
     setBusy(false); setTimeout(() => setFeedback(''), 3000)
+  }
+
+  // ══ CHAT (shared, inline to keep input focus across renders) ══
+  const chatBlock = selected && (
+    <>
+      <div className="sect"><span className="h"><ChatCircleDots style={{ verticalAlign: '-3px', marginRight: 4 }} />Circle chat</span></div>
+      <div className="feedcard" style={{ maxHeight: 260, overflowY: 'auto' }}>
+        {chat.length === 0 ? (
+          <div className="empty" style={{ padding: '18px 0' }}><div className="es">No messages yet — say hello 👋</div></div>
+        ) : chat.map((m) => (
+          <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: m.mine ? 'flex-end' : 'flex-start', padding: '4px 10px' }}>
+            {!m.mine && <span style={{ fontSize: 11, color: 'var(--faint)', fontWeight: 600, margin: '0 4px 2px' }}>{m.author}</span>}
+            <span style={{ maxWidth: '80%', background: m.mine ? 'var(--green)' : 'var(--green-soft)', color: m.mine ? '#fff' : 'var(--ink)', padding: '7px 11px', borderRadius: 14, fontSize: 13, lineHeight: 1.35, wordBreak: 'break-word' }}>{m.body}</span>
+            <span style={{ fontSize: 10, color: 'var(--faint)', margin: '2px 4px 0' }}>{timeAgo(m.createdAt)}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <input className="field" style={{ flex: 1 }} value={chatInput} maxLength={1000} onChange={(e) => setChatInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }} placeholder="Message the circle…" />
+        <button className="cta" style={{ width: 'auto', padding: '0 16px' }} onClick={sendChat} disabled={chatBusy || !chatInput.trim()}><PaperPlaneRight /></button>
+      </div>
+    </>
+  )
+
+  // ══ DETAIL — collection / investment circle ══
+  if (selected && !isRotating(selected)) {
+    const tpl = templateOf(selected.circle_type)
+    const potKobo = selected.pot_balance_kobo || 0
+    const goalKobo = selected.goal_kobo || 0
+    const pct = goalKobo > 0 ? Math.min(100, Math.round((potKobo / goalKobo) * 100)) : null
+    const isMember = members.some((m) => m.user_id === user?.id)
+    const isOwner = selected.owner_id === user?.id
+    const isBeneficiary = selected.beneficiary_id === user?.id
+    const settled = selected.status === 'settled'
+    const beneficiaryName = selected.beneficiary_id
+      ? (isBeneficiary ? 'You' : (members.find((m) => m.user_id === selected.beneficiary_id)?.profile_name || 'the beneficiary'))
+      : null
+    const suggested = selected.contribution_amount_kobo ? formatNaira(selected.contribution_amount_kobo) : null
+
+    return (
+      <div className="b">
+        <div className="ajohead">
+          <div>
+            <div className="t">{tpl.emoji} {selected.name}</div>
+            <div className="s">{tpl.label} · {members.length} member{members.length === 1 ? '' : 's'}{settled ? ' · settled' : ''}</div>
+          </div>
+          <button className="cyclechip" onClick={handleShare} style={{ border: 0, cursor: 'pointer' }}>{linkCopied ? 'Link copied!' : 'Invite'}</button>
+        </div>
+
+        {selected.purpose && <p className="p" style={{ margin: '0 3px 12px' }}>{selected.purpose}</p>}
+
+        {/* Pot + goal progress */}
+        <div className="info">
+          <div className="l">{settled ? 'Paid out' : 'Collected so far'}</div>
+          <div className="num" style={{ fontSize: 'var(--t-2xl)', fontWeight: 'var(--w-bold)', color: 'var(--ink)', margin: '2px 0' }}>{formatNaira(potKobo)}</div>
+          {pct !== null && (
+            <>
+              <div style={{ height: 8, borderRadius: 6, background: 'var(--line)', overflow: 'hidden', margin: '6px 0 4px' }}>
+                <div style={{ height: '100%', width: `${pct}%`, background: 'var(--green)', transition: 'width .8s cubic-bezier(.2,.7,.2,1)' }} />
+              </div>
+              <div style={{ fontSize: 'var(--t-2xs)', color: 'var(--muted)', fontWeight: 'var(--w-medium)' }}>{pct}% of {formatNaira(goalKobo)} goal</div>
+            </>
+          )}
+          {beneficiaryName && <div style={{ fontSize: 'var(--t-2xs)', color: 'var(--muted)', fontWeight: 'var(--w-medium)', marginTop: 6 }}>Goes to <b style={{ color: 'var(--ink)' }}>{beneficiaryName}</b></div>}
+        </div>
+
+        {/* Contribute */}
+        {isMember && !settled && (
+          <div style={{ marginTop: 14 }}>
+            <label className="lab">Your contribution (₦){suggested ? ` · suggested ${suggested}` : ''}</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input className="field" style={{ flex: 1 }} type="number" inputMode="numeric" value={contribAmount}
+                onChange={(e) => setContribAmount(e.target.value)} placeholder={selected.contribution_amount_kobo ? String(selected.contribution_amount_kobo / 100) : '0'} />
+              <button className="cta" style={{ width: 'auto', padding: '0 18px' }} onClick={contributeCollection} disabled={busy}>{busy ? '…' : 'Pay in'}</button>
+            </div>
+          </div>
+        )}
+
+        {/* Settle (owner or beneficiary) */}
+        {(isOwner || isBeneficiary) && !settled && potKobo > 0 && (
+          <button className="cta" style={{ marginTop: 12 }} onClick={settleCircle} disabled={busy}>
+            <CheckCircle style={{ verticalAlign: '-3px', marginRight: 6 }} />{busy ? 'Settling…' : `Pay out ${formatNaira(potKobo)} to ${beneficiaryName || 'beneficiary'}`}
+          </button>
+        )}
+        {settled && <div className="flash ok" style={{ marginTop: 12 }}>This circle has been settled — the pot was paid to {beneficiaryName || 'the beneficiary'}.</div>}
+
+        {feedback && <div className={`flash ${/sent|paid|complete/.test(feedback) ? 'ok' : 'err'}`}>{feedback}</div>}
+        {payoutMsg && <div className="flash ok">{payoutMsg}</div>}
+
+        {/* Members */}
+        <div className="sect"><span className="h">Members ({members.length}{selected.max_members ? `/${selected.max_members}` : ''})</span></div>
+        <div className="rows" style={{ padding: '2px 12px' }}>
+          {members.map((m) => (
+            <div key={m.id} className="memrow" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 4px', borderTop: '1px solid var(--line)' }}>
+              <span className="dot" style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--green-soft)', color: 'var(--green)', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12, flex: 'none' }}>{initialsOf(m.user_id === user?.id ? 'You' : m.profile_name)}</span>
+              <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{m.user_id === user?.id ? 'You' : m.profile_name}{m.user_id === selected.beneficiary_id && <span style={{ color: 'var(--green)', fontWeight: 600 }}> · beneficiary</span>}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Recent contributions */}
+        <div className="sect"><span className="h">Contributions</span></div>
+        {contributions.length === 0 ? (
+          <div className="empty"><div className="es">No contributions yet</div></div>
+        ) : (
+          <div className="feedcard">
+            {contributions.map((c) => (
+              <div key={c.id} className="tx">
+                <span className="ic"><Gift /></span>
+                <div className="mid"><div className="nm">Contribution</div><div className="sub">{timeAgo(c.paid_at)}</div></div>
+                <div className="rt"><div className="amt pos num">{formatNaira(c.amount_kobo)}</div></div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {chatBlock}
+
+        <button className="cta ghost" style={{ marginTop: 16, color: 'var(--muted)' }} onClick={() => setSelected(null)}>← Back to circles</button>
+      </div>
+    )
   }
 
   // ══ DETAIL ══
@@ -392,6 +625,8 @@ export default function GroupsView({ user, wallet }: Props) {
           </div>
         )}
 
+        {chatBlock}
+
         <button className="cta ghost" style={{ marginTop: 16, color: 'var(--muted)' }} onClick={() => setSelected(null)}>← Back to circles</button>
       </div>
     )
@@ -399,34 +634,72 @@ export default function GroupsView({ user, wallet }: Props) {
 
   // ══ CREATE ══
   if (showCreate) {
+    const tpl = templateOf(formType)
+    const rotating = tpl.mode === 'rotating'
     return (
       <div className="b">
-        <button className="back" onClick={() => setShowCreate(false)}>← Back</button>
-        <div className="h2">Create an Ajo circle</div>
-        <p className="p">Save together — each cycle one member receives the pooled pot.</p>
+        <button className="back" onClick={() => { setShowCreate(false); setFeedback('') }}>← Back</button>
+        <div className="h2">Start a circle</div>
+        <p className="p">Pick what kind of group money this is.</p>
 
-        <label className="lab">Circle name</label>
-        <input className="field" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="Market Women Circle" />
-
-        <label className="lab" style={{ marginTop: 14 }}>Contribution amount (₦)</label>
-        <input className="field" type="number" inputMode="numeric" value={formAmount} onChange={(e) => setFormAmount(e.target.value)} placeholder="10000" />
-
-        <label className="lab" style={{ marginTop: 14 }}>Max members</label>
-        <input className="field" type="number" inputMode="numeric" value={formMax} onChange={(e) => setFormMax(e.target.value)} />
-
-        <label className="lab" style={{ marginTop: 14 }}>Frequency</label>
-        <div className="terms">
-          {(['daily', 'weekly', 'monthly'] as const).map((f) => <button key={f} className={`term${formFreq === f ? ' on' : ''}`} onClick={() => setFormFreq(f)} style={{ textTransform: 'capitalize' }}>{f}</button>)}
+        {/* Template picker */}
+        <div className="rows" style={{ marginTop: 6 }}>
+          {CIRCLE_TEMPLATES.map((t) => (
+            <button key={t.type} className="opt" onClick={() => setFormType(t.type)}
+              style={{ outline: formType === t.type ? '2px solid var(--green)' : 'none', borderRadius: 12 }}>
+              <span className="ic" style={{ fontSize: 18 }}>{t.emoji}</span>
+              <div className="mid"><div className="nm">{t.label}</div><div className="sub">{t.desc}</div></div>
+              {formType === t.type && <span className="chev"><Check /></span>}
+            </button>
+          ))}
         </div>
 
-        <label className="lab" style={{ marginTop: 14 }}>Creator incentive (optional, 0–5%)</label>
-        <div className="terms" style={{ gridTemplateColumns: 'repeat(5,1fr)' }}>
-          {[0, 1, 2, 3, 5].map((v) => <button key={v} className={`term${formIncentive === v ? ' on' : ''}`} onClick={() => setFormIncentive(v)}>{v === 0 ? 'None' : `${v}%`}</button>)}
-        </div>
-        {formIncentive > 0 && <p className="p" style={{ margin: '6px 3px 0', color: 'var(--green)' }}>You earn {formIncentive}% of every payout as circle manager.</p>}
+        <label className="lab" style={{ marginTop: 16 }}>Circle name</label>
+        <input className="field" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder={rotating ? 'Market Women Circle' : tpl.label + ' — Ada'} />
+
+        {!rotating && (
+          <>
+            <label className="lab" style={{ marginTop: 14 }}>What&apos;s it for? (optional)</label>
+            <input className="field" value={formPurpose} onChange={(e) => setFormPurpose(e.target.value)} placeholder="Ada's wedding aso ebi" />
+
+            <label className="lab" style={{ marginTop: 14 }}>Suggested contribution (₦, optional)</label>
+            <input className="field" type="number" inputMode="numeric" value={formAmount} onChange={(e) => setFormAmount(e.target.value)} placeholder="5000" />
+
+            <label className="lab" style={{ marginTop: 14 }}>Target / goal (₦, optional)</label>
+            <input className="field" type="number" inputMode="numeric" value={formGoal} onChange={(e) => setFormGoal(e.target.value)} placeholder="200000" />
+
+            <label className="lab" style={{ marginTop: 14 }}>Who receives the pot? (@tag, optional — defaults to you)</label>
+            <input className="field" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={formBeneficiary}
+              onChange={(e) => setFormBeneficiary(e.target.value.replace(/[^a-zA-Z0-9_@]/g, '').toLowerCase())} placeholder="@ada" />
+
+            <label className="lab" style={{ marginTop: 14 }}>Max members</label>
+            <input className="field" type="number" inputMode="numeric" value={formMax} onChange={(e) => setFormMax(e.target.value)} />
+          </>
+        )}
+
+        {rotating && (
+          <>
+            <label className="lab" style={{ marginTop: 14 }}>Contribution amount (₦)</label>
+            <input className="field" type="number" inputMode="numeric" value={formAmount} onChange={(e) => setFormAmount(e.target.value)} placeholder="10000" />
+
+            <label className="lab" style={{ marginTop: 14 }}>Max members</label>
+            <input className="field" type="number" inputMode="numeric" value={formMax} onChange={(e) => setFormMax(e.target.value)} />
+
+            <label className="lab" style={{ marginTop: 14 }}>Frequency</label>
+            <div className="terms">
+              {(['daily', 'weekly', 'monthly'] as const).map((f) => <button key={f} className={`term${formFreq === f ? ' on' : ''}`} onClick={() => setFormFreq(f)} style={{ textTransform: 'capitalize' }}>{f}</button>)}
+            </div>
+
+            <label className="lab" style={{ marginTop: 14 }}>Creator incentive (optional, 0–5%)</label>
+            <div className="terms" style={{ gridTemplateColumns: 'repeat(5,1fr)' }}>
+              {[0, 1, 2, 3, 5].map((v) => <button key={v} className={`term${formIncentive === v ? ' on' : ''}`} onClick={() => setFormIncentive(v)}>{v === 0 ? 'None' : `${v}%`}</button>)}
+            </div>
+            {formIncentive > 0 && <p className="p" style={{ margin: '6px 3px 0', color: 'var(--green)' }}>You earn {formIncentive}% of every payout as circle manager.</p>}
+          </>
+        )}
 
         {feedback && <div className="flash err">{feedback}</div>}
-        <button className="cta" onClick={createGroup} disabled={busy || !formName || !formAmount}>{busy ? 'Creating…' : 'Create circle'}</button>
+        <button className="cta" onClick={createGroup} disabled={busy || !formName || (rotating && !formAmount)}>{busy ? 'Creating…' : `Create ${tpl.label}`}</button>
       </div>
     )
   }
@@ -435,8 +708,8 @@ export default function GroupsView({ user, wallet }: Props) {
   return (
     <div className="b">
       <div className="ajohead">
-        <div><div className="t">Ajo circles</div><div className="s">Save together, get paid in turns · pot earns 27% a year</div></div>
-        <button className="cyclechip" onClick={() => setShowCreate(true)} style={{ border: 0, cursor: 'pointer' }}>+ New</button>
+        <div><div className="t">Circles</div><div className="s">Ajo, aso ebi, dues, group buys &amp; more — group money, together</div></div>
+        <button className="cyclechip" onClick={() => { resetCreateForm(); setFeedback(''); setShowCreate(true) }} style={{ border: 0, cursor: 'pointer' }}>+ New</button>
       </div>
 
       {loading ? (
@@ -449,13 +722,19 @@ export default function GroupsView({ user, wallet }: Props) {
         </div>
       ) : (
         <div className="rows" style={{ marginTop: 8 }}>
-          {groups.map((g) => (
-            <button key={g.id} className="opt" onClick={() => openGroup(g)}>
-              <span className="ic"><Users /></span>
-              <div className="mid"><div className="nm">{g.name}</div><div className="sub">{formatNaira(g.contribution_amount_kobo)} / {g.cycle_period} · {g.member_count}/{g.max_members} members</div></div>
-              <span className="chev"><CaretRight /></span>
-            </button>
-          ))}
+          {groups.map((g) => {
+            const t = templateOf(g.circle_type)
+            const sub = isRotating(g)
+              ? `${formatNaira(g.contribution_amount_kobo)} / ${g.cycle_period} · ${g.member_count}/${g.max_members} members`
+              : `${t.label} · ${formatNaira(g.pot_balance_kobo || 0)} pooled${g.status === 'settled' ? ' · settled' : ''}`
+            return (
+              <button key={g.id} className="opt" onClick={() => openGroup(g)}>
+                <span className="ic" style={{ fontSize: 17 }}>{isRotating(g) ? <Users /> : t.emoji}</span>
+                <div className="mid"><div className="nm">{g.name}</div><div className="sub">{sub}</div></div>
+                <span className="chev"><CaretRight /></span>
+              </button>
+            )
+          })}
         </div>
       )}
 

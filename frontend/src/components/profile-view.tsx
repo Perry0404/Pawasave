@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react'
 // User aliased: `User` here is already the Supabase auth type.
-import { CaretRight, User as UserIcon, CreditCard, Lock, Bell, Question, Check } from '@phosphor-icons/react'
+import { CaretRight, User as UserIcon, CreditCard, Lock, Bell, Question, Check, Storefront } from '@phosphor-icons/react'
+import PawaHub from './pawa-hub'
 import type { User } from '@supabase/supabase-js'
 import type { Profile, Wallet } from '@/lib/types'
 import { useConfirm } from '@/components/confirm-dialog'
@@ -63,7 +64,8 @@ export default function ProfileView({ user, profile, wallet, theme, onThemeChang
     }
   }
 
-  // Pay with Pawa — seller mode + payment links (§3.6)
+  // Pay with Pawa — buyer/orders hub (§3.6) + seller mode + payment links
+  const [showPawa, setShowPawa] = useState(false)
   const [sellName, setSellName] = useState('')
   const [sellEnabled, setSellEnabled] = useState(false)
   const [sellMsg, setSellMsg] = useState('')
@@ -176,6 +178,8 @@ export default function ProfileView({ user, profile, wallet, theme, onThemeChang
 
   const toggle = (k: 'pin' | 'bank' | 'personal' | 'support' | 'tag' | 'sell') => setOpen(open === k ? null : k)
 
+  if (showPawa) return <PawaHub onBack={() => setShowPawa(false)} />
+
   return (
     <div className="b">
       {/* Header */}
@@ -235,6 +239,12 @@ export default function ProfileView({ user, profile, wallet, theme, onThemeChang
             <button className="cta" onClick={saveTag} disabled={tagBusy || !tagInput.trim()} style={{ marginTop: 10 }}>{tagBusy ? 'Saving…' : 'Save tag'}</button>
           </div>
         )}
+
+        <button className="row" onClick={() => setShowPawa(true)}>
+          <span className="dot"><Storefront /></span>
+          <div className="mid"><div className="nm">Pay with Pawa</div><div className="sub">Pay a seller & track your orders</div></div>
+          <span className="chev"><Chevron /></span>
+        </button>
 
         <button className="row" onClick={openSell}>
           <span className="dot"><CreditCard /></span>

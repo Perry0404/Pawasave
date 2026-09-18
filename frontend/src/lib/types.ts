@@ -74,6 +74,9 @@ export interface SplitRule {
   created_at: string
 }
 
+export type CircleType = 'rotating_ajo' | 'aso_ebi' | 'event_dues' | 'harambee' | 'group_buy' | 'chama'
+export type CirclePayoutMode = 'rotating' | 'collection' | 'investment'
+
 export interface EsusuGroup {
   id: string
   name: string
@@ -85,8 +88,16 @@ export interface EsusuGroup {
   pot_balance_kobo: number
   emergency_pot_kobo: number
   creator_incentive_percent: number
-  status: 'forming' | 'active' | 'completed'
+  status: 'forming' | 'active' | 'completed' | 'settled'
   created_at: string
+  // §3.3 Circles templates (085). Older rows default to rotating_ajo / rotating.
+  circle_type?: CircleType
+  payout_mode?: CirclePayoutMode
+  goal_kobo?: number | null
+  deadline?: string | null
+  beneficiary_id?: string | null
+  purpose?: string | null
+  settled_at?: string | null
 }
 
 export interface EsusuMember {

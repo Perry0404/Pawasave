@@ -20,3 +20,4 @@ public_key*
 .env*.local
 /backend/
 /pawasave/
+.kiro

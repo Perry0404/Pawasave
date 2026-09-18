@@ -1,0 +1,1008 @@
+{
+  "accrue_daily_yield": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/cron/accrue-yield/route.ts",
+        "line": 29,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "accrue_loan_interest": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/cron/loan-maintenance/route.ts",
+        "line": 50,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "admin_fee_summary": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/admin/dashboard/route.ts",
+        "line": 37,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "admin_login_locked": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/admin/verify/route.ts",
+        "line": 38,
+        "var": "db",
+        "kind": "service"
+      }
+    ]
+  },
+  "admin_login_record": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/admin/verify/route.ts",
+        "line": 57,
+        "var": "db",
+        "kind": "service"
+      }
+    ]
+  },
+  "admin_recent_fees": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/admin/dashboard/route.ts",
+        "line": 40,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "admin_tx_volume": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/admin/dashboard/route.ts",
+        "line": 39,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "admin_user_stats": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/admin/dashboard/route.ts",
+        "line": 38,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "allocate_cngn_pool": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/hooks/use-data.ts",
+        "line": 209,
+        "var": "supabase",
+        "kind": "browser"
+      },
+      {
+        "file": "frontend/src/app/api/xend/route.ts",
+        "line": 125,
+        "var": "supabase",
+        "kind": "session"
+      },
+      {
+        "file": "frontend/src/app/api/xend-webhook/route.ts",
+        "line": 86,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "auto_contribute_goals": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/cron/auto-contribute/route.ts",
+        "line": 92,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "break_savings_goal": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/savings/forfeit-withdraw/route.ts",
+        "line": 138,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "bump_equity_buy_attempt": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/cron/equity-buy-reconcile/route.ts",
+        "line": 63,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "bump_equity_sell_attempt": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/cron/equity-sell-reconcile/route.ts",
+        "line": 70,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "cast_emergency_vote": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/components/groups-view.tsx",
+        "line": 147,
+        "var": "supabase",
+        "kind": "browser"
+      }
+    ]
+  },
+  "claim_ajo_invite": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/ussd/route.ts",
+        "line": 102,
+        "var": "db",
+        "kind": "service"
+      }
+    ]
+  },
+  "complete_savings_goal": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/hooks/use-data.ts",
+        "line": 502,
+        "var": "supabase",
+        "kind": "browser"
+      }
+    ]
+  },
+  "contribute_to_goal": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/hooks/use-data.ts",
+        "line": 470,
+        "var": "supabase",
+        "kind": "browser"
+      }
+    ]
+  },
+  "create_ajo_invite": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/components/groups-view.tsx",
+        "line": 98,
+        "var": "supabase",
+        "kind": "browser"
+      }
+    ]
+  },
+  "create_loan": {
+    "verdict": "USER SESSION, must stay granted to authenticated",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/loans/route.ts",
+        "line": 131,
+        "var": "supabase",
+        "kind": "session"
+      }
+    ]
+  },
+  "credit_crypto_deposit": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/lib/deposit-scan.ts",
+        "line": 81,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "credit_strails_deposit": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/strails-webhook/route.ts",
+        "line": 181,
+        "var": "admin",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/cron/strails-reconcile/route.ts",
+        "line": 95,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "credit_wallet": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/esusu/yield/route.ts",
+        "line": 121,
+        "var": "supabase",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/flipeet-webhook/route.ts",
+        "line": 195,
+        "var": "supabase",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/flipeet-webhook/route.ts",
+        "line": 225,
+        "var": "supabase",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/ramp/route.ts",
+        "line": 625,
+        "var": "moneyDb",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/ramp/route.ts",
+        "line": 734,
+        "var": "moneyDb",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/ramp/route.ts",
+        "line": 811,
+        "var": "moneyDb",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/ramp/route.ts",
+        "line": 859,
+        "var": "moneyDb",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/ramp/route.ts",
+        "line": 872,
+        "var": "moneyDb",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/webhook/route.ts",
+        "line": 121,
+        "var": "supabase",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/webhook/route.ts",
+        "line": 165,
+        "var": "supabase",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/cron/reconcile-withdrawals/route.ts",
+        "line": 141,
+        "var": "supabase",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/cron/reconcile-withdrawals/route.ts",
+        "line": 145,
+        "var": "supabase",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/cron/reconcile-withdrawals/route.ts",
+        "line": 159,
+        "var": "supabase",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/xend-webhook/route.ts",
+        "line": 80,
+        "var": "supabase",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/xend-webhook/route.ts",
+        "line": 132,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "debit_wallet": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/ramp/route.ts",
+        "line": 247,
+        "var": "moneyDb",
+        "kind": "service"
+      }
+    ]
+  },
+  "distribute_vault_yield": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/cron/harvest-vault/route.ts",
+        "line": 96,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "esusu_autodebit": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/cron/auto-contribute/route.ts",
+        "line": 113,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "esusu_claim_mm_position": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/esusu/yield/route.ts",
+        "line": 102,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "esusu_contribute": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/components/groups-view.tsx",
+        "line": 200,
+        "var": "supabase",
+        "kind": "browser"
+      },
+      {
+        "file": "frontend/src/app/api/ussd/route.ts",
+        "line": 164,
+        "var": "db",
+        "kind": "service"
+      }
+    ]
+  },
+  "esusu_contribute_crypto": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/components/groups-view.tsx",
+        "line": 179,
+        "var": "supabase",
+        "kind": "browser"
+      }
+    ]
+  },
+  "esusu_record_mm_deposit": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/esusu/yield/route.ts",
+        "line": 85,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "finalize_kyc": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/kyc/webhook/route.ts",
+        "line": 63,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "get_apy_settings": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/hooks/use-data.ts",
+        "line": 377,
+        "var": "supabase",
+        "kind": "browser"
+      }
+    ]
+  },
+  "get_pending_lend_supplies": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/cron/auto-contribute/route.ts",
+        "line": 32,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "get_proxy_member_for_user": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/proxy/route.ts",
+        "line": 54,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "get_proxy_transfers": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/proxy/route.ts",
+        "line": 66,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "get_user_for_proxy_member": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/flipeet-webhook/route.ts",
+        "line": 135,
+        "var": "supabase",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/xend-webhook/route.ts",
+        "line": 93,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "join_esusu_group": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/app/join/[groupId]/page.tsx",
+        "line": 64,
+        "var": "supabase",
+        "kind": "browser"
+      }
+    ]
+  },
+  "lease_status": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/lib/custody-lease.ts",
+        "line": 280,
+        "var": "c",
+        "kind": "service"
+      }
+    ]
+  },
+  "liquidate_overdue_loans": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/cron/loan-maintenance/route.ts",
+        "line": 57,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "loan_borrow_limit": {
+    "verdict": "USER SESSION, must stay granted to authenticated",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/loans/route.ts",
+        "line": 82,
+        "var": "supabase",
+        "kind": "session"
+      }
+    ]
+  },
+  "lock_savings": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/hooks/use-data.ts",
+        "line": 323,
+        "var": "supabase",
+        "kind": "browser"
+      }
+    ]
+  },
+  "mark_equity_buy_settling": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/invest/equity/route.ts",
+        "line": 172,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "mark_equity_sell_settling": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/invest/equity/sell/route.ts",
+        "line": 137,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "mark_lend_supply_done": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/cron/auto-contribute/route.ts",
+        "line": 52,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "mark_lend_supply_failed": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/cron/auto-contribute/route.ts",
+        "line": 62,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "pin_lock_status": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/lib/pin-lockout.ts",
+        "line": 35,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "place_equity_order": {
+    "verdict": "USER SESSION, must stay granted to authenticated",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/invest/equity/route.ts",
+        "line": 133,
+        "var": "supabase",
+        "kind": "session"
+      }
+    ]
+  },
+  "place_equity_sell": {
+    "verdict": "USER SESSION, must stay granted to authenticated",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/invest/equity/sell/route.ts",
+        "line": 97,
+        "var": "supabase",
+        "kind": "session"
+      }
+    ]
+  },
+  "place_getequity_order": {
+    "verdict": "USER SESSION, must stay granted to authenticated",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/invest/getequity/route.ts",
+        "line": 147,
+        "var": "supabase",
+        "kind": "session"
+      }
+    ]
+  },
+  "process_esusu_payout": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/components/groups-view.tsx",
+        "line": 206,
+        "var": "supabase",
+        "kind": "browser"
+      }
+    ]
+  },
+  "process_proxy_deposit": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/flipeet-webhook/route.ts",
+        "line": 151,
+        "var": "supabase",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/xend-webhook/route.ts",
+        "line": 103,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "proxy_transfer": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/proxy/route.ts",
+        "line": 116,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "reconcile_stale_transactions": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/cron/reconcile-withdrawals/route.ts",
+        "line": 177,
+        "var": "supabase",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/cron/sweep-deposits/route.ts",
+        "line": 21,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "record_custody_divergence": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/invest/equity/route.ts",
+        "line": 188,
+        "var": "admin",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/invest/equity/sell/route.ts",
+        "line": 146,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "record_goal_forfeiture": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/savings/forfeit-withdraw/route.ts",
+        "line": 127,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "record_lock_forfeiture": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/savings/forfeit-withdraw/route.ts",
+        "line": 86,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "record_pin_attempt": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/lib/pin-lockout.ts",
+        "line": 47,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "record_platform_fee": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/ramp/route.ts",
+        "line": 271,
+        "var": "moneyDb",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/webhook/route.ts",
+        "line": 142,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "refresh_lease": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/lib/custody-lease.ts",
+        "line": 132,
+        "var": "c",
+        "kind": "service"
+      }
+    ]
+  },
+  "register_proxy_member": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/proxy/route.ts",
+        "line": 93,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "release_lease": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/lib/custody-lease.ts",
+        "line": 150,
+        "var": "c",
+        "kind": "service"
+      }
+    ]
+  },
+  "repay_loan": {
+    "verdict": "USER SESSION, must stay granted to authenticated",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/loans/route.ts",
+        "line": 148,
+        "var": "supabase",
+        "kind": "session"
+      }
+    ]
+  },
+  "request_emergency_payout": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/components/groups-view.tsx",
+        "line": 138,
+        "var": "supabase",
+        "kind": "browser"
+      }
+    ]
+  },
+  "save_to_vault": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/hooks/use-data.ts",
+        "line": 201,
+        "var": "supabase",
+        "kind": "browser"
+      }
+    ]
+  },
+  "set_deposit_address": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/lib/deposit-scan.ts",
+        "line": 68,
+        "var": "supabase",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/wallet/deposit-address/route.ts",
+        "line": 51,
+        "var": "serviceDb",
+        "kind": "service"
+      }
+    ]
+  },
+  "set_goal_auto_contribute": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/hooks/use-data.ts",
+        "line": 533,
+        "var": "supabase",
+        "kind": "browser"
+      }
+    ]
+  },
+  "set_strails_onboarding": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/ussd/route.ts",
+        "line": 96,
+        "var": "db",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/strails/onboard/route.ts",
+        "line": 77,
+        "var": "admin",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/strails/onboard/route.ts",
+        "line": 90,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "set_yield_state": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/cron/update-yield-apy/route.ts",
+        "line": 65,
+        "var": "supabase",
+        "kind": "service"
+      }
+    ]
+  },
+  "settle_equity_order": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/invest/equity/route.ts",
+        "line": 154,
+        "var": "admin",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/invest/equity/route.ts",
+        "line": 181,
+        "var": "admin",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/cron/equity-buy-reconcile/route.ts",
+        "line": 91,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "settle_equity_sell": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/invest/equity/sell/route.ts",
+        "line": 115,
+        "var": "admin",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/invest/equity/sell/route.ts",
+        "line": 165,
+        "var": "admin",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/cron/equity-sell-reconcile/route.ts",
+        "line": 99,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "settle_getequity_order": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/invest/getequity/route.ts",
+        "line": 167,
+        "var": "admin",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/invest/getequity/route.ts",
+        "line": 177,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "try_acquire_lease": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/lib/custody-lease.ts",
+        "line": 213,
+        "var": "c",
+        "kind": "service"
+      }
+    ]
+  },
+  "withdraw_cngn_pool": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/ramp/route.ts",
+        "line": 237,
+        "var": "moneyDb",
+        "kind": "service"
+      },
+      {
+        "file": "frontend/src/app/api/xend/route.ts",
+        "line": 172,
+        "var": "serviceDb",
+        "kind": "service"
+      }
+    ]
+  },
+  "withdraw_lock": {
+    "verdict": "service only, safe to revoke",
+    "sites": [
+      {
+        "file": "frontend/src/app/api/savings/forfeit-withdraw/route.ts",
+        "line": 100,
+        "var": "admin",
+        "kind": "service"
+      }
+    ]
+  },
+  "withdraw_vault_atomic": {
+    "verdict": "BROWSER, must be allow-listed or moved server-side",
+    "sites": [
+      {
+        "file": "frontend/src/hooks/use-data.ts",
+        "line": 247,
+        "var": "supabase",
+        "kind": "browser"
+      }
+    ]
+  }
+}

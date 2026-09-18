@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PawaSave — Product Tour</title>
+<style>
+  :root{
+    --bg:#050505; --appbg:#0a0b0a; --card:#12140f; --card2:#161a14;
+    --line:#20261f; --ink:#f3f7f4; --mut:#8a9a90; --grn:#12b981; --grn2:#0f9c6c;
+    --grnd:#0b6a49; --mint:#6ee7b7; --amber:#c99a3a; --amberbg:#221c0d;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:#020403;color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    gap:clamp(24px,5vw,84px);padding:4vh 5vw;
+    background:radial-gradient(120% 130% at 78% 12%,#0a3a2a 0%,#041a13 48%,#020403 100%)}
+  @media(max-width:860px){#stage{flex-direction:column;gap:20px;padding:3vh 5vw}}
+
+  /* caption side */
+  .cap{max-width:min(44vw,560px)}
+  @media(max-width:860px){.cap{max-width:none;text-align:center}}
+  .kick{font-size:clamp(12px,1.4vw,16px);font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--mint)}
+  .ctitle{font-size:clamp(30px,4.6vw,66px);font-weight:800;letter-spacing:-.03em;line-height:1.04;margin-top:14px}
+  .csub{font-size:clamp(15px,1.9vw,26px);color:var(--mut);margin-top:18px;line-height:1.45;max-width:24ch}
+  @media(max-width:860px){.csub{margin-left:auto;margin-right:auto}}
+  .cap .k,.cap .t,.cap .s{opacity:0;transform:translateY(14px);transition:opacity .55s ease,transform .55s ease}
+  .cap.show .k{opacity:1;transform:none;transition-delay:.05s}
+  .cap.show .t{opacity:1;transform:none;transition-delay:.13s}
+  .cap.show .s{opacity:1;transform:none;transition-delay:.22s}
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+  .logo{width:clamp(40px,4vw,56px);aspect-ratio:1;border-radius:26%;background:linear-gradient(150deg,var(--grn),var(--grnd));
+    display:grid;place-items:center;font-weight:800;color:#04140d;font-size:clamp(22px,2.4vw,32px)}
+  .brand b{font-size:clamp(18px,2vw,26px);font-weight:800}
+
+  /* device */
+  .device{height:clamp(470px,76vh,720px);aspect-ratio:320/676;background:#000;border:2px solid #1c241f;
+    border-radius:40px;padding:11px;box-shadow:0 40px 100px rgba(0,0,0,.6),0 0 0 1px rgba(110,231,183,.06);position:relative;flex:0 0 auto}
+  .device::before{content:"";position:absolute;top:16px;left:50%;transform:translateX(-50%);width:34%;height:7px;border-radius:6px;background:#141a15;z-index:9}
+  .vp{position:relative;height:100%;width:100%;border-radius:30px;overflow:hidden;background:var(--appbg)}
+  .screen{position:absolute;inset:0;display:flex;flex-direction:column;padding:34px 16px 66px;overflow:hidden;
+    opacity:0;transform:translateX(22px) scale(.99);transition:opacity .55s ease,transform .55s ease;pointer-events:none}
+  .screen.on{opacity:1;transform:none}
+  .screen.on .g{animation:g .55s ease both}
+  .screen.on .g:nth-child(2){animation-delay:.06s}.screen.on .g:nth-child(3){animation-delay:.12s}
+  .screen.on .g:nth-child(4){animation-delay:.18s}.screen.on .g:nth-child(5){animation-delay:.24s}
+  @keyframes g{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  .screen::-webkit-scrollbar{display:none}
+
+  /* app bits */
+  .hi{font-size:11px;color:var(--mut)} .who{font-size:16px;font-weight:800;margin-top:1px}
+  .av{width:32px;height:32px;border-radius:50%;background:#123a2b;color:var(--mint);display:grid;place-items:center;font-weight:800;font-size:13px}
+  .toprow{display:flex;justify-content:space-between;align-items:flex-start}
+  .h1{font-size:20px;font-weight:800}.psub{font-size:12px;color:var(--mut);margin-top:3px}
+  .back{font-size:13px;color:#7fd7b6;margin-bottom:12px}
+  .grn{background:linear-gradient(150deg,#0f5c40,#0c8a5c);border-radius:20px;padding:16px;color:#eafff5}
+  .grn .lbl{font-size:11px;opacity:.85;font-weight:600}
+  .bignum{font-size:34px;font-weight:800;letter-spacing:-.02em;margin-top:2px}
+  .pillw{display:inline-block;background:#ffffff;color:#0b6a49;font-weight:800;font-size:10px;padding:3px 9px;border-radius:999px}
+  .pillg{display:inline-block;background:rgba(255,255,255,.16);color:#eafff5;font-weight:700;font-size:11px;padding:5px 11px;border-radius:999px;margin-top:12px}
+  .subrow{display:flex;gap:26px;margin-top:12px}
+  .subrow .l{font-size:10px;opacity:.8}.subrow .v{font-size:14px;font-weight:800;margin-top:1px}
+  .acts{display:flex;gap:10px;margin-top:14px}
+  .btn{flex:1;border-radius:13px;padding:11px;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;gap:7px}
+  .btn.dk{background:rgba(255,255,255,.14);color:#eafff5}.btn.wh{background:#fff;color:#0b6a49}
+  .btn.full{width:100%;background:var(--grn);color:#04140d;padding:13px;border-radius:14px;font-size:14px;margin-top:6px}
+  .sect{display:flex;justify-content:space-between;align-items:center;margin:16px 2px 8px}
+  .sect .h{font-size:13px;font-weight:800}.sect .a{font-size:12px;color:#5fd0a6;font-weight:700}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:13px;display:flex;align-items:center;gap:12px;margin-bottom:9px}
+  .ic{width:38px;height:38px;border-radius:11px;background:#123024;color:var(--mint);display:grid;place-items:center;flex:0 0 auto}
+  .ic svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:2}
+  .card .nm{font-size:14px;font-weight:800}.card .ds{font-size:11px;color:var(--mut);margin-top:2px;line-height:1.3}
+  .card .rt{margin-left:auto;text-align:right;font-weight:800;font-size:13px}
+  .chev{margin-left:auto;color:#4a5a51}
+  .amber{background:var(--amberbg);border:1px solid #4a3a13;border-radius:13px;padding:11px 13px;font-size:11px;color:#d8b465;line-height:1.4;margin:4px 0 12px}
+  .field{background:#0e120e;border:1px solid #2a5f47;border-radius:13px;padding:13px;font-size:18px;font-weight:700;color:#5c6b62}
+  .flabel{font-size:11px;color:var(--mut);margin:2px 0 6px}
+  .avail{font-size:11px;color:var(--mut);margin-top:7px}
+  .chips{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:8px}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center;font-size:13px;font-weight:800;color:#c7d3cc}
+  .chip.on{background:var(--grn);color:#04140d;border-color:var(--grn)}
+  .tabs{display:flex;gap:8px;margin:12px 0}
+  .tab{flex:1;text-align:center;padding:11px;border-radius:12px;font-size:12px;font-weight:800;background:var(--card);color:#9fb0a7;border:1px solid var(--line)}
+  .tab.on{background:var(--grn);color:#04140d;border-color:var(--grn)}
+  .note{font-size:11px;color:var(--mut);line-height:1.45;margin-top:6px}
+  .ajocirc{width:150px;height:150px;border-radius:50%;border:2px solid #1e2a24;position:relative;margin:8px auto 4px}
+  .ajocirc .me{position:absolute;top:-16px;left:50%;transform:translateX(-50%);width:44px;height:44px;border-radius:50%;
+    background:var(--grn);color:#04140d;display:grid;place-items:center;font-weight:800;border:3px solid #0a1f17}
+  .ajocirc .dot{position:absolute;width:34px;height:34px;border-radius:50%;background:#0f1a14;border:1px solid #223026}
+  .ajocirc .d2{right:-14px;top:50%;transform:translateY(-50%)}.ajocirc .d3{left:-14px;top:50%;transform:translateY(-50%)}
+  .ajocirc .d4{bottom:-14px;left:50%;transform:translateX(-50%)}
+  .ajocirc .mid{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .ajocirc .mid .l{font-size:10px;color:var(--mut)}.ajocirc .mid .v{font-size:26px;font-weight:800}.ajocirc .mid .r{font-size:11px;color:#5fd0a6;font-weight:700}
+  .act{display:flex;align-items:center;gap:11px;padding:10px 0;border-top:1px solid var(--line)}
+  .act .sq{width:34px;height:34px;border-radius:10px;background:#141a15;color:#8a9a90;display:grid;place-items:center}
+  .act .m .t{font-size:13px;font-weight:700}.act .m .d{font-size:10px;color:var(--mut)}
+  .act .amt{margin-left:auto;font-weight:800;font-size:13px;color:#e88}
+
+  /* nav */
+  .nav{position:absolute;left:0;right:0;bottom:0;height:58px;background:#070807;border-top:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-around;padding-bottom:4px;z-index:8}
+  .nav a{display:flex;flex-direction:column;align-items:center;gap:3px;color:#5a6b61;font-size:9px;font-weight:600}
+  .nav a svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:2}
+  .nav a.active{color:var(--grn)}
+
+  /* controls */
+  #bar{position:fixed;left:0;bottom:0;height:4px;width:0;background:linear-gradient(90deg,var(--grn),var(--mint));z-index:20}
+  .replay{position:fixed;bottom:16px;right:18px;z-index:21;display:none;background:rgba(4,20,13,.7);border:1px solid #14805c;
+    color:var(--mint);font-weight:700;font-size:13px;padding:9px 15px;border-radius:999px;cursor:pointer;backdrop-filter:blur(6px)}
+  #overlay{position:fixed;inset:0;z-index:30;display:grid;place-items:center;text-align:center;cursor:pointer;
+    background:rgba(3,10,7,.9);backdrop-filter:blur(4px);padding:6vw}
+  #overlay .play{width:92px;height:92px;border-radius:50%;background:var(--grn);display:grid;place-items:center;margin:0 auto 20px;box-shadow:0 20px 60px rgba(18,185,129,.4)}
+  #overlay .play svg{width:38px;height:38px;fill:#04140d;margin-left:5px}
+  #overlay h3{font-size:clamp(19px,3vw,30px);font-weight:800}
+  #overlay p{color:var(--mut);margin-top:11px;font-size:clamp(13px,1.7vw,17px);max-width:36ch;margin-inline:auto;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="stage">
+  <!-- caption -->
+  <div class="cap" id="cap">
+    <div class="brand"><span class="logo">B</span><b>PawaSave</b></div>
+    <div class="k kick">01 · Your account</div>
+    <div class="t ctitle">One balance, in cNGN</div>
+    <div class="s csub">Save, spend and grow — all from a single Naira balance, on Base.</div>
+  </div>
+
+  <!-- device -->
+  <div class="device"><div class="vp">
+
+    <!-- HOME -->
+    <div class="screen" data-tab="home">
+      <div class="toprow g"><div><div class="hi">Good afternoon</div><div class="who">supportatcasewinai</div></div><div class="av">S</div></div>
+      <div class="grn g" style="margin-top:14px">
+        <div style="display:flex;justify-content:space-between"><span class="lbl">Total balance</span><span class="pillw">cNGN</span></div>
+        <div class="bignum">₦2,678</div>
+        <div class="subrow"><div><div class="l">Available</div><div class="v">₦1,990</div></div><div><div class="l">Savings</div><div class="v">₦688</div></div></div>
+        <div class="acts"><div class="btn dk">↗ Send</div><div class="btn wh">↙ Receive</div></div>
+      </div>
+      <div class="sect g"><span class="h">Activity</span><span class="a">Statement</span></div>
+      <div class="g">
+        <div class="act"><span class="sq">↗</span><div class="m"><div class="t">Sent via Flipeet</div><div class="d">Debit · 3 Aug</div></div><span class="amt">−₦3,054</span></div>
+        <div class="act"><span class="sq">↗</span><div class="m"><div class="t">Sent to bank</div><div class="d">Debit · 3 Aug</div></div><span class="amt">−₦4,072</span></div>
+      </div>
+    </div>
+
+    <!-- RECEIVE -->
+    <div class="screen" data-tab="home">
+      <div class="back g">← Back</div>
+      <div class="h1 g">Receive Money</div>
+      <div class="psub g" style="margin-bottom:14px">Choose how to add money. Both are credited as cNGN (1 cNGN = ₦1).</div>
+      <div class="card g"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/></svg></span><div><div class="nm">Naira bank transfer</div><div class="ds">Get your own account number. Transfer from your bank anytime.</div></div></div>
+      <div class="card g"><span class="ic"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="13" rx="2"/><circle cx="17" cy="12.5" r="1.6"/></svg></span><div><div class="nm">Crypto deposit (cNGN)</div><div class="ds">Send cNGN on Base to your address. Credited 1:1 automatically.</div></div></div>
+    </div>
+
+    <!-- SAVE -->
+    <div class="screen" data-tab="save">
+      <div class="h1 g">Save</div><div class="psub g">Grow steadily, or lock in for a higher rate.</div>
+      <div class="grn g" style="margin-top:14px"><span class="lbl">Savings pool</span><div class="bignum">₦3</div><span class="pillg">Up to 40% a year · paid daily</span></div>
+      <div class="sect g"><span class="h">Fixed deposits</span><span class="a">New</span></div>
+      <div class="card g"><span class="ic">+</span><div><div class="nm">Start a fixed deposit</div><div class="ds">Lock 30–365 days · up to 40%</div></div><span class="chev">›</span></div>
+      <div class="sect g"><span class="h">Goals</span><span class="a">Add</span></div>
+      <div class="card g"><span class="ic">+</span><div><div class="nm">Create your first goal</div><div class="ds">Save toward a target, earn as you go</div></div><span class="chev">›</span></div>
+    </div>
+
+    <!-- FIXED DEPOSIT -->
+    <div class="screen" data-tab="save">
+      <div class="back g">← Back</div>
+      <div class="h1 g">Start a fixed deposit</div>
+      <div class="psub g" style="margin-bottom:14px">Lock cNGN for a set term and earn a higher, guaranteed rate.</div>
+      <div class="flabel g">Amount to lock (₦)</div>
+      <div class="field g">0</div>
+      <div class="avail g">Available in savings: ₦3</div>
+      <div class="flabel g" style="margin-top:14px">Term</div>
+      <div class="chips g">
+        <div class="chip">30 days · 15%</div><div class="chip on">90 days · 22%</div>
+        <div class="chip">6 months · 30%</div><div class="chip">1 year · 40%</div>
+      </div>
+      <div class="btn full g">Lock</div>
+    </div>
+
+    <!-- AJO CIRCLES -->
+    <div class="screen" data-tab="ajo">
+      <div class="toprow g"><div><div class="h1">Ajo circles</div><div class="psub">Save together, get paid in turns · pot earns 27% a year</div></div><span class="pillg" style="background:#123024;color:#5fd0a6">+ New</span></div>
+      <div class="card g" style="margin-top:14px"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg></span><div><div class="nm">meristem</div><div class="ds">₦1,000 / daily · 1/4 members</div></div><span class="chev">›</span></div>
+      <div class="card g"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg></span><div><div class="nm">Ejike family</div><div class="ds">₦2,000 / weekly · 1/4 members</div></div><span class="chev">›</span></div>
+      <div class="note g">Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot. The pot earns 27% a year via PawasaveLend while members save.</div>
+    </div>
+
+    <!-- AJO DETAIL -->
+    <div class="screen" data-tab="ajo">
+      <div class="toprow g"><div><div class="h1">Ejike family</div><div class="psub">1 member · ₦2,000 each · weekly</div></div><span class="pillg" style="background:#123024;color:#5fd0a6">Invite</span></div>
+      <div class="ajocirc g"><div class="me">Y</div><div class="dot d2"></div><div class="dot d3"></div><div class="dot d4"></div>
+        <div class="mid"><div class="l">This cycle's pot</div><div class="v">₦1,900</div><div class="r">You receive</div></div></div>
+      <div class="flabel g" style="margin-top:6px">Pay with</div>
+      <div class="tabs g"><div class="tab on">Savings</div><div class="tab">Naira</div><div class="tab">Crypto</div></div>
+      <div class="btn full g">Contribute ₦2,000</div>
+    </div>
+
+    <!-- INVEST -->
+    <div class="screen" data-tab="invest">
+      <div class="grn g"><span class="lbl">Naira markets</span><div style="font-size:22px;font-weight:800;margin-top:2px">T-bills, funds &amp; IPOs</div><span class="pillg">Buy with your cNGN · regulated &amp; on-chain</span></div>
+      <div class="amber g" style="margin-top:12px">Regulated Naira investments (T-bills, funds, REITs) are launching soon. Browse and register interest now.</div>
+      <div class="tabs g"><div class="tab on">Naira assets</div><div class="tab">Stocks</div><div class="tab">Pre-IPO</div></div>
+      <div class="card g"><span class="ic" style="font-size:11px;font-weight:800">NT</span><div><div class="nm">Nigerian Treasury Bill</div><div class="ds">Government-backed · fixed income</div></div><span class="rt" style="color:#5fd0a6">Buy →</span></div>
+      <div class="card g"><span class="ic" style="font-size:11px;font-weight:800">AR</span><div><div class="nm">ARM NGN Mutual Fund</div><div class="ds">Money-market income fund</div></div><span class="rt" style="color:#5fd0a6">Buy →</span></div>
+      <div class="card g"><span class="ic" style="font-size:11px;font-weight:800">CH</span><div><div class="nm">Chapel Hill Denham REIT</div><div class="ds">Real estate income</div></div><span class="rt" style="color:#5fd0a6">Buy →</span></div>
+    </div>
+
+    <!-- BORROW -->
+    <div class="screen" data-tab="borrow">
+      <div class="h1 g">Borrow</div><div class="psub g">Cash against what you own — no selling, no broken savings.</div>
+      <div class="card g" style="flex-direction:column;align-items:flex-start;background:#0e140f;margin-top:14px;padding:16px">
+        <div class="ds" style="color:var(--mut)">You can borrow up to</div><div class="bignum" style="color:var(--mint)">your collateral value</div></div>
+      <div class="sect g"><span class="h">Your collateral</span></div>
+      <div class="card g"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg></span><div><div class="nm">Stocks</div><div class="ds">40% power · live value</div></div><span class="chev">›</span></div>
+      <div class="card g"><span class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="9" width="16" height="12" rx="2"/><path d="M8 9V6a4 4 0 0 1 8 0v3"/></svg></span><div><div class="nm">Fixed savings</div><div class="ds">70% power</div></div><span class="chev">›</span></div>
+      <div class="card g"><span class="ic" style="background:#123024">₦</span><div><div class="nm">Naira assets</div><div class="ds">80% power · T-bills &amp; funds</div></div><span class="chev">›</span></div>
+    </div>
+
+    <!-- nav (active tab set by JS) -->
+    <div class="nav">
+      <a data-t="home"><svg viewBox="0 0 24 24"><path d="M3 10l9-7 9 7v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Home</a>
+      <a data-t="save"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/></svg>Save</a>
+      <a data-t="ajo"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Ajo</a>
+      <a data-t="invest"><svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg>Invest</a>
+      <a data-t="borrow"><svg viewBox="0 0 24 24"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Borrow</a>
+      <a data-t="profile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Profile</a>
+    </div>
+
+  </div></div>
+</div>
+
+<div id="bar"></div>
+<button class="replay" id="replay">↻ Replay</button>
+<div id="overlay"><div>
+  <div class="play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+  <h3>PawaSave — product tour</h3>
+  <p>Start your Loom recording, then click to play. Runs once (~90s), then a Replay button appears.</p>
+</div></div>
+
+<script>
+  const screens = [...document.querySelectorAll('.screen')];
+  const navs = [...document.querySelectorAll('.nav a')];
+  const cap = document.getElementById('cap');
+  const bar = document.getElementById('bar');
+  const replay = document.getElementById('replay');
+  const overlay = document.getElementById('overlay');
+
+  // scene = [screenIndex, dur(s), kicker, title, sub]
+  const scenes = [
+    [0, 11, '01 · Your account',   'One balance, in cNGN',            'Save, spend and grow — all from a single Naira balance, on Base.'],
+    [1,  8, '02 · Fund it',        'Add money in seconds',            'Naira bank transfer or crypto cNGN — credited 1:1, automatically.'],
+    [2, 11, '03 · Save',           'Earn up to 40% a year',           'Grow steadily with daily yield, or lock in for a higher guaranteed rate.'],
+    [3,  8, '04 · Fixed deposits', 'Lock in, earn more',              '30 days to 1 year — up to 40% APY, guaranteed.'],
+    [4, 11, '05 · Ajo',            'Ajo, reinvented',                 'Save together and get paid in turns — and the pot itself earns 27% a year.'],
+    [5,  9, '05 · Ajo',            'Transparent by design',           'See every cycle. Contribute from savings, Naira or crypto.'],
+    [6, 12, '06 · Invest',         'Regulated Naira assets',          'Buy T-bills, funds and REITs with your cNGN — on-chain.'],
+    [7, 12, '07 · Borrow',         'Borrow, don’t break savings','Get cash against your savings and assets — no selling, no breaking.'],
+    [0,  8, 'PawaSave',            'Save. Earn. Borrow. Spend.',      'pawasave.xyz'],
+  ];
+  const total = scenes.reduce((a,s)=>a+s[1],0)*1000;
+  let timers = [], raf = 0;
+
+  function render(sc){
+    const [si,,k,t,s] = sc;
+    screens.forEach((el,i)=>el.classList.toggle('on', i===si));
+    const tab = screens[si].dataset.tab;
+    navs.forEach(n=>n.classList.toggle('active', n.dataset.t===tab));
+    cap.classList.remove('show');
+    cap.querySelector('.k').textContent = k;
+    cap.querySelector('.t').textContent = t;
+    cap.querySelector('.s').textContent = s;
+    requestAnimationFrame(()=>requestAnimationFrame(()=>cap.classList.add('show')));
+  }
+  function clearAll(){ timers.forEach(clearTimeout); timers=[]; cancelAnimationFrame(raf); }
+  function play(){
+    clearAll(); replay.style.display='none';
+    let t=0;
+    scenes.forEach(sc=>{ timers.push(setTimeout(()=>render(sc), t)); t += sc[1]*1000; });
+    timers.push(setTimeout(()=>{ replay.style.display='block'; }, total));
+    const t0=performance.now();
+    (function tick(now){ const p=Math.min(1,(now-t0)/total); bar.style.width=(p*100)+'%'; if(p<1) raf=requestAnimationFrame(tick); })(t0);
+  }
+  overlay.addEventListener('click', ()=>{ overlay.style.display='none'; play(); });
+  replay.addEventListener('click', play);
+</script>
+</body>
+</html>

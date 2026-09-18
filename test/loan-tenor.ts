@@ -39,12 +39,27 @@ describe("Loan tenor + overdue liquidation", () => {
     expect(due).to.be.closeTo(now + 90 * DAY, 5);
   });
 
-  it("rejects an invalid tenor; accepts 30/180", async () => {
+  it("accepts any tenor in MIN..maxTenorDays; rejects out-of-range", async () => {
     const { lend, borrower } = await setup();
-    await expect(lend.connect(borrower)["borrow(uint256,uint256)"](u6(10), 45)).to.be.revertedWith("Invalid tenor");
+    // Below the 7-day minimum and above the 365-day default max are rejected.
+    await expect(lend.connect(borrower)["borrow(uint256,uint256)"](u6(10), 3)).to.be.revertedWith("Invalid tenor");
+    await expect(lend.connect(borrower)["borrow(uint256,uint256)"](u6(10), 400)).to.be.revertedWith("Invalid tenor");
+    // A non-standard in-range tenor (e.g. 180) is fine.
     await lend.connect(borrower)["borrow(uint256,uint256)"](u6(10), 180);
     const now = (await ethers.provider.getBlock("latest"))!.timestamp;
     expect(Number(await lend.loanDueDate(borrower.address))).to.be.closeTo(now + 180 * DAY, 5);
+  });
+
+  it("supports the longer 365-day tenor (and owner can extend the max)", async () => {
+    const { lend, owner, borrower } = await setup();
+    await lend.connect(borrower)["borrow(uint256,uint256)"](u6(50), 365);
+    let now = (await ethers.provider.getBlock("latest"))!.timestamp;
+    expect(Number(await lend.loanDueDate(borrower.address))).to.be.closeTo(now + 365 * DAY, 5);
+
+    // Owner raises the ceiling; a fresh borrower can then take a longer term.
+    await lend.connect(owner).setMaxTenor(540);
+    expect(await lend.maxTenorDays()).to.equal(540n);
+    await expect(lend.connect(owner).setMaxTenor(1000)).to.be.revertedWith("Tenor out of range");
   });
 
   it("healthy + not overdue cannot be liquidated", async () => {

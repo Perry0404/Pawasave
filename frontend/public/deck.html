@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pawasave — Pitch Deck</title>
+<meta name="description" content="Pawasave investor deck: live product status, PawasaveLend, partners, and roadmap.">
+<link rel="icon" href="/favicon-48.png">
+<style>
+  :root{
+    --page:#F5F7FA; --frame:#E9EDF2;
+    --slide:#FFFFFF; --ink:#0B1220; --slate:#4A535F; --muted:#78828E;
+    --green:#0A6B42; --green-2:#0E7A50; --green-soft:#E7F3EC;
+    --blue:#2563EB; --blue-soft:#E8EFFE;
+    --teal:#22D3C7; --navy:#0A0E1A;
+    --line:#E4E8EE; --line-2:#EEF1F5;
+    --red:#E5484D; --red-soft:#FCECEC;
+    --amber:#B7791F; --amber-soft:#FBF3E4;
+    --card:#FFFFFF; --card-2:#FAFBFC;
+    --shadow:0 18px 50px -24px rgba(11,18,32,.28);
+    --sans:'Segoe UI',system-ui,-apple-system,Roboto,'Helvetica Neue',Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){ :root{ --page:#0C0F14; --frame:#151A21; } }
+  :root[data-theme="dark"]{ --page:#0C0F14; --frame:#151A21; }
+  :root[data-theme="light"]{ --page:#F5F7FA; --frame:#E9EDF2; }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--page);font-family:var(--sans);color:var(--ink);
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+
+  .toolbar{position:fixed;top:16px;right:16px;z-index:50;display:flex;gap:8px}
+  .toolbar button{font-family:var(--sans);font-weight:650;font-size:13px;cursor:pointer;
+    border:1px solid var(--line);background:var(--slide);color:var(--ink);
+    padding:9px 15px;border-radius:11px;box-shadow:var(--shadow)}
+  .toolbar button:hover{border-color:var(--green)}
+  .toolbar button:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+
+  .deck{display:flex;flex-direction:column;align-items:center;gap:26px;
+    padding:34px 18px 60px}
+
+  .slide{position:relative;width:min(1120px,96vw);aspect-ratio:16/9;background:var(--slide);
+    border:1px solid var(--frame);border-radius:20px;box-shadow:var(--shadow);
+    padding:clamp(26px,3.4vw,52px);overflow:hidden;container-type:inline-size}
+  .slide::after{content:"";position:absolute;right:26px;bottom:20px;font-size:11px}
+
+  .pageno{position:absolute;right:clamp(26px,3.4vw,52px);bottom:clamp(18px,2.4vw,34px);
+    font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.02em}
+  .brandmark{position:absolute;left:clamp(26px,3.4vw,52px);bottom:clamp(16px,2.2vw,30px);
+    display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.02em}
+
+  .eyebrow{font-size:clamp(11px,1.1cqw,13px);font-weight:700;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--green)}
+  h2.stitle{font-size:clamp(26px,4.4cqw,46px);font-weight:800;letter-spacing:-.025em;
+    line-height:1.03;margin:0;text-wrap:balance}
+  .dot{width:12px;height:12px;border-radius:50%;background:var(--green-2);margin-top:16px}
+  .lead{color:var(--slate);font-size:clamp(13px,1.5cqw,17px);line-height:1.55;max-width:58ch;margin:0}
+
+  .head{margin-bottom:clamp(14px,2cqw,26px)}
+  .head h2.stitle{margin-top:2px}
+
+  .grid{display:grid;gap:clamp(12px,1.5cqw,20px)}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:clamp(15px,1.8cqw,24px);display:flex;flex-direction:column;gap:8px}
+  .card h3{margin:0;font-size:clamp(15px,1.7cqw,20px);font-weight:750;letter-spacing:-.01em}
+  .card p{margin:0;color:var(--slate);font-size:clamp(11.5px,1.25cqw,14.5px);line-height:1.5}
+  .ico{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;margin-bottom:2px}
+  .ico svg{width:19px;height:19px}
+  .ico.grn{background:var(--green-soft);color:var(--green)}
+  .ico.blu{background:var(--blue-soft);color:var(--blue)}
+  .ico.red{background:var(--red-soft);color:var(--red)}
+
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;
+    letter-spacing:.02em;padding:3px 9px;border-radius:999px;width:max-content}
+  .badge.live{background:var(--green-soft);color:var(--green)}
+  .badge.prog{background:var(--amber-soft);color:var(--amber)}
+  .badge.blue{background:var(--blue-soft);color:var(--blue)}
+  .badge b{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block}
+
+  .numrow{display:grid;grid-template-columns:auto 1fr;gap:14px 16px;align-items:start}
+  .num{width:30px;height:30px;border-radius:50%;background:var(--green);color:#fff;
+    display:grid;place-items:center;font-weight:750;font-size:14px}
+  .numrow .t h3{margin:0 0 3px;font-size:clamp(15px,1.7cqw,20px);font-weight:750}
+  .numrow .t p{margin:0;color:var(--slate);font-size:clamp(12px,1.35cqw,15px);line-height:1.5}
+
+  .banner{display:flex;gap:12px;align-items:flex-start;background:var(--red-soft);
+    border-left:4px solid var(--red);border-radius:10px;padding:14px 16px;margin-bottom:clamp(14px,1.8cqw,22px)}
+  .banner svg{flex:none;width:20px;height:20px;color:var(--red);margin-top:1px}
+  .banner p{margin:0;color:var(--red);font-weight:650;font-size:clamp(12.5px,1.4cqw,16px);line-height:1.4}
+
+  .notebar{margin-top:clamp(12px,1.6cqw,20px);background:var(--card-2);border:1px solid var(--line);
+    border-radius:12px;padding:12px 16px;color:var(--slate);font-size:clamp(11.5px,1.2cqw,14px);line-height:1.5}
+  .notebar b{color:var(--ink)}
+
+  ul.ticks{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:9px}
+  ul.ticks li{position:relative;padding-left:24px;color:var(--slate);
+    font-size:clamp(12px,1.3cqw,15px);line-height:1.45}
+  ul.ticks li::before{content:"";position:absolute;left:0;top:6px;width:14px;height:14px;
+    border-radius:50%;background:var(--green-soft);
+    box-shadow:inset 0 0 0 1px var(--green)}
+  ul.ticks li svg{position:absolute;left:2px;top:8px;width:10px;height:10px;color:var(--green)}
+
+  .phases{display:grid;grid-template-columns:repeat(4,1fr);gap:clamp(12px,1.4cqw,18px)}
+  .phase{border-top:3px solid var(--green);padding-top:14px;display:flex;flex-direction:column;gap:8px}
+  .phase.blue{border-color:var(--blue)}
+  .phase .ph{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--green)}
+  .phase.blue .ph{color:var(--blue)}
+  .phase h3{margin:0;font-size:clamp(14px,1.55cqw,18px);font-weight:750;letter-spacing:-.01em}
+  .phase ul{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-direction:column;gap:7px}
+  .phase li{position:relative;padding-left:16px;color:var(--slate);font-size:clamp(11px,1.15cqw,13.5px);line-height:1.4}
+  .phase li::before{content:"→";position:absolute;left:0;top:0;color:var(--green)}
+  .phase.blue li::before{color:var(--blue)}
+
+  .title-slide{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;gap:0}
+  .logo-lockup{display:flex;align-items:center;gap:14px;margin-bottom:clamp(20px,3cqw,34px)}
+  .logo-lockup .mk{width:clamp(46px,5cqw,60px);height:clamp(46px,5cqw,60px);border-radius:14px;
+    background:var(--navy);display:grid;place-items:center}
+  .logo-lockup .mk svg{width:64%;height:64%}
+  .logo-lockup .wm{font-size:clamp(26px,3.6cqw,40px);font-weight:800;letter-spacing:-.02em}
+  .title-slide h1{font-size:clamp(30px,6.1cqw,66px);font-weight:800;letter-spacing:-.03em;
+    line-height:1.02;margin:0;text-wrap:balance;max-width:16ch}
+  .tagpill{margin-top:clamp(20px,3cqw,34px);background:var(--blue-soft);color:var(--blue);
+    font-weight:700;font-size:clamp(11px,1.35cqw,15px);letter-spacing:.04em;
+    padding:11px 22px;border-radius:999px;text-transform:uppercase}
+  .title-slide .live{margin-top:18px;display:flex;align-items:center;gap:8px;color:var(--muted);
+    font-size:13px;font-weight:600}
+  .title-slide .live b{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;
+    box-shadow:0 0 0 3px var(--green-soft)}
+
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:clamp(14px,1.8cqw,24px)}
+  .panel{border:1px solid var(--line);border-radius:16px;padding:clamp(16px,2cqw,26px)}
+  .panel h3{margin:0 0 12px;font-size:clamp(16px,1.9cqw,22px);font-weight:800;letter-spacing:-.01em}
+  .panel.sup h3{color:var(--green)}
+  .panel.bor h3{color:var(--blue)}
+  .panel ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:11px}
+  .panel li{position:relative;padding-left:20px;color:var(--slate);font-size:clamp(12px,1.3cqw,15px);line-height:1.45}
+  .panel.sup li::before{content:"";position:absolute;left:0;top:6px;width:8px;height:8px;border-radius:50%;background:var(--green)}
+  .panel.bor li::before{content:"";position:absolute;left:0;top:6px;width:8px;height:8px;border-radius:50%;background:var(--blue)}
+
+  .ask{display:grid;grid-template-columns:1.15fr 1fr;gap:clamp(18px,2.4cqw,34px);align-items:center}
+  .quote{border-left:4px solid var(--green);padding-left:20px}
+  .quote p{font-size:clamp(19px,2.6cqw,32px);font-weight:800;letter-spacing:-.02em;line-height:1.12;margin:0;text-wrap:balance}
+  .quote span{display:block;margin-top:16px;color:var(--slate);font-size:clamp(12.5px,1.4cqw,16px);
+    line-height:1.55;font-weight:400}
+  .askcard{background:var(--blue-soft);border:1px solid #D6E2FD;border-radius:18px;padding:clamp(18px,2.2cqw,30px)}
+  .askcard h3{margin:0 0 14px;color:var(--blue);font-size:clamp(16px,1.9cqw,22px);font-weight:800}
+  .askcard ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+  .askcard li{color:var(--slate);font-size:clamp(12px,1.3cqw,15px);line-height:1.5}
+  .askcard li b{color:var(--ink)}
+  .contact{display:flex;gap:26px;justify-content:center;margin-top:clamp(16px,2cqw,26px);
+    color:var(--ink);font-size:clamp(12px,1.3cqw,15px);font-weight:600;flex-wrap:wrap}
+  .contact a{color:var(--ink);text-decoration:none;display:inline-flex;align-items:center;gap:7px}
+  .contact svg{width:15px;height:15px;color:var(--green)}
+
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(12px,1.5cqw,20px);margin-top:auto}
+  .kpi{border:1px solid var(--line);border-radius:14px;padding:clamp(14px,1.7cqw,22px)}
+  .kpi .v{font-size:clamp(22px,3cqw,38px);font-weight:800;letter-spacing:-.02em;color:var(--green);
+    font-variant-numeric:tabular-nums}
+  .kpi .k{color:var(--slate);font-size:clamp(11px,1.2cqw,14px);margin-top:4px;line-height:1.4}
+
+  .flow{display:flex;flex-direction:column;height:100%}
+  .flow-body{margin-top:auto;margin-bottom:auto}
+
+  @media (max-width:720px){
+    .slide{aspect-ratio:auto;width:100%;padding:24px}
+    .g3,.g4,.g2,.phases,.kpis,.split,.ask{grid-template-columns:1fr}
+    .title-slide{min-height:74vh;justify-content:center}
+    .pageno,.brandmark{position:static;margin-top:16px}
+  }
+
+  @media print{
+    :root{--page:#fff}
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .toolbar{display:none}
+    body{background:#fff}
+    .deck{gap:0;padding:0}
+    .slide{width:100%;aspect-ratio:16/9;border:0;border-radius:0;box-shadow:none;
+      page-break-after:always;break-after:page}
+    .slide:last-child{page-break-after:auto;break-after:auto}
+    @page{size:1280px 720px;margin:0}
+  }
+  @media (prefers-reduced-motion:no-preference){
+    .toolbar button{transition:border-color .15s}
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button type="button" onclick="window.print()">Save as PDF</button>
+</div>
+
+<div class="deck">
+
+  <section class="slide title-slide" aria-label="Title">
+    <div class="logo-lockup">
+      <span class="mk" aria-hidden="true">
+        <svg viewBox="0 0 512 512"><defs><linearGradient id="lg" x1="150" y1="120" x2="360" y2="392" gradientUnits="userSpaceOnUse"><stop stop-color="#2DD4C4"/><stop offset="1" stop-color="#12B981"/></linearGradient></defs>
+          <g fill="url(#lg)"><rect x="132" y="120" width="78" height="272" rx="12"/><rect x="150" y="120" width="176" height="132" rx="66"/><rect x="150" y="246" width="198" height="146" rx="73"/></g>
+          <g fill="#0A0E1A"><rect x="208" y="150" width="82" height="72" rx="36"/><rect x="208" y="278" width="100" height="88" rx="44"/></g>
+        </svg>
+      </span>
+      <span class="wm">Pawasave</span>
+    </div>
+    <h1>Asset-Backed cNGN Lending, Built for Nigeria</h1>
+    <div class="tagpill">Borrow against your savings · Secured by T-bills · Settled in cNGN on Base</div>
+    <div class="live"><b></b> Live at pawasave.xyz</div>
+  </section>
+
+  <section class="slide" aria-label="The Problem">
+    <div class="head">
+      <div class="eyebrow">01 — Why now</div>
+      <h2 class="stitle">The Problem</h2>
+      <div class="dot"></div>
+    </div>
+    <div class="banner">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <p>Nigerians lose critical capital daily to persistent Naira devaluation — savings, credit and community finance are all broken at once.</p>
+    </div>
+    <div class="grid g3">
+      <div class="card"><div class="ico red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg></div>
+        <h3>Explosive Credit Cost</h3><p>SMEs and traders pay predatory 40–80% interest on informal loans just to fund everyday working capital.</p></div>
+      <div class="card"><div class="ico red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+        <h3>Savings You Can't Tap</h3><p>To raise cash, Nigerians break their savings and investments — forfeiting the yield and compounding they were building.</p></div>
+      <div class="card"><div class="ico red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg></div>
+        <h3>No Naira Collateral Rails</h3><p>There is no simple way to borrow against on-chain savings or assets in Naira, so billions in idle value can't unlock affordable credit.</p></div>
+    </div>
+    <div class="brandmark">Pawasave · Confidential</div>
+    <div class="pageno">02</div>
+  </section>
+
+  <section class="slide" aria-label="Our Solution">
+    <div class="head">
+      <div class="eyebrow">02 — What we do</div>
+      <h2 class="stitle">Our Solution</h2>
+      <div class="dot"></div>
+    </div>
+    <p class="lead" style="margin-bottom:22px">A collateralized cNGN credit layer: Nigerians save and earn real, T-bill-backed yield — then borrow against those savings without breaking them. Over-collateralized, settled in cNGN on Base.</p>
+    <div class="grid" style="gap:18px">
+      <div class="numrow"><div class="num">1</div><div class="t"><h3>PawasaveLend — Asset-Backed Credit <span class="badge live" style="vertical-align:middle"><b></b>Live</span></h3><p>Borrow cNGN against locked savings, T-bills and holdings — over-collateralized, on Base, live in-app today.</p></div></div>
+      <div class="numrow"><div class="num">2</div><div class="t"><h3>A Yield-Bearing Savings Base</h3><p>An elegant Naira wallet where deposits earn real, T-bill-backed yield — building the collateral and deposit base that credit is secured against.</p></div></div>
+      <div class="numrow"><div class="num">3</div><div class="t"><h3>LP-Funded Liquidity</h3><p>A dedicated liquidity pool funds the loan book, so savings stay invested and earning while borrowers draw stable cNGN.</p></div></div>
+    </div>
+    <div class="brandmark">Pawasave · Confidential</div>
+    <div class="pageno">03</div>
+  </section>
+
+  <section class="slide" aria-label="What We've Built">
+    <div class="head">
+      <div class="eyebrow">03 — Product status</div>
+      <h2 class="stitle">What We've Built</h2>
+      <div class="dot"></div>
+    </div>
+    <div class="grid g4">
+      <div class="card"><span class="badge live"><b></b>Live</span><h3>Save</h3><p>cNGN savings with automatic yield vaults and daily accrual.</p></div>
+      <div class="card"><span class="badge live"><b></b>Live</span><h3>Ajo (Esusu)</h3><p>Automated savings circles with rules, payouts and transparency.</p></div>
+      <div class="card"><span class="badge live"><b></b>Live</span><h3>Invest</h3><p>Market exposure alongside savings, from one balance.</p></div>
+      <div class="card"><span class="badge live"><b></b>Live</span><h3>Borrow</h3><p>Asset-backed cNGN loans against locked savings &amp; holdings.</p></div>
+      <div class="card"><span class="badge live"><b></b>Live</span><h3>Security</h3><p>Independent audit, protected transactions, and multi-signature custody.</p></div>
+      <div class="card"><span class="badge live"><b></b>Live</span><h3>App &amp; Wallet</h3><p>Installable PWA, push, biometric lock, printable statements.</p></div>
+      <div class="card"><span class="badge prog"><b></b>Rolling out</span><h3>Fiat Rails</h3><p>Per-user NUBAN cNGN deposits via Strails.</p></div>
+      <div class="card"><span class="badge prog"><b></b>Rolling out</span><h3>Identity / KYC</h3><p>Biometric liveness verification via Sense.</p></div>
+    </div>
+    <div class="notebar">Deployed on <b>Base mainnet</b> · contract ownership under a <b>Gnosis Safe multisig</b> · native <b>cNGN</b> settlement end-to-end.</div>
+    <div class="brandmark">Pawasave · Confidential</div>
+    <div class="pageno">04</div>
+  </section>
+
+  <section class="slide flow" aria-label="Product-Market Fit">
+    <div class="head">
+      <div class="eyebrow">04 — Traction</div>
+      <h2 class="stitle">Product–Market Fit</h2>
+      <div class="dot"></div>
+    </div>
+    <div class="split" style="align-items:start">
+      <div>
+        <h3 style="margin:0 0 10px;font-size:clamp(15px,1.7cqw,20px)">Empowering Nigerian commerce</h3>
+        <ul class="ticks">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><b>Ideal users:</b> market traders, regional SMEs and merchants who need affordable working-capital credit against value they already hold.</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><b>Real pain solved:</b> saving and borrowing unified in a single, simple platform.</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><b>Early validation:</b> users park money to save while actively requesting credit to fund trade inventory.</li>
+        </ul>
+      </div>
+      <div class="kpis" style="grid-template-columns:1fr 1fr;margin-top:0">
+        <div class="kpi"><div class="v">50+</div><div class="k">Early users onboarded</div></div>
+        <div class="kpi"><div class="v">₦2M+</div><div class="k">Transaction volume to date</div></div>
+        <div class="kpi"><div class="v">40–80%</div><div class="k">Informal loan rates we undercut</div></div>
+        <div class="kpi"><div class="v">cNGN</div><div class="k">Naira-native, on Base</div></div>
+      </div>
+    </div>
+    <div class="brandmark">Pawasave · Confidential</div>
+    <div class="pageno">05</div>
+  </section>
+
+  <section class="slide flow" aria-label="How P-AUTO Works">
+    <div class="head">
+      <div class="eyebrow">05 — Yield engine</div>
+      <h2 class="stitle">How P-AUTO Works</h2>
+      <div class="dot"></div>
+    </div>
+    <div class="flow-body grid g4">
+      <div class="numrow" style="grid-template-columns:1fr"><div class="num">1</div><div class="t"><h3>Lock Savings</h3><p>Users commit capital in “Fixed Mode” directly from their wallet balance.</p></div></div>
+      <div class="numrow" style="grid-template-columns:1fr"><div class="num">2</div><div class="t"><h3>Smart Allocator</h3><p>P-AUTO maps pools to vetted, high-quality Web3 yield opportunities.</p></div></div>
+      <div class="numrow" style="grid-template-columns:1fr"><div class="num">3</div><div class="t"><h3>Auto-Rebalance</h3><p>Compounding engines optimise rates, rebalancing positions continuously.</p></div></div>
+      <div class="numrow" style="grid-template-columns:1fr"><div class="num">4</div><div class="t"><h3>Clean UX</h3><p>Users simply see “Earn up to X%” — no complexity, no jargon.</p></div></div>
+    </div>
+    <div class="brandmark">Pawasave · Confidential</div>
+    <div class="pageno">06</div>
+  </section>
+
+  <section class="slide flow" aria-label="PawasaveLend Engine">
+    <div class="head">
+      <div class="eyebrow">06 — Protocol</div>
+      <h2 class="stitle">PawasaveLend Engine</h2>
+      <div class="dot"></div>
+    </div>
+    <div class="flow-body split">
+      <div class="panel sup"><h3>Liquidity Suppliers</h3><ul>
+        <li>Deposit native cNGN to earn instantly.</li>
+        <li>Receive automated yield-bearing psNGN protocol shares.</li>
+        <li>Real-time, liquidation-backed safety protections.</li>
+      </ul></div>
+      <div class="panel bor"><h3>Stable Borrowers</h3><ul>
+        <li>Post liquid collateral — savings, holdings or USDC.</li>
+        <li>Borrow native, stable cNGN directly on Base.</li>
+        <li>Flexible credit lines tailored to commerce velocity.</li>
+      </ul></div>
+    </div>
+    <div class="notebar"><b>Protocol mechanics:</b> a specialised Kink rate model (higher rates during hyper-utilisation) with a 10% reserve fee powering direct platform revenue.</div>
+    <div class="brandmark">Pawasave · Confidential</div>
+    <div class="pageno">07</div>
+  </section>
+
+  <section class="slide" aria-label="Our Edge">
+    <div class="head">
+      <div class="eyebrow">07 — Moat</div>
+      <h2 class="stitle">Our Edge</h2>
+      <div class="dot"></div>
+    </div>
+    <div class="grid g3">
+      <div class="card"><div class="ico grn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+        <h3>First-Mover cNGN</h3><p>Pioneering the first native stablecoin borrow/lend architecture aligned with Nigeria's digital-currency push.</p></div>
+      <div class="card"><div class="ico blu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></div>
+        <h3>Closed-Loop Model</h3><p>Our consumer app continuously fuels the supply side of PawasaveLend's liquidity pools.</p></div>
+      <div class="card"><div class="ico grn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></div>
+        <h3>Hyper-Localized</h3><p>Local bank rails, per-user NUBAN, biometric KYC and intuitive fiat-native mental math.</p></div>
+    </div>
+    <div class="brandmark">Pawasave · Confidential</div>
+    <div class="pageno">08</div>
+  </section>
+
+  <section class="slide" aria-label="Partners & Ecosystem">
+    <div class="head">
+      <div class="eyebrow">08 — Ecosystem</div>
+      <h2 class="stitle">Partners &amp; Infrastructure</h2>
+      <div class="dot"></div>
+    </div>
+    <div class="grid g2">
+      <div class="card"><span class="badge blue"><b></b>Built on</span><h3>cNGN</h3><p>The regulated Naira stablecoin — our native unit of account for saving, lending and borrowing.</p></div>
+      <div class="card"><span class="badge blue"><b></b>Deployed on</span><h3>Base (Coinbase L2)</h3><p>Fast, low-cost Ethereum L2 settlement for every on-chain transaction.</p></div>
+      <div class="card"><span class="badge live"><b></b>Integrating</span><h3>Sense</h3><p>Biometric liveness identity &amp; KYC for compliant, fraud-resistant onboarding.</p></div>
+      <div class="card"><span class="badge live"><b></b>Integrating</span><h3>Strails</h3><p>Per-user NUBAN bank rails — instant Naira → cNGN deposits at scale.</p></div>
+    </div>
+    <div class="notebar">Custody secured by a <b>Gnosis Safe multisig</b>; infrastructure hardened through an independent <b>security audit</b>.</div>
+    <div class="brandmark">Pawasave · Confidential</div>
+    <div class="pageno">09</div>
+  </section>
+
+  <section class="slide" aria-label="Traction & Roadmap">
+    <div class="head">
+      <div class="eyebrow">09 — Where we're going</div>
+      <h2 class="stitle">Traction &amp; Roadmap</h2>
+      <div class="dot"></div>
+    </div>
+    <div class="phases">
+      <div class="phase"><span class="ph">Phase 1 · Done</span><h3>App Live</h3><ul><li>Consumer fiat gateway shipped.</li><li>P-AUTO yield vaults live.</li><li>Save · Ajo · Invest in production.</li></ul></div>
+      <div class="phase"><span class="ph">Phase 2 · Done</span><h3>Lending Live</h3><ul><li>Asset-backed cNGN loans in-app.</li><li>Security audit remediated.</li><li>Deployed on Base mainnet.</li></ul></div>
+      <div class="phase blue"><span class="ph">Phase 3 · Now</span><h3>Scale Rails</h3><ul><li>NUBAN fiat rails (Strails).</li><li>Biometric KYC (Sense) rollout.</li><li>Play Store &amp; App Store launch.</li></ul></div>
+      <div class="phase blue"><span class="ph">Phase 4 · Next</span><h3>Protocol Expansion</h3><ul><li>Open liquidity pools &amp; incentives.</li><li>Tokenized T-bills &amp; RWAs.</li><li>Credit scoring + insurance fund.</li></ul></div>
+    </div>
+    <div class="brandmark">Pawasave · Confidential</div>
+    <div class="pageno">10</div>
+  </section>
+
+  <section class="slide flow" aria-label="Vision & The Ask">
+    <div class="head">
+      <div class="eyebrow">10 — The ask</div>
+      <h2 class="stitle">Vision &amp; The Ask</h2>
+      <div class="dot"></div>
+    </div>
+    <div class="ask">
+      <div class="quote">
+        <p>"We are building the definitive financial operating system for Nigerian stable finance."</p>
+        <span>Our mission is to make Pawasave the default place where millions of Nigerians securely save, lend and borrow using natively secured cNGN.</span>
+      </div>
+      <div class="askcard">
+        <h3>Strategic Partnership Ask</h3>
+        <ul>
+          <li><b>Liquidity providers:</b> bootstrap capital for initial lending supply pools.</li>
+          <li><b>Co-marketing:</b> joint campaigns alongside the core cNGN ecosystem.</li>
+          <li><b>Compliance:</b> compliant institutional fiat-gateway integrations.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="contact">
+      <a href="mailto:support@pawasave.xyz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>support@pawasave.xyz</a>
+      <a href="https://pawasave.xyz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"/></svg>www.pawasave.xyz</a>
+    </div>
+    <div class="brandmark">Pawasave · Confidential</div>
+    <div class="pageno">11</div>
+  </section>
+
+</div>
+</body>
+</html>

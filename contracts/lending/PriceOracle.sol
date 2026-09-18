@@ -31,9 +31,17 @@ contract PriceOracle is Ownable {
     uint256 public maxDeviationBps = 2500; // 25%
     uint256 private constant BPS = 10_000;
 
+    // Per-token sanity floor (V2-SC oracle price floor). On the FIRST price set
+    // there is no previous value for the deviation breaker to check against, so a
+    // glitchy feed returning a near-zero price could value collateral at ~0 and
+    // enable bad-debt borrows. When set (>0), no update may push a token's price
+    // below this floor — including forceSetPrice. Owner tunes it per token.
+    mapping(address => uint256) public minPrice;
+
     event PriceUpdated(address indexed token, uint256 price, uint256 timestamp);
     event MaxDeviationUpdated(uint256 newMaxDeviationBps);
     event KeeperUpdated(address indexed oldKeeper, address indexed newKeeper);
+    event MinPriceUpdated(address indexed token, uint256 minPrice);
 
     // Authorised price keeper (separate from owner for operational security)
     address public keeper;
@@ -81,6 +89,11 @@ contract PriceOracle is Ownable {
     function _setPrice(address token, uint256 price, bool enforceDeviation) internal {
         require(token != address(0), "Zero address");
         require(price > 0, "Zero price");
+
+        // Sanity floor (V2-SC). Applies on every path, including forceSetPrice,
+        // so a near-zero glitch can never be written even on the first update.
+        uint256 floor = minPrice[token];
+        if (floor > 0) require(price >= floor, "Price below floor");
 
         uint256 prev = prices[token];
         if (enforceDeviation && prev > 0) {
@@ -141,5 +154,15 @@ contract PriceOracle is Ownable {
     function setKeeper(address _keeper) external onlyOwner {
         emit KeeperUpdated(keeper, _keeper); // V2-SC-10: observable keeper rotation
         keeper = _keeper;
+    }
+
+    /// @notice Set the per-token sanity floor (0 = disabled). New floor must not
+    ///         exceed the current price (if one is set) so it can't brick updates.
+    function setMinPrice(address token, uint256 floor) external onlyOwner {
+        require(token != address(0), "Zero address");
+        uint256 current = prices[token];
+        if (floor > 0 && current > 0) require(floor <= current, "Floor above price");
+        minPrice[token] = floor;
+        emit MinPriceUpdated(token, floor);
     }
 }

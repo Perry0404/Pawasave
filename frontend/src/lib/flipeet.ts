@@ -92,10 +92,14 @@ function getHeaders() {
 }
 
 async function request<T>(path: string, payload: Record<string, unknown>): Promise<T> {
+  // Bound the wait: with no timeout, an unreachable Flipeet host hangs ~10s (Node's default
+  // connect timeout) before we can fail over to another provider or fall back to manual name
+  // entry. 8s is ample for a slow-but-up API while making an outage fail fast.
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(8000),
   })
 
   const json = (await res.json().catch(() => null)) as FlipeetEnvelope<T> | null
@@ -165,6 +169,29 @@ export async function initializeFlipeetOnRamp(params: {
     channel: 'BANK',
     reason: 'OTHER',
   })
+}
+
+/**
+ * Name enquiry — resolve the account holder name for a bank + account number,
+ * BEFORE initiating a payout (like a normal Nigerian transfer). Uses the same
+ * bank codes and x-api-key as the off-ramp. Throws FlipeetApiError on a bad
+ * account/bank (typically 4xx) or provider outage.
+ */
+export async function lookupFlipeetAccount(params: {
+  bankCode: string
+  accountNumber: string
+  country?: string
+}): Promise<{ bank_code?: string; account_number?: string; account_name?: string }> {
+  return request<{ bank_code?: string; account_number?: string; account_name?: string }>(
+    '/institutions/lookup',
+    {
+      country: params.country || DEFAULT_COUNTRY,
+      beneficiary: {
+        account_number: params.accountNumber,
+        bank_code: params.bankCode,
+      },
+    },
+  )
 }
 
 export async function initializeFlipeetOffRamp(params: {

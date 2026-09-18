@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import Logo from '@/components/logo'
-import { Lock, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react'
+import { Lock, Eye, EyeSlash, CircleNotch, CheckCircle } from '@phosphor-icons/react'
 
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState('')
@@ -40,11 +40,49 @@ export default function ResetPasswordPage() {
       }
     })
 
-    // Also check for session already set by callback route (PKCE / token_hash flow)
-    supabase.auth.getSession().then(({ data }) => {
+    const init = async () => {
+      const params = new URLSearchParams(window.location.search)
+
+      // PREFERRED — token-hash (OTP) flow: the link lands here with
+      // ?token_hash=...&type=recovery. verifyOtp is self-contained (no per-browser
+      // code_verifier needed), so it works even when the email is opened in the
+      // Gmail in-app browser or on a different device than the one that requested it.
+      const token_hash = params.get('token_hash')
+      const type = params.get('type')
+      if (token_hash && type) {
+        const { data, error } = await supabase.auth.verifyOtp({
+          type: type as 'recovery',
+          token_hash,
+        })
+        if (!error && data.session) {
+          setSessionReady(true)
+          setCheckingSession(false)
+          window.history.replaceState({}, '', '/reset-password')
+          return
+        }
+        if (error) setLinkError(error.message)
+      }
+
+      // FALLBACK — PKCE flow: link lands with ?code=... Only works in the same
+      // browser that requested the reset (code_verifier lives here).
+      const code = params.get('code')
+      if (code) {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+        if (!error && data.session) {
+          setSessionReady(true)
+          setCheckingSession(false)
+          window.history.replaceState({}, '', '/reset-password')
+          return
+        }
+      }
+
+      // FALLBACK — session already established (hash flow via detectSessionInUrl,
+      // or an already-exchanged code).
+      const { data } = await supabase.auth.getSession()
       if (data.session) setSessionReady(true)
       setCheckingSession(false)
-    })
+    }
+    init()
 
     return () => subscription.unsubscribe()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -73,7 +111,7 @@ export default function ResetPasswordPage() {
       <div className="min-h-dvh bg-slate-950 flex items-center justify-center px-6">
         <div className="text-center">
           <Logo size={44} className="mx-auto mb-4" />
-          <Loader2 className="w-5 h-5 animate-spin text-emerald-500 mx-auto" />
+          <CircleNotch className="w-5 h-5 animate-spin text-emerald-500 mx-auto" />
           <p className="text-slate-400 text-sm mt-3">Validating reset link...</p>
         </div>
       </div>
@@ -140,7 +178,7 @@ export default function ResetPasswordPage() {
               className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition p-0.5"
               tabIndex={-1}
             >
-              {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {showPw ? <EyeSlash className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
         </div>
@@ -167,7 +205,7 @@ export default function ResetPasswordPage() {
           disabled={busy || !sessionReady}
           className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition"
         >
-          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Update Password'}
+          {busy ? <CircleNotch className="w-4 h-4 animate-spin" /> : 'Update Password'}
         </button>
       </form>
     </div>

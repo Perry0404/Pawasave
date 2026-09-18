@@ -266,10 +266,16 @@ export function useLendPool(address: string | null, signer: ethers.JsonRpcSigner
     })
   }
 
-  async function borrow(amount: bigint, tenorDays: number = 90) {
+  // Pool borrowing is DISABLED. The PawasaveLend pool is now a custodial holding
+  // layer only (supply/withdraw) — no one draws cNGN out as a loan, so the float
+  // that backs user balances stays fully redeemable. Borrowing moves to the
+  // asset-backed model (Daya-funded disbursement → HyperFX USDT→cNGN → user).
+  // The on-chain guarantee is removeCollateral() (scripts/block-borrowing.ts);
+  // this just makes the app refuse to build a borrow tx. Args kept for the caller
+  // signature; intentionally unused.
+  async function borrow(_amount: bigint, _tenorDays: number = 90) {
     await run(async () => {
-      const tx = await lendRW()["borrow(uint256,uint256)"](amount, tenorDays)
-      await tx.wait()
+      throw new Error("Pool borrowing is disabled — borrowing is handled by asset-backed lending.")
     })
   }
 

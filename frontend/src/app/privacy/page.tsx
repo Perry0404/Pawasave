@@ -3,7 +3,7 @@ import Link from 'next/link'
 
 export const metadata: Metadata = {
   title: 'Privacy Policy — PawaSave',
-  description: 'PawaSave privacy policy. Learn how we collect, use, and protect your personal data.',
+  description: 'PawaSave privacy policy. Learn how we collect, use, store, and protect your personal data.',
 }
 
 export default function PrivacyPage() {
@@ -12,15 +12,15 @@ export default function PrivacyPage() {
       <header className="px-6 pt-14 pb-8 max-w-2xl mx-auto">
         <Link href="/" className="inline-block mb-6 text-emerald-400 text-sm font-medium hover:underline">&larr; Back to App</Link>
         <h1 className="text-4xl font-bold tracking-tight mb-2">Privacy Policy</h1>
-        <p className="text-slate-400 text-sm">Last updated: April 19, 2026</p>
+        <p className="text-slate-400 text-sm">Last updated: September 1, 2026</p>
       </header>
 
       <main className="max-w-2xl mx-auto px-6 pb-20 space-y-10">
         <section>
           <h2 className="text-xl font-bold text-emerald-400 mb-3">1. Introduction</h2>
           <p className="text-slate-300 leading-relaxed">
-            PawaSave (&quot;we,&quot; &quot;our,&quot; or &quot;the Platform&quot;) is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your personal information when you use
-            our mobile web application and related services. By using PawaSave, you agree to the practices described in this policy.
+            PawaSave (&quot;we,&quot; &quot;our,&quot; or &quot;the Platform&quot;) is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, store, and safeguard your personal information when you use
+            our web application and related services. By using PawaSave, you agree to the practices described in this policy.
           </p>
         </section>
 
@@ -30,31 +30,31 @@ export default function PrivacyPage() {
             <div>
               <h3 className="font-semibold text-white mb-1">2.1 Account Information</h3>
               <p className="text-slate-300 leading-relaxed">
-                When you register, we collect your email address, display name, and password (securely hashed). We never store plaintext passwords.
+                When you register, we collect your email address and display name, and either a password (which is securely hashed — we never store plaintext passwords) or a Google account identifier if you sign in with Google.
               </p>
             </div>
             <div>
-              <h3 className="font-semibold text-white mb-1">2.2 KYC Verification Data</h3>
+              <h3 className="font-semibold text-white mb-1">2.2 KYC &amp; Verification Data</h3>
               <p className="text-slate-300 leading-relaxed">
-                To comply with Nigerian financial regulations, we collect your Bank Verification Number (BVN) or National Identification Number (NIN) for identity verification. We store only a one-way hash of these numbers — the original numbers are not stored in our database after verification.
+                To comply with Nigerian financial regulations, we verify your identity through our onboarding and KYC partners. This involves your <span className="text-white">Bank Verification Number (BVN)</span>, used to verify you and issue your dedicated Naira account, and a <span className="text-white">biometric liveness (selfie) check</span> required for higher withdrawal limits. We keep only a one-way reference to your BVN in our own systems; the raw BVN and biometric data are handled by the identity partners named in Section 4 under their own privacy terms.
               </p>
             </div>
             <div>
-              <h3 className="font-semibold text-white mb-1">2.3 Financial Transaction Data</h3>
+              <h3 className="font-semibold text-white mb-1">2.3 Financial &amp; Transaction Data</h3>
               <p className="text-slate-300 leading-relaxed">
-                We record your deposit, withdrawal, savings, and Esusu contribution transactions including amounts, timestamps, and status. This data is necessary to operate your account and provide transaction history.
+                We record your deposits, withdrawals, savings, loans, tokenized-stock investments, and Esusu contributions — including amounts, timestamps, counterparties (such as the bank account details used for a payout), and status. This data is necessary to operate your account, hold your funds custodially, and provide transaction history.
               </p>
             </div>
             <div>
               <h3 className="font-semibold text-white mb-1">2.4 Blockchain Data</h3>
               <p className="text-slate-300 leading-relaxed">
-                Your personal deposit address on the Base L2 blockchain is stored with your account. Blockchain transactions are inherently public. We do not control the public nature of on-chain data.
+                Your funds are held as cNGN and other tokens on the Base blockchain in wallets that PawaSave controls on your behalf, and you are assigned an on-chain deposit address. Blockchain transactions are inherently public; we do not control the public nature of on-chain data.
               </p>
             </div>
             <div>
-              <h3 className="font-semibold text-white mb-1">2.5 Usage Data</h3>
+              <h3 className="font-semibold text-white mb-1">2.5 Usage &amp; Device Data</h3>
               <p className="text-slate-300 leading-relaxed">
-                We may collect information about how you interact with the Platform, including device type, browser, IP address, and pages visited. This is used to improve the service and troubleshoot issues.
+                We may collect information about how you interact with the Platform, including device type, browser, IP address, and pages visited, to operate the service, secure it, and troubleshoot issues. If you enable notifications, we store a push-notification subscription for your device.
               </p>
             </div>
           </div>
@@ -63,77 +63,95 @@ export default function PrivacyPage() {
         <section>
           <h2 className="text-xl font-bold text-emerald-400 mb-3">3. How We Use Your Information</h2>
           <ul className="list-disc list-inside text-slate-300 space-y-2 leading-relaxed">
-            <li>To create and manage your PawaSave account</li>
-            <li>To process deposits, withdrawals, and savings transactions</li>
+            <li>To create and manage your PawaSave account and hold your funds custodially</li>
+            <li>To process deposits, withdrawals, savings, loans, and tokenized-stock trades</li>
             <li>To verify your identity (KYC) in compliance with Nigerian regulations</li>
             <li>To facilitate Esusu savings circles and group payouts</li>
-            <li>To allocate funds to yield pools (Morpho, Xend Asset Chain)</li>
-            <li>To communicate important account and service updates</li>
+            <li>To supply idle funds to the PawasaveLend protocol on Base to generate yield</li>
+            <li>To send you transactional emails and, if enabled, push notifications about your account</li>
             <li>To prevent fraud, unauthorized access, and security threats</li>
-            <li>To improve the Platform functionality and user experience</li>
-            <li>To comply with applicable laws and regulations</li>
+            <li>To improve the Platform and comply with applicable laws and regulations</li>
           </ul>
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">4. Third-Party Services</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">4. Third-Party Services &amp; Data Sharing</h2>
           <p className="text-slate-300 leading-relaxed mb-3">
-            We integrate with the following third-party services to operate the Platform. Each has their own privacy policies:
+            We rely on the following providers to operate the Platform. Each has its own privacy policy, and we share only the minimum data necessary with each:
           </p>
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <span className="text-white text-sm font-medium">Supabase</span>
-              <span className="text-slate-400 text-sm">Database, authentication, &amp; storage</span>
+              <span className="text-slate-400 text-sm">Database, authentication &amp; storage</span>
             </div>
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <span className="text-white text-sm font-medium">FlintAPI</span>
-              <span className="text-slate-400 text-sm">Naira on-ramp &amp; off-ramp</span>
+              <span className="text-white text-sm font-medium">Strails (Stablesrail)</span>
+              <span className="text-slate-400 text-sm">BVN onboarding, dedicated Naira account &amp; deposits</span>
             </div>
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <span className="text-white text-sm font-medium">Xend Finance</span>
-              <span className="text-slate-400 text-sm">Yield pools &amp; ramp services</span>
+              <span className="text-white text-sm font-medium">Flipeet</span>
+              <span className="text-slate-400 text-sm">Naira withdrawals (off-ramp) to your bank</span>
             </div>
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <span className="text-white text-sm font-medium">Base (Coinbase L2)</span>
-              <span className="text-slate-400 text-sm">Blockchain network for USDC</span>
+              <span className="text-white text-sm font-medium">Sense (usesense.ai)</span>
+              <span className="text-slate-400 text-sm">Biometric identity verification (KYC)</span>
+            </div>
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <span className="text-white text-sm font-medium">HyperFX / Hyperbridge</span>
+              <span className="text-slate-400 text-sm">cNGN ↔ USDC conversion for stock trades</span>
+            </div>
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <span className="text-white text-sm font-medium">Base (Coinbase L2) &amp; Aerodrome</span>
+              <span className="text-slate-400 text-sm">Blockchain network &amp; on-chain trading</span>
+            </div>
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <span className="text-white text-sm font-medium">Hetzner &amp; Cloudflare</span>
+              <span className="text-slate-400 text-sm">Server hosting (EU) &amp; content delivery / security</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-white text-sm font-medium">Vercel</span>
-              <span className="text-slate-400 text-sm">Hosting &amp; deployment</span>
+              <span className="text-white text-sm font-medium">Zoho Mail</span>
+              <span className="text-slate-400 text-sm">Transactional email delivery</span>
             </div>
           </div>
           <p className="text-slate-400 text-sm mt-3">
-            We share only the minimum data necessary with each provider (e.g., transaction amounts with FlintAPI, user identifiers with Xend Finance). We never sell your data to third parties.
+            For example, we share your BVN with our onboarding partner to create your account, and your bank details with our payout partner to process a withdrawal. We never sell your data to third parties.
           </p>
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">5. Data Security</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">5. Where Your Data Is Stored (International Transfer)</h2>
+          <p className="text-slate-300 leading-relaxed">
+            PawaSave is operated from secure servers located in the <span className="text-white">European Union (Germany)</span>, and our database and authentication provider may store data in the EU or other regions. This means your personal data is transferred to and stored outside Nigeria. By using PawaSave, you consent to this international transfer and storage. We take reasonable steps to ensure your data is protected to a standard consistent with the Nigeria Data Protection Act / Regulation wherever it is processed.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">6. Data Security</h2>
           <p className="text-slate-300 leading-relaxed mb-3">
             We implement multiple layers of security to protect your data:
           </p>
           <ul className="list-disc list-inside text-slate-300 space-y-2 leading-relaxed">
             <li>All data is transmitted over HTTPS with TLS encryption</li>
-            <li>Passwords are hashed using industry-standard bcrypt via Supabase Auth</li>
-            <li>KYC identity numbers are stored only as one-way hashes (SHA-256)</li>
-            <li>API keys and secrets are stored server-side only — never exposed to the browser</li>
-            <li>Row-Level Security (RLS) in Supabase ensures users can only access their own data</li>
-            <li>Rate limiting (30 requests/minute) and security headers protect against abuse</li>
-            <li>Webhook signatures are verified (HMAC for FlintAPI, RSA for Xend Finance)</li>
+            <li>Passwords are hashed via Supabase Auth; your 4-digit transaction PIN is hashed server-side with a salted scrypt function</li>
+            <li>Repeated incorrect PIN attempts trigger a temporary account lockout</li>
+            <li>API keys, wallet keys, and secrets are stored server-side only — never exposed to the browser</li>
+            <li>Row-Level Security (RLS) ensures users can only access their own data</li>
+            <li>Rate limiting and security headers protect against abuse</li>
+            <li>Inbound webhooks (deposits, payouts) are authenticated before any funds move</li>
           </ul>
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">6. Data Retention</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">7. Data Retention</h2>
           <p className="text-slate-300 leading-relaxed">
-            We retain your account data for as long as your account is active. Transaction records are kept for a minimum of 6 years in compliance with Nigerian financial record-keeping requirements. If you request account deletion, we will remove your personal data within 30 days, except where retention is required by law.
+            We retain your account data for as long as your account is active. Transaction and KYC records are kept for a minimum period in line with Nigerian financial record-keeping and AML requirements (generally at least 6 years). If you request account deletion, we will remove your personal data within a reasonable period, except where retention is required by law.
           </p>
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">7. Your Rights</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">8. Your Rights</h2>
           <p className="text-slate-300 leading-relaxed mb-3">
-            Under the Nigeria Data Protection Regulation (NDPR) and applicable data protection laws, you have the right to:
+            Under the Nigeria Data Protection Act / Regulation (NDPA/NDPR) and applicable data protection laws, you have the right to:
           </p>
           <ul className="list-disc list-inside text-slate-300 space-y-2 leading-relaxed">
             <li><strong className="text-white">Access:</strong> Request a copy of the personal data we hold about you</li>
@@ -148,28 +166,28 @@ export default function PrivacyPage() {
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">8. Cookies &amp; Local Storage</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">9. Cookies &amp; Local Storage</h2>
           <p className="text-slate-300 leading-relaxed">
-            PawaSave uses essential cookies and browser localStorage for authentication session management (Supabase Auth tokens). We do not use advertising cookies or third-party tracking cookies. No analytics or behavioral tracking tools are used on the Platform.
+            PawaSave uses essential cookies and browser localStorage for authentication session management (Supabase Auth tokens) and, if you enable them, to store your notification preferences and push subscription. We do not use advertising cookies or third-party behavioral tracking on the Platform.
           </p>
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">9. Children&apos;s Privacy</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">10. Children&apos;s Privacy</h2>
           <p className="text-slate-300 leading-relaxed">
             PawaSave is not intended for use by individuals under the age of 18. We do not knowingly collect personal data from children. If we become aware that we have collected data from a child under 18, we will take steps to delete that data promptly.
           </p>
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">10. Changes to This Policy</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">11. Changes to This Policy</h2>
           <p className="text-slate-300 leading-relaxed">
             We may update this Privacy Policy from time to time to reflect changes in our practices or applicable laws. We will notify you of any material changes via email or by posting a notice in the app. Your continued use of PawaSave after any changes constitutes acceptance of the updated policy.
           </p>
         </section>
 
         <section>
-          <h2 className="text-xl font-bold text-emerald-400 mb-3">11. Contact Us</h2>
+          <h2 className="text-xl font-bold text-emerald-400 mb-3">12. Contact Us</h2>
           <p className="text-slate-300 leading-relaxed">
             If you have any questions about this Privacy Policy or our data practices, please contact us:
           </p>
@@ -183,7 +201,7 @@ export default function PrivacyPage() {
         <footer className="border-t border-slate-800 pt-6 flex items-center justify-center gap-6 text-sm text-slate-500">
           <Link href="/about" className="hover:text-slate-300 transition">About</Link>
           <span>&middot;</span>
-          <Link href="/privacy" className="hover:text-slate-300 transition">Privacy Policy</Link>
+          <Link href="/terms" className="hover:text-slate-300 transition">Terms of Service</Link>
           <span>&middot;</span>
           <Link href="/" className="hover:text-slate-300 transition">App</Link>
         </footer>

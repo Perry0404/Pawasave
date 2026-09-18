@@ -54,10 +54,10 @@ PRICE_ORACLE_ADDRESS=0x...
 ORACLE_KEEPER_PRIVATE_KEY=0x...
 PAWASAVE_LEND_ADDRESS=0xA540FB9a23DDB7Cd989CDe0d924dd2a76533a9eA
 USDC_TOKEN_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
-CRON_SECRET=<random string>      # secures /api/cron/* — set the SAME value in Vercel Cron
+CRON_SECRET=<random string>      # secures /api/cron/* — set the SAME value in the host crontab
 ```
 
-### Cron jobs (already declared in [frontend/vercel.json](frontend/vercel.json))
+### Cron jobs (already declared in `ops/cron/crontab`)
 | Endpoint | Schedule | Needs |
 |---|---|---|
 | `/api/cron/accrue-yield` | daily 00:00 | `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET` |

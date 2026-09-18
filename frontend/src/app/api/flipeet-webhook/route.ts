@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
 import { ngnToCngnMicro } from '@/lib/ramp-rate'
-import { supplyToLend } from '@/lib/custody'
+
+// Deposits are DB-only now (spendable custody cNGN — no on-chain PawasaveLend
+// supply until a real yield source is live). maxDuration kept for headroom.
+export const maxDuration = 60
 
 function readString(...values: unknown[]) {
   for (const value of values) {
@@ -160,10 +163,16 @@ export async function POST(request: NextRequest) {
   }
 
   if (isCompletedStatus(status)) {
-    await supabase
+    // Guarded claim: only ONE actor may move this row off 'pending' and then credit.
+    // Without the status guard, concurrent Flipeet retries (or a webhook racing the
+    // reconciler) could both pass the pending-select above and credit twice.
+    const { data: claimed } = await supabase
       .from('transactions')
       .update({ status: 'completed', paychant_tx_id: transactionId || tx.paychant_tx_id })
       .eq('id', tx.id)
+      .eq('status', 'pending')
+      .select('id')
+    if (!claimed || claimed.length === 0) return NextResponse.json({ ok: true, already_processed: true })
 
     if (tx.type === 'deposit') {
       // cNGN end-to-end: user deposits NGN → credited as cNGN (1 NGN = 1 cNGN).
@@ -194,34 +203,21 @@ export async function POST(request: NextRequest) {
         .update({ amount_usdc_micro: cngnMicro })
         .eq('id', tx.id)
 
-      await supabase.rpc('allocate_cngn_pool', {
-        p_user_id: tx.user_id,
-        p_usdc_micro: cngnMicro,
-      })
-
-      // Supply cNGN to PawasaveLend for yield (flexible savings)
-      // Done async so webhook returns fast — failure logged but does not block credit
-      if (cngnMicro > 0) {
-        Promise.resolve(supplyToLend(BigInt(cngnMicro)))
-          .then(({ txHash, shares }) => {
-            console.info(`Supplied ${cngnMicro} cNGN to PawasaveLend — tx: ${txHash}, shares: ${shares}`)
-            // Record shares in Supabase for proportional yield tracking
-            return supabase.from('flexible_pool_positions').upsert({
-              user_id: tx.user_id,
-              cngn_deposited_micro: cngnMicro,
-              last_supply_tx: txHash,
-            }, { onConflict: 'user_id', ignoreDuplicates: false })
-          })
-          .catch((err: unknown) => {
-            console.warn('PawasaveLend supply skipped (funds still credited):', err)
-          })
-      }
+      // Deposits land 100% spendable in custody (like crypto deposits): no pool
+      // auto-allocation and no PawasaveLend supply until a real yield source exists.
+      // Withdrawals settle from raw custody cNGN. (Flipeet is off-ramp-only today,
+      // so this deposit branch is effectively dormant — kept consistent regardless.)
     }
   } else if (isFailedStatus(status)) {
-    await supabase
+    // Guarded claim: only ONE actor may move this row off 'pending' and then refund,
+    // so a webhook racing the reconciler (or a Flipeet retry) can't double-refund.
+    const { data: claimed } = await supabase
       .from('transactions')
       .update({ status: 'failed', paychant_tx_id: transactionId || tx.paychant_tx_id })
       .eq('id', tx.id)
+      .eq('status', 'pending')
+      .select('id')
+    if (!claimed || claimed.length === 0) return NextResponse.json({ ok: true, already_processed: true })
 
     if (tx.type === 'withdrawal') {
       // Refund the cNGN that was debited (1 NGN = 1 cNGN). amount_kobo → cNGN micro.

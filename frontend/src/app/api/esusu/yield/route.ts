@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { koboToCngnMicro, cngnMicroToKobo } from '@/lib/ramp-rate'
+import { sendPushToUser } from '@/lib/push-send'
 
 /**
  * POST /api/esusu/yield
@@ -132,6 +133,12 @@ export async function POST(request: NextRequest) {
         status:      'completed',
       })
     }
+
+    sendPushToUser(recipient_user_id, {
+      title: 'Ajo payout received 🎉',
+      body: 'It’s your turn — the group pot has been paid into your PawaSave balance.',
+      url: '/', tag: 'ajo-payout',
+    }).catch(() => {})
 
     return NextResponse.json({
       ok:              true,

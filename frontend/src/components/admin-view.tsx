@@ -8,6 +8,13 @@ import Link from 'next/link'
 
 const ADMIN_STORAGE_KEY = 'pawa_admin_auth'
 
+interface AdminInvestment {
+  kind: string; side: 'buy' | 'sell' | string; symbol: string
+  user_id: string; display_name: string | null; phone: string | null
+  amount_cngn_micro: number; shares: number | null; status: string
+  reference: string | null; created_at: string
+}
+
 export default function AdminView() {
   const [authed, setAuthed] = useState(false)
   const [password, setPassword] = useState('')
@@ -18,6 +25,8 @@ export default function AdminView() {
   const [users, setUsers] = useState<AdminUserStats | null>(null)
   const [volume, setVolume] = useState<AdminTxVolume | null>(null)
   const [recentFees, setRecentFees] = useState<PlatformFee[]>([])
+  const [recentInvestments, setRecentInvestments] = useState<AdminInvestment[]>([])
+  const [ajo, setAjo] = useState<{ groups: number; members: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [revenueKobo, setRevenueKobo] = useState(0)
   const [showWithdrawRevenue, setShowWithdrawRevenue] = useState(false)
@@ -61,7 +70,9 @@ export default function AdminView() {
           setUsers(data.users)
           setVolume(data.volume)
           setRecentFees(data.recentFees || [])
+          setRecentInvestments(data.recentInvestments || [])
           setRevenueKobo(data.revenueKobo || 0)
+          setAjo(data.ajo || null)
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Network error'
@@ -228,7 +239,7 @@ export default function AdminView() {
       </div>
 
       {/* Fee Breakdown */}
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="bg-white rounded-xl border border-slate-200 p-3.5">
           <ArrowDownLeft className="w-4 h-4 text-emerald-500 mb-1.5" />
           <p className="text-[10px] text-slate-500 uppercase tracking-wider">On-ramp</p>
@@ -243,6 +254,16 @@ export default function AdminView() {
           <Lock className="w-4 h-4 text-purple-500 mb-1.5" />
           <p className="text-[10px] text-slate-500 uppercase tracking-wider">Penalties</p>
           <p className="text-sm font-bold text-slate-800 mt-0.5">{formatNaira(fees?.total_penalty_fees || 0)}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-3.5">
+          <TrendingUp className="w-4 h-4 text-teal-500 mb-1.5" />
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider">Loans (fee + interest)</p>
+          <p className="text-sm font-bold text-slate-800 mt-0.5">{formatNaira(fees?.total_loan_fees || 0)}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-3.5">
+          <TrendingUp className="w-4 h-4 text-indigo-500 mb-1.5" />
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider">Stocks (sell fee)</p>
+          <p className="text-sm font-bold text-slate-800 mt-0.5">{formatNaira(fees?.total_investment_fees || 0)}</p>
         </div>
       </div>
 
@@ -260,6 +281,16 @@ export default function AdminView() {
           {(volume?.pending_count || 0) > 0 && (
             <p className="text-[10px] text-amber-600 mt-0.5">{volume!.pending_count} pending</p>
           )}
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <Users className="w-4 h-4 text-amber-500 mb-2" />
+          <p className="text-xs text-slate-500">Ajo Groups Created</p>
+          <p className="text-xl font-bold text-slate-800">{ajo?.groups || 0}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <Users className="w-4 h-4 text-emerald-500 mb-2" />
+          <p className="text-xs text-slate-500">Ajo Memberships</p>
+          <p className="text-xl font-bold text-slate-800">{ajo?.members || 0}</p>
         </div>
       </div>
 
@@ -305,7 +336,71 @@ export default function AdminView() {
             <span className="text-slate-500">Vault Saves</span>
             <span className="font-semibold text-blue-600">{formatNaira(volume?.total_vault_saves_kobo || 0)}</span>
           </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">Loans Disbursed</span>
+            <span className="font-semibold text-teal-600">{formatNaira(volume?.total_loans_disbursed_kobo || 0)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">Loans Repaid</span>
+            <span className="font-semibold text-teal-700">{formatNaira(volume?.total_loans_repaid_kobo || 0)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">Investments</span>
+            <span className="font-semibold text-indigo-600">{formatNaira(volume?.total_investments_kobo || 0)}</span>
+          </div>
+          <div className="flex justify-between pt-2.5 mt-0.5 border-t border-slate-200">
+            <span className="font-semibold text-slate-700">Total Volume</span>
+            <span className="font-bold text-slate-900">
+              {formatNaira(
+                (volume?.total_deposits_kobo || 0)
+                + (volume?.total_withdrawals_kobo || 0)
+                + (volume?.total_vault_saves_kobo || 0)
+                + (volume?.total_loans_disbursed_kobo || 0)
+                + (volume?.total_loans_repaid_kobo || 0)
+                + (volume?.total_investments_kobo || 0),
+              )}
+            </span>
+          </div>
         </div>
+      </div>
+
+      {/* Recent Investments — each buy/sell, newest first */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-semibold text-slate-800">Recent Investments</p>
+          <span className="text-[11px] text-slate-400">{recentInvestments.length} shown</span>
+        </div>
+        {recentInvestments.length === 0 ? (
+          <p className="text-xs text-slate-400 py-2">No investments yet.</p>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {recentInvestments.map((inv, i) => {
+              const buy = inv.side === 'buy'
+              const done = inv.status === 'filled' || inv.status === 'completed' || inv.status === 'credited'
+              const failed = inv.status === 'failed' || inv.status === 'refunded'
+              return (
+                <div key={`${inv.reference || inv.user_id}-${i}`} className="flex items-center justify-between py-2 text-sm">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${buy ? 'bg-emerald-50 text-emerald-700' : 'bg-orange-50 text-orange-700'}`}>{buy ? 'BUY' : 'SELL'}</span>
+                      <span className="font-semibold text-slate-800">{inv.symbol}</span>
+                      <span className="text-[10px] text-slate-400">{inv.kind}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 truncate">
+                      {inv.display_name || inv.phone || inv.user_id.slice(0, 8)} · {new Date(inv.created_at).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })}
+                    </p>
+                  </div>
+                  <div className="text-right flex-none ml-2">
+                    <div className="font-semibold text-slate-900">{formatNaira((inv.amount_cngn_micro || 0) / 10000)}</div>
+                    <div className={`text-[10px] font-medium ${done ? 'text-emerald-600' : failed ? 'text-red-500' : 'text-amber-600'}`}>
+                      {inv.status}{inv.shares ? ` · ${Number(inv.shares).toFixed(4)} sh` : ''}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Revenue Withdrawal */}

@@ -1,0 +1,56 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PawaSave crontab. The single source of truth for cron schedules.
+# frontend/vercel.json has been deleted, Vercel is no longer in use.
+# Install on the VPS host:   crontab /opt/pawasave/crontab
+#
+# IMPORTANT: Vercel Cron ran in UTC. CRON_TZ=UTC below keeps the daily jobs
+# (accrue-yield 00:00, auto-contribute 01:00, harvest-vault 02:00) firing at the
+# SAME wall-clock time they did on Vercel, regardless of the server's timezone.
+#
+# Prereqs on the box:
+#   /opt/pawasave/pawasave-cron.sh   (chmod +x)
+#   /opt/pawasave/cron.env           (BASE_URL, CRON_SECRET, HC_PING_BASE, HC_* uuids)
+# Create one healthchecks.io check per job and paste its UUID into cron.env.
+# ─────────────────────────────────────────────────────────────────────────────
+SHELL=/bin/sh
+CRON_TZ=UTC
+
+# ── every 3 min ──────────────────────────────────────────────────────────────
+# Deposit detection/crediting runs hot so cNGN + Strails NUBAN deposits land in
+# ~minutes. Both credit idempotently (crypto: tx_key unique; Strails: advisory-lock
+# + reference check in credit_strails_deposit, migration 067), so the tight interval
+# and the webhook can overlap without double-crediting.
+*/3 * * * *   . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/scan-deposits     "$HC_SCAN_DEPOSITS"
+*/3 * * * *   . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/strails-reconcile  "$HC_STRAILS_RECONCILE"
+
+# ── every 10 min ─────────────────────────────────────────────────────────────
+*/10 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/update-oracle      "$HC_UPDATE_ORACLE"
+# Finish stock sells stuck between legs (stock→USDC done, USDC→cNGN awaiting a solver).
+*/10 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/equity-sell-reconcile "$HC_EQUITY_SELL_RECONCILE"
+# Offset from the sell reconciler so the two do not queue on the custody lease every run.
+5-59/10 * * * * . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/equity-buy-reconcile "$HC_EQUITY_BUY_RECONCILE"
+
+# Cross-chain stablecoin deposits: scan USDC/USDT on every enabled chain → cNGN on Base.
+# (No-op unless CROSSCHAIN_DEPOSIT_ENABLED=true; each fill can take minutes, hence the 5-min slot.)
+*/5 * * * *   . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/scan-crosschain-deposits "$HC_SCAN_CROSSCHAIN_DEPOSITS"
+
+# ── every 15 min ─────────────────────────────────────────────────────────────
+*/15 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/reconcile-withdrawals "$HC_RECONCILE_WITHDRAWALS"
+
+# ── every 30 min ─────────────────────────────────────────────────────────────
+*/30 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/liquidate       "$HC_LIQUIDATE"
+*/30 * * * *  . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/sweep-deposits  "$HC_SWEEP_DEPOSITS"
+
+# ── every 6 hours ────────────────────────────────────────────────────────────
+0 */6 * * *   . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/update-yield-apy  "$HC_UPDATE_YIELD_APY"
+0 */6 * * *   . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/loan-maintenance  "$HC_LOAN_MAINTENANCE"
+# Return unclaimed peer-to-peer transfers to the sender once past their expiry.
+0 */6 * * *   . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/revert-p2p-claims "$HC_REVERT_P2P_CLAIMS"
+# Release Pay-with-Pawa escrow to the seller once past auto_release_at (buyer never confirmed
+# and never disputed). Hourly so sellers aren't left waiting a long time after the window.
+0 * * * *     . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/pawa-auto-release "$HC_PAWA_AUTO_RELEASE"
+
+# ── daily (UTC) ──────────────────────────────────────────────────────────────
+0 0 * * *     . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/accrue-yield     "$HC_ACCRUE_YIELD"
+0 1 * * *     . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/auto-contribute  "$HC_AUTO_CONTRIBUTE"
+0 2 * * *     . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/harvest-vault    "$HC_HARVEST_VAULT"

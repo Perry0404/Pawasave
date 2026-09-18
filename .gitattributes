@@ -1,0 +1,6 @@
+# Keep LF line endings for files that RUN on the Linux VPS, even when the repo is
+# checked out on Windows. CRLF would break the shell shebang / cron parsing.
+*.sh            text eol=lf
+*.mjs           text eol=lf
+ops/cron/crontab        text eol=lf
+ops/cron/cron.env.example text eol=lf

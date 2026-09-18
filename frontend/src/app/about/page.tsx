@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 
 export const metadata: Metadata = {
-  title: 'About PawaSave — Save in Crypto with Naira',
-  description: 'Learn how PawaSave helps Nigerians save directly in crypto using fiat, with Esusu savings circles, yield pools, and instant on/off-ramp.',
+  title: 'About PawaSave — Your Naira Money App',
+  description: 'Learn how PawaSave helps Nigerians save in cNGN and earn yield, run Ajo savings circles, invest in stocks, and borrow against their assets.',
 }
 
 export default function AboutPage() {
@@ -14,8 +14,8 @@ export default function AboutPage() {
         <Link href="/" className="inline-block mb-6 text-emerald-400 text-sm font-medium hover:underline">&larr; Back to App</Link>
         <h1 className="text-4xl font-bold tracking-tight mb-3">PawaSave</h1>
         <p className="text-lg text-slate-400 leading-relaxed">
-          Collect naira. Save in dollars. Withdraw anytime.<br className="hidden sm:block" />
-          The smartest way for Nigerians to protect and grow their money.
+          Save, Ajo, Invest &amp; Borrow.<br className="hidden sm:block" />
+          Your money app for Nigeria — powered by cNGN on Base.
         </p>
       </header>
 
@@ -24,10 +24,10 @@ export default function AboutPage() {
         <section>
           <h2 className="text-2xl font-bold text-emerald-400 mb-4">What is PawaSave?</h2>
           <p className="text-slate-300 leading-relaxed mb-3">
-            PawaSave is a Nigerian fintech platform that lets you <strong className="text-white">deposit naira and save directly in crypto (USDC)</strong> — a stablecoin pegged 1:1 to the US dollar. Your savings are protected from naira devaluation while remaining instantly accessible whenever you need them.
+            PawaSave is a Nigerian money app where you <strong className="text-white">save in cNGN</strong> — the Central Bank of Nigeria-compliant, Naira-pegged stablecoin (₦1 = 1 cNGN) — and put it to work. Earn yield on your savings, run traditional Ajo (Esusu) circles, invest in tokenized US stocks, and borrow against your assets.
           </p>
           <p className="text-slate-300 leading-relaxed">
-            We handle the complexity of crypto on/off-ramp so you don&apos;t have to. Simply send naira via bank transfer, and PawaSave automatically converts it to USDC and stores it securely in your personal vault on the Base L2 blockchain.
+            We handle the on-chain complexity for you. PawaSave is a <strong className="text-white">custodial</strong> app: you deposit by bank transfer, we hold your cNGN securely on the Base blockchain on your behalf, and you manage everything from a simple app — no crypto wallet required.
           </p>
         </section>
 
@@ -41,7 +41,7 @@ export default function AboutPage() {
                 <div>
                   <h3 className="font-semibold text-white mb-1">Deposit Naira</h3>
                   <p className="text-slate-400 text-sm leading-relaxed">
-                    Send naira from any Nigerian bank account. We generate a unique virtual account for you via FlintAPI or Xend Finance. No crypto wallet needed — just a simple bank transfer.
+                    After a quick BVN check, you get your own dedicated Naira account number. Send money to it from any Nigerian bank — no crypto wallet needed.
                   </p>
                 </div>
               </div>
@@ -50,9 +50,9 @@ export default function AboutPage() {
               <div className="flex items-start gap-4">
                 <span className="bg-emerald-600 text-white text-sm font-bold rounded-full w-8 h-8 flex items-center justify-center flex-shrink-0">2</span>
                 <div>
-                  <h3 className="font-semibold text-white mb-1">Auto-Convert to USDC</h3>
+                  <h3 className="font-semibold text-white mb-1">Held as cNGN, 1:1</h3>
                   <p className="text-slate-400 text-sm leading-relaxed">
-                    Your naira is instantly converted to USDC at the current market rate and deposited into your personal USDC vault on the Base L2 blockchain. Each user gets their own non-custodial deposit address.
+                    Your Naira is credited as cNGN at 1:1 (₦1 = 1 cNGN) and held securely on Base. Your balance stays in Naira — no US-dollar conversion, no exchange-rate surprises.
                   </p>
                 </div>
               </div>
@@ -61,9 +61,9 @@ export default function AboutPage() {
               <div className="flex items-start gap-4">
                 <span className="bg-emerald-600 text-white text-sm font-bold rounded-full w-8 h-8 flex items-center justify-center flex-shrink-0">3</span>
                 <div>
-                  <h3 className="font-semibold text-white mb-1">Earn Yield</h3>
+                  <h3 className="font-semibold text-white mb-1">Save, Invest &amp; Borrow</h3>
                   <p className="text-slate-400 text-sm leading-relaxed">
-                    Lock your savings to earn interest through Morpho vaults or participate in the Xend Asset Chain yield pool at up to 21% APY. 90% of deposits are auto-allocated to the cNGN yield pool for maximum returns.
+                    Earn yield through the PawasaveLend protocol, join Ajo circles, invest in tokenized stocks, or borrow cNGN against your savings and holdings.
                   </p>
                 </div>
               </div>
@@ -74,7 +74,7 @@ export default function AboutPage() {
                 <div>
                   <h3 className="font-semibold text-white mb-1">Withdraw Anytime</h3>
                   <p className="text-slate-400 text-sm leading-relaxed">
-                    Convert your USDC back to naira and send it to any Nigerian bank account instantly. No lock-in periods for standard savings — your money is always yours.
+                    Cash out to any Nigerian bank account. Your cNGN converts back to Naira and lands in your bank — no lock-in for flexible savings.
                   </p>
                 </div>
               </div>
@@ -87,39 +87,39 @@ export default function AboutPage() {
           <h2 className="text-2xl font-bold text-emerald-400 mb-4">Key Features</h2>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-              <h3 className="font-semibold text-white mb-2">💰 USDC Savings Vault</h3>
+              <h3 className="font-semibold text-white mb-2">💰 cNGN Savings &amp; Yield</h3>
               <p className="text-slate-400 text-sm leading-relaxed">
-                Save in a dollar-pegged stablecoin. Your naira value is protected from inflation and currency devaluation. View balances in both USDC and naira.
+                Save in Naira-pegged cNGN and earn variable yield through the PawasaveLend protocol on Base. Flexible savings, fixed locks, and goals.
               </p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-              <h3 className="font-semibold text-white mb-2">🤝 Esusu Circles</h3>
+              <h3 className="font-semibold text-white mb-2">🤝 Ajo (Esusu) Circles</h3>
               <p className="text-slate-400 text-sm leading-relaxed">
-                Join traditional rotating savings groups (ajo/esusu) powered by blockchain. Contribute weekly or monthly with 3-way payment: USDC, naira, or crypto.
+                Join traditional rotating savings groups. Contribute each round and receive the pooled amount in rotation — with yield while funds are pooled.
               </p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-              <h3 className="font-semibold text-white mb-2">📈 Yield Pools</h3>
+              <h3 className="font-semibold text-white mb-2">📈 Tokenized Stock Investing</h3>
               <p className="text-slate-400 text-sm leading-relaxed">
-                Earn up to 40% APY on fixed savings (P Auto) or 27% APY on flexible savings (PawasaveLend). Save to the vault and your money starts earning automatically — no lock-in required.
+                Buy fractional shares of tokenized US stocks (like Apple, Nvidia, Alphabet, and Meta) with your cNGN. Buying is free; a flat ₦500 fee applies on sale.
               </p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-              <h3 className="font-semibold text-white mb-2">🔄 Smart Ramp Routing</h3>
+              <h3 className="font-semibold text-white mb-2">🏦 Borrow Against Your Assets</h3>
               <p className="text-slate-400 text-sm leading-relaxed">
-                Deposits and withdrawals are routed automatically to the best available provider — FlintAPI, Flipeet, or Xend Finance — for the lowest fee and fastest settlement.
+                Unlock cash without selling. Borrow cNGN against your savings locks and eligible holdings through the PawaSave lending protocol.
               </p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-              <h3 className="font-semibold text-white mb-2">🏦 Bank-to-Crypto Deposits</h3>
+              <h3 className="font-semibold text-white mb-2">🏧 Bank-to-App Deposits</h3>
               <p className="text-slate-400 text-sm leading-relaxed">
-                Deposit naira directly from your Nigerian bank account via a virtual bank transfer — no crypto knowledge required. Your funds are instantly converted to USDC and auto-saved.
+                Fund your account with a normal bank transfer to your dedicated Naira account number — no crypto knowledge required.
               </p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
               <h3 className="font-semibold text-white mb-2">✅ KYC Verified</h3>
               <p className="text-slate-400 text-sm leading-relaxed">
-                BVN or NIN verification ensures account security and regulatory compliance. Quick automated verification gets you started in minutes.
+                BVN verification and biometric liveness keep your account secure and compliant with Nigerian regulations.
               </p>
             </div>
           </div>
@@ -131,19 +131,19 @@ export default function AboutPage() {
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <span className="text-slate-400 text-sm">Blockchain</span>
-              <span className="text-white text-sm font-medium">Base L2 (Ethereum Layer 2)</span>
+              <span className="text-white text-sm font-medium">Base (Ethereum Layer 2)</span>
             </div>
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <span className="text-slate-400 text-sm">Stablecoin</span>
-              <span className="text-white text-sm font-medium">USDC (Circle)</span>
+              <span className="text-white text-sm font-medium">cNGN (Naira-pegged)</span>
             </div>
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <span className="text-slate-400 text-sm">On/Off-Ramp</span>
-              <span className="text-white text-sm font-medium">FlintAPI + Xend Finance</span>
+              <span className="text-slate-400 text-sm">Deposits &amp; Withdrawals</span>
+              <span className="text-white text-sm font-medium">Strails (deposits) + Flipeet (payouts)</span>
             </div>
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <span className="text-slate-400 text-sm">Yield</span>
-              <span className="text-white text-sm font-medium">Morpho Vaults + Xend Asset Chain</span>
+              <span className="text-white text-sm font-medium">PawasaveLend protocol on Base</span>
             </div>
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <span className="text-slate-400 text-sm">Backend</span>
@@ -161,32 +161,35 @@ export default function AboutPage() {
           <h2 className="text-2xl font-bold text-emerald-400 mb-4">Transparent Fees</h2>
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <span className="text-slate-400 text-sm">On-Ramp (Deposit)</span>
-              <span className="text-white text-sm font-medium">1.5% PawaSave fee + provider fees</span>
+              <span className="text-slate-400 text-sm">Deposit (on-ramp)</span>
+              <span className="text-white text-sm font-medium">up to 1.5%</span>
             </div>
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <span className="text-slate-400 text-sm">Off-Ramp (Withdraw)</span>
-              <span className="text-white text-sm font-medium">1.5% PawaSave fee + provider fees</span>
+              <span className="text-slate-400 text-sm">Withdrawal (off-ramp)</span>
+              <span className="text-white text-sm font-medium">up to 1.5%</span>
             </div>
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <span className="text-slate-400 text-sm">Vault Save/Withdraw</span>
-              <span className="text-white text-sm font-medium">Free</span>
+              <span className="text-slate-400 text-sm">Tokenized stock — sell</span>
+              <span className="text-white text-sm font-medium">₦500 flat (buying is free)</span>
             </div>
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <span className="text-slate-400 text-sm">Esusu Contributions</span>
+              <span className="text-slate-400 text-sm">Vault Save/Withdraw &amp; Esusu</span>
               <span className="text-white text-sm font-medium">Free</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-slate-400 text-sm">Early Lock Withdrawal</span>
-              <span className="text-white text-sm font-medium">0.5% penalty (no interest)</span>
+              <span className="text-slate-400 text-sm">Early Lock / Goal break</span>
+              <span className="text-white text-sm font-medium">0.5% penalty</span>
             </div>
           </div>
+          <p className="text-slate-500 text-xs mt-3">
+            See the full <Link href="/terms" className="text-emerald-400 hover:underline">Terms of Service</Link> for the complete fee schedule.
+          </p>
         </section>
 
         {/* CTA */}
         <section className="text-center">
           <h2 className="text-2xl font-bold text-white mb-3">Ready to Save Smarter?</h2>
-          <p className="text-slate-400 mb-6">Join thousands of Nigerians protecting their money from inflation.</p>
+          <p className="text-slate-400 mb-6">Save, run Ajo, invest, and borrow — all in one Naira app.</p>
           <Link
             href="/"
             className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3.5 px-8 rounded-xl transition active:scale-[0.98]"
@@ -199,7 +202,7 @@ export default function AboutPage() {
         <footer className="border-t border-slate-800 pt-6 flex items-center justify-center gap-6 text-sm text-slate-500">
           <Link href="/privacy" className="hover:text-slate-300 transition">Privacy Policy</Link>
           <span>&middot;</span>
-          <Link href="/about" className="hover:text-slate-300 transition">About</Link>
+          <Link href="/terms" className="hover:text-slate-300 transition">Terms</Link>
           <span>&middot;</span>
           <Link href="/" className="hover:text-slate-300 transition">App</Link>
         </footer>

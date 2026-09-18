@@ -348,6 +348,10 @@ export default function AdminView() {
             <span className="text-slate-500">Investments</span>
             <span className="font-semibold text-indigo-600">{formatNaira(volume?.total_investments_kobo || 0)}</span>
           </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">Transfers (P2P &amp; Pawa)</span>
+            <span className="font-semibold text-purple-600">{formatNaira(volume?.total_transfers_kobo || 0)}</span>
+          </div>
           <div className="flex justify-between pt-2.5 mt-0.5 border-t border-slate-200">
             <span className="font-semibold text-slate-700">Total Volume</span>
             <span className="font-bold text-slate-900">
@@ -357,7 +361,8 @@ export default function AdminView() {
                 + (volume?.total_vault_saves_kobo || 0)
                 + (volume?.total_loans_disbursed_kobo || 0)
                 + (volume?.total_loans_repaid_kobo || 0)
-                + (volume?.total_investments_kobo || 0),
+                + (volume?.total_investments_kobo || 0)
+                + (volume?.total_transfers_kobo || 0),
               )}
             </span>
           </div>

@@ -217,6 +217,7 @@ export interface AdminTxVolume {
   total_loans_disbursed_kobo: number
   total_loans_repaid_kobo: number
   total_investments_kobo: number
+  total_transfers_kobo: number
   total_tx_count: number
   pending_count: number
 }

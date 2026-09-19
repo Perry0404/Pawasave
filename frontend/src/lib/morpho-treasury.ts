@@ -38,6 +38,9 @@ const DEFAULT_RATE = 1600
 interface Leg {
   symbol: string; collateral_base: string; usdc_micro: string
   borrow_shares: string; supply_tx: string; borrow_tx: string
+  // Set as each unwind leg completes, so a retry resumes instead of re-repaying (which
+  // would over-repay other loans' debt in the shared aggregate position).
+  repaid?: boolean; withdrawn?: boolean
 }
 
 async function setting(admin: SupabaseClient, key: string, dflt: number): Promise<number> {
@@ -141,60 +144,83 @@ export async function fundLoanFromMorpho(admin: SupabaseClient, loanId: string):
  */
 export async function unwindLoanFromMorpho(admin: SupabaseClient, loanId: string): Promise<void> {
   if (!isMorphoLive() || !HYPERFX_ENABLED) return
-  const { data: draw } = await admin
-    .from('morpho_loan_draws').select('*').eq('loan_id', loanId)
-    .in('status', ['funded', 'settling']).maybeSingle()
-  if (!draw) return
-  const legs = ((draw as any).legs || []) as Leg[]
-  const cngnIn = BigInt((draw as any).cngn_micro || '0')
+
+  // Atomic claim: only ONE runner may unwind a draw. Flip funded/settling → unwinding;
+  // a racing runner (inline repay vs reconcile cron) gets no row back and returns.
+  const { data: claimed } = await admin
+    .from('morpho_loan_draws')
+    .update({ status: 'unwinding', updated_at: new Date().toISOString() })
+    .eq('loan_id', loanId).in('status', ['funded', 'settling'])
+    .select('*').maybeSingle()
+  if (!claimed) return
+
+  const legs = ((claimed as any).legs || []) as Leg[]
+  const cngnIn = BigInt((claimed as any).cngn_micro || '0')
+  let cngnRepaidAccum = BigInt((claimed as any).cngn_repaid_micro || '0')
   if (!legs.length) {
-    await admin.from('morpho_loan_draws').update({ status: 'closed', updated_at: new Date().toISOString() }).eq('loan_id', loanId)
+    await admin.rpc('record_morpho_unwind', { p_loan_id: loanId, p_cngn_repaid_micro: '0', p_financing_cost_micro: '0', p_repay_tx: null })
     return
   }
   const rate = await setting(admin, 'usd_ngn_rate', DEFAULT_RATE)
 
+  let cngnUsedThisRun = 0n
+  let repayTx = ''
   try {
-    const result = await withLease('custody:signer', async () => {
-      // 1) Current USDC owed for each leg's shares — principal + accrued Morpho interest.
-      let totalOwed = 0n
-      for (const leg of legs) totalOwed += await owedUsdcForShares(leg.symbol, BigInt(leg.borrow_shares || '0'))
+    await withLease('custody:signer', async () => {
+      // USDC still owed = legs not yet repaid (idempotent: a resumed run skips done legs).
+      let owed = 0n
+      for (const leg of legs) if (!leg.repaid) owed += await owedUsdcForShares(leg.symbol, BigInt(leg.borrow_shares || '0'))
 
-      if (totalOwed <= 0n) {
-        for (const leg of legs) await withdrawCollateral(leg.symbol, BigInt(leg.collateral_base))
-        return { repayTx: '', cngnUsed: 0n, financingCost: 0n }
+      // Buy back enough USDC via HyperFX (3% headroom for FX drift + interest tick).
+      if (owed > 0n) {
+        const cngnToConvert = (owed * BigInt(Math.round(rate)) * 103n) / 100n
+        const usdcGot = await convertCngnToUsdc(cngnToConvert)
+        if (usdcGot < owed) throw new Error(`unwind FX short: got ${usdcGot} < owed ${owed}`)
+        // Only the fraction of converted cNGN that actually clears the debt is a cost;
+        // leftover USDC stays custody float (excluded).
+        cngnUsedThisRun = (cngnToConvert * owed) / usdcGot
       }
 
-      // 2) Buy back exactly-enough USDC via HyperFX (3% headroom for FX drift + interest tick).
-      const cngnToConvert = (totalOwed * BigInt(Math.round(rate)) * 103n) / 100n
-      const usdcGot = await convertCngnToUsdc(cngnToConvert)
-      if (usdcGot < totalOwed) throw new Error(`unwind FX short: got ${usdcGot} < owed ${totalOwed}`)
-
-      // 3) Fully close each leg by SHARES (principal + interest) and pull its collateral back.
-      let repayTx = ''
+      // Close each leg by SHARES (principal + interest) then pull its collateral. Each
+      // step flips a flag so a mid-way failure resumes here instead of repeating.
       for (const leg of legs) {
-        const sh = BigInt(leg.borrow_shares || '0')
-        if (sh > 0n) repayTx = await repayShares(leg.symbol, sh)
-        await withdrawCollateral(leg.symbol, BigInt(leg.collateral_base))
+        if (!leg.repaid) {
+          const sh = BigInt(leg.borrow_shares || '0')
+          if (sh > 0n) repayTx = await repayShares(leg.symbol, sh)
+          leg.repaid = true
+        }
+        if (!leg.withdrawn) {
+          await withdrawCollateral(leg.symbol, BigInt(leg.collateral_base))
+          leg.withdrawn = true
+        }
       }
+    }, { holder: `morpho-unwind ${loanId}`, waitMs: 60_000 })
 
-      // 4) Financing cost (cNGN): the share of converted cNGN that actually paid the debt
-      //    (leftover USDC stays custody float, so it's excluded), minus what we received at
-      //    funding. This = Morpho borrow interest + HyperFX round-trip spread for this loan.
-      const cngnUsed = (cngnToConvert * totalOwed) / usdcGot
-      const financingCost = cngnUsed - cngnIn
-      return { repayTx, cngnUsed, financingCost }
-    }, { holder: `morpho-unwind ${loanId}`, waitMs: 25_000 })
-
-    // Close the draw + book the cost against net revenue, atomically.
-    await admin.rpc('record_morpho_unwind', {
-      p_loan_id: loanId,
-      p_cngn_repaid_micro: result.cngnUsed.toString(),
-      p_financing_cost_micro: result.financingCost.toString(),
-      p_repay_tx: result.repayTx || null,
-    })
+    cngnRepaidAccum += cngnUsedThisRun
+    const allDone = legs.every((l) => l.repaid && l.withdrawn)
+    if (allDone) {
+      const financingCost = cngnRepaidAccum - cngnIn
+      await admin.rpc('record_morpho_unwind', {
+        p_loan_id: loanId,
+        p_cngn_repaid_micro: cngnRepaidAccum.toString(),
+        p_financing_cost_micro: financingCost.toString(),
+        p_repay_tx: repayTx || null,
+      })
+    } else {
+      // Shouldn't happen (loop completes or throws), but persist and let reconcile resume.
+      await admin.from('morpho_loan_draws').update({
+        status: 'funded', legs, cngn_repaid_micro: cngnRepaidAccum.toString(), updated_at: new Date().toISOString(),
+      }).eq('loan_id', loanId)
+    }
   } catch (e) {
+    // Persist per-leg progress + cNGN spent so far, and hand back to 'funded' so the
+    // reconcile cron resumes ONLY the remaining legs (never re-repaying a done one).
+    cngnRepaidAccum += cngnUsedThisRun
+    await admin.from('morpho_loan_draws').update({
+      status: 'funded', legs, cngn_repaid_micro: cngnRepaidAccum.toString(),
+      error: (e instanceof Error ? e.message : 'unwind failed').slice(0, 500), updated_at: new Date().toISOString(),
+    }).eq('loan_id', loanId)
     console.error('[morpho-treasury] unwind failed (will retry)', { loanId, msg: e instanceof Error ? e.message : e })
-    // Leave status as-is so the reconcile cron retries.
   }
 }
 
@@ -206,6 +232,13 @@ export async function unwindLoanFromMorpho(admin: SupabaseClient, loanId: string
 export async function reconcileMorphoDraws(admin: SupabaseClient): Promise<{ settled: number; unwound: number }> {
   const out = { settled: 0, unwound: 0 }
   if (!isMorphoLive() || !HYPERFX_ENABLED) return out
+
+  // 0) Recover draws stuck 'unwinding' (a process died mid-unwind). After a grace period,
+  //    hand them back to 'funded' so the unwind (idempotent per-leg) resumes.
+  const staleIso = new Date(Date.now() - 5 * 60_000).toISOString()
+  await admin.from('morpho_loan_draws')
+    .update({ status: 'funded', updated_at: new Date().toISOString() })
+    .eq('status', 'unwinding').lt('updated_at', staleIso)
 
   // 1) settling → retry the USDC→cNGN conversion.
   const { data: settling } = await admin

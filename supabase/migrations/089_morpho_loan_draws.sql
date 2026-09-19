@@ -23,7 +23,12 @@ CREATE TABLE IF NOT EXISTS public.morpho_loan_draws (
   -- Per-market legs: [{symbol, collateral_base, usdc_micro, supply_tx, borrow_tx}]
   legs         jsonb NOT NULL DEFAULT '[]'::jsonb,
   usdc_micro   bigint NOT NULL DEFAULT 0,   -- total USDC borrowed on Morpho for this loan
-  cngn_micro   bigint NOT NULL DEFAULT 0,   -- cNGN received from HyperFX (0 while 'settling')
+  cngn_micro   bigint NOT NULL DEFAULT 0,   -- cNGN received from HyperFX at funding (0 while 'settling')
+  cngn_repaid_micro   bigint NOT NULL DEFAULT 0,  -- cNGN spent to unwind (buy back USDC + repay)
+  -- All-in cost of this loan's Morpho financing, in cNGN micro:
+  --   cngn_repaid_micro − cngn_micro  (= Morpho borrow interest + HyperFX round-trip spread).
+  -- Booked AGAINST platform_revenue_kobo at unwind so net profit isn't overstated.
+  financing_cost_micro bigint NOT NULL DEFAULT 0,
   repay_tx     text,
   error        text,
   created_at   timestamptz NOT NULL DEFAULT now(),
@@ -46,3 +51,33 @@ INSERT INTO public.platform_settings (key, value) VALUES
   -- fraction of Morpho's LLTV, so we can unwind before Morpho liquidates.
   ('morpho_health_warn_bps', '7500')
 ON CONFLICT (key) DO NOTHING;
+
+-- ── record_morpho_unwind ─────────────────────────────────────────────────────
+-- Close a draw AND book its financing cost against net revenue, atomically. Revenue
+-- from a Morpho-backed loan is: user interest + origination fee (already added to
+-- platform_revenue_kobo by create_loan/repay_loan, migration 042) MINUS this cost, so
+-- decrementing here makes platform_revenue_kobo the TRUE net. Service-role only; called
+-- by the treasury unwind (lib/morpho-treasury.ts) after the on-chain repay settles.
+CREATE OR REPLACE FUNCTION public.record_morpho_unwind(
+  p_loan_id uuid, p_cngn_repaid_micro bigint, p_financing_cost_micro bigint, p_repay_tx text
+) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  UPDATE public.morpho_loan_draws
+     SET status = 'closed',
+         cngn_repaid_micro = GREATEST(0, COALESCE(p_cngn_repaid_micro, 0)),
+         financing_cost_micro = COALESCE(p_financing_cost_micro, 0),
+         repay_tx = p_repay_tx,
+         updated_at = now()
+   WHERE loan_id = p_loan_id;
+
+  -- Only a positive cost reduces net revenue (a negative would mean the round-trip
+  -- somehow gained, which we don't credit — clamp to a cost).
+  IF COALESCE(p_financing_cost_micro, 0) > 0 THEN
+    UPDATE public.platform_settings
+       SET value = GREATEST(0, COALESCE(value::bigint, 0) - FLOOR(p_financing_cost_micro / 10000))::text
+     WHERE key = 'platform_revenue_kobo';
+  END IF;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.record_morpho_unwind(uuid, bigint, bigint, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.record_morpho_unwind(uuid, bigint, bigint, text) TO service_role;

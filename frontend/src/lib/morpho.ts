@@ -126,6 +126,7 @@ const MORPHO_ABI = [
   'function repay((address,address,address,address,uint256) marketParams, uint256 assets, uint256 shares, address onBehalf, bytes data) returns (uint256 assetsRepaid, uint256 sharesRepaid)',
   'function accrueInterest((address,address,address,address,uint256) marketParams)',
   'function position(bytes32 id, address user) view returns (uint256 supplyShares, uint128 borrowShares, uint128 collateral)',
+  'function market(bytes32 id) view returns (uint128 totalSupplyAssets, uint128 totalSupplyShares, uint128 totalBorrowAssets, uint128 totalBorrowShares, uint128 lastUpdate, uint128 fee)',
 ]
 
 async function getSigner(): Promise<ethers.Wallet> {
@@ -172,18 +173,37 @@ export async function supplyCollateral(symbol: string, collateralBase: bigint): 
   return r.hash
 }
 
-/** Borrow `usdcMicro` USDC against the market, received into custody. */
-export async function borrowUsdc(symbol: string, usdcMicro: bigint): Promise<string> {
+/**
+ * Borrow `usdcMicro` USDC against the market, received into custody. Returns the tx hash
+ * AND the borrow SHARES this borrow added (read as the position delta), so the caller can
+ * later repay exactly this loan's debt — principal + its accrued interest — by shares.
+ */
+export async function borrowUsdc(symbol: string, usdcMicro: bigint): Promise<{ txHash: string; shares: bigint }> {
   const m = marketFor(symbol)
   if (usdcMicro <= 0n) throw new Error('Zero borrow')
   const signer = await getSigner()
   const morpho = new ethers.Contract(MORPHO_BLUE, MORPHO_ABI, signer)
+  const id = marketId(m)
+  const before = b((await morpho.position(id, signer.address))[1])
   const tx = await morpho.borrow(toTuple(m), usdcMicro, 0n, signer.address, signer.address, { gasLimit: GAS.borrow })
   const r = await tx.wait(); if (!r || r.status !== 1) throw new Error('borrow reverted')
-  return r.hash
+  const after = b((await morpho.position(id, signer.address))[1])
+  return { txHash: r.hash, shares: after - before }
 }
 
-/** Repay `usdcMicro` USDC of debt (custody must hold the USDC). */
+/** Current USDC owed for a given borrow-share amount in a market (rounded up, as Morpho does). */
+export async function owedUsdcForShares(symbol: string, shares: bigint): Promise<bigint> {
+  if (shares <= 0n) return 0n
+  const m = marketFor(symbol)
+  const signer = await getSigner()
+  const morpho = new ethers.Contract(MORPHO_BLUE, MORPHO_ABI, signer)
+  const mk = await morpho.market(marketId(m))
+  const totalBorrowAssets = b(mk[2]); const totalBorrowShares = b(mk[3])
+  if (totalBorrowShares === 0n) return 0n
+  return (shares * totalBorrowAssets + totalBorrowShares - 1n) / totalBorrowShares
+}
+
+/** Repay `usdcMicro` USDC of debt by assets (custody must hold the USDC). */
 export async function repayUsdc(symbol: string, usdcMicro: bigint): Promise<string> {
   const m = marketFor(symbol)
   if (usdcMicro <= 0n) throw new Error('Zero repay')
@@ -192,6 +212,19 @@ export async function repayUsdc(symbol: string, usdcMicro: bigint): Promise<stri
   const morpho = new ethers.Contract(MORPHO_BLUE, MORPHO_ABI, signer)
   const tx = await morpho.repay(toTuple(m), usdcMicro, 0n, signer.address, '0x', { gasLimit: GAS.repay })
   const r = await tx.wait(); if (!r || r.status !== 1) throw new Error('repay reverted')
+  return r.hash
+}
+
+/** Repay debt by SHARES — fully closes exactly `shares` of this loan's debt incl. accrued
+ *  interest (custody must hold enough USDC; approve MAX so the exact pull always clears). */
+export async function repayShares(symbol: string, shares: bigint): Promise<string> {
+  const m = marketFor(symbol)
+  if (shares <= 0n) throw new Error('Zero repay shares')
+  const signer = await getSigner()
+  await ensureApproval(m.loanToken, signer.address, MORPHO_BLUE, MAX_UINT256 / 2n, signer)
+  const morpho = new ethers.Contract(MORPHO_BLUE, MORPHO_ABI, signer)
+  const tx = await morpho.repay(toTuple(m), 0n, shares, signer.address, '0x', { gasLimit: GAS.repay })
+  const r = await tx.wait(); if (!r || r.status !== 1) throw new Error('repay(shares) reverted')
   return r.hash
 }
 
@@ -233,7 +266,7 @@ export async function borrowCngnAgainstStock(
     if (opts.collateralToSupplyBase && opts.collateralToSupplyBase > 0n) {
       supplyTx = await supplyCollateral(symbol, opts.collateralToSupplyBase)
     }
-    const borrowTx = await borrowUsdc(symbol, opts.usdcToBorrowMicro)
+    const { txHash: borrowTx } = await borrowUsdc(symbol, opts.usdcToBorrowMicro)
     const cngnMicro = await convertUsdcToCngn(opts.usdcToBorrowMicro)
     return { cngnMicro, usdcMicro: opts.usdcToBorrowMicro, borrowTx, supplyTx }
   }, { holder: `morpho-borrow ${symbol}`, waitMs: 25_000 })

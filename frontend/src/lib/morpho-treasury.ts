@@ -28,13 +28,17 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { withLease } from './custody-lease'
 import { HYPERFX_ENABLED, convertUsdcToCngn, convertCngnToUsdc } from './hyperfx'
 import {
-  isMorphoLive, morphoSymbols, supplyCollateral, borrowUsdc, repayUsdc, withdrawCollateral,
+  isMorphoLive, morphoSymbols, supplyCollateral, borrowUsdc, repayShares,
+  withdrawCollateral, owedUsdcForShares,
 } from './morpho'
 
 const B20_DECIMALS = 8
 const DEFAULT_RATE = 1600
 
-interface Leg { symbol: string; collateral_base: string; usdc_micro: string; supply_tx: string; borrow_tx: string }
+interface Leg {
+  symbol: string; collateral_base: string; usdc_micro: string
+  borrow_shares: string; supply_tx: string; borrow_tx: string
+}
 
 async function setting(admin: SupabaseClient, key: string, dflt: number): Promise<number> {
   const { data } = await admin.from('platform_settings').select('value').eq('key', key).maybeSingle()
@@ -99,8 +103,11 @@ export async function fundLoanFromMorpho(admin: SupabaseClient, loanId: string):
         const borrowThis = want < capacity ? want : capacity
         if (borrowThis <= 0n || collateralBase <= 0n) continue
         const supply_tx = await supplyCollateral(e.symbol, collateralBase)
-        const borrow_tx = await borrowUsdc(e.symbol, borrowThis)
-        legs.push({ symbol: e.symbol, collateral_base: collateralBase.toString(), usdc_micro: borrowThis.toString(), supply_tx, borrow_tx })
+        const { txHash: borrow_tx, shares } = await borrowUsdc(e.symbol, borrowThis)
+        legs.push({
+          symbol: e.symbol, collateral_base: collateralBase.toString(), usdc_micro: borrowThis.toString(),
+          borrow_shares: shares.toString(), supply_tx, borrow_tx,
+        })
         borrowed += borrowThis
       }
       if (borrowed <= 0n) throw new Error('no Morpho capacity for this loan')
@@ -139,30 +146,52 @@ export async function unwindLoanFromMorpho(admin: SupabaseClient, loanId: string
     .in('status', ['funded', 'settling']).maybeSingle()
   if (!draw) return
   const legs = ((draw as any).legs || []) as Leg[]
-  const totalUsdc = BigInt((draw as any).usdc_micro || '0')
-  if (!legs.length || totalUsdc <= 0n) {
+  const cngnIn = BigInt((draw as any).cngn_micro || '0')
+  if (!legs.length) {
     await admin.from('morpho_loan_draws').update({ status: 'closed', updated_at: new Date().toISOString() }).eq('loan_id', loanId)
     return
   }
   const rate = await setting(admin, 'usd_ngn_rate', DEFAULT_RATE)
 
   try {
-    const repayTx = await withLease('custody:signer', async () => {
-      // Convert enough cNGN to cover the USDC owed (custody holds the cNGN freed by the
-      // user's repayment). Small headroom (1%) for FX drift; any excess USDC stays float.
-      const cngnNeeded = (totalUsdc * BigInt(Math.round(rate)) * 101n) / 100n
-      await convertCngnToUsdc(cngnNeeded)
-      let last = ''
+    const result = await withLease('custody:signer', async () => {
+      // 1) Current USDC owed for each leg's shares — principal + accrued Morpho interest.
+      let totalOwed = 0n
+      for (const leg of legs) totalOwed += await owedUsdcForShares(leg.symbol, BigInt(leg.borrow_shares || '0'))
+
+      if (totalOwed <= 0n) {
+        for (const leg of legs) await withdrawCollateral(leg.symbol, BigInt(leg.collateral_base))
+        return { repayTx: '', cngnUsed: 0n, financingCost: 0n }
+      }
+
+      // 2) Buy back exactly-enough USDC via HyperFX (3% headroom for FX drift + interest tick).
+      const cngnToConvert = (totalOwed * BigInt(Math.round(rate)) * 103n) / 100n
+      const usdcGot = await convertCngnToUsdc(cngnToConvert)
+      if (usdcGot < totalOwed) throw new Error(`unwind FX short: got ${usdcGot} < owed ${totalOwed}`)
+
+      // 3) Fully close each leg by SHARES (principal + interest) and pull its collateral back.
+      let repayTx = ''
       for (const leg of legs) {
-        last = await repayUsdc(leg.symbol, BigInt(leg.usdc_micro))
+        const sh = BigInt(leg.borrow_shares || '0')
+        if (sh > 0n) repayTx = await repayShares(leg.symbol, sh)
         await withdrawCollateral(leg.symbol, BigInt(leg.collateral_base))
       }
-      return last
+
+      // 4) Financing cost (cNGN): the share of converted cNGN that actually paid the debt
+      //    (leftover USDC stays custody float, so it's excluded), minus what we received at
+      //    funding. This = Morpho borrow interest + HyperFX round-trip spread for this loan.
+      const cngnUsed = (cngnToConvert * totalOwed) / usdcGot
+      const financingCost = cngnUsed - cngnIn
+      return { repayTx, cngnUsed, financingCost }
     }, { holder: `morpho-unwind ${loanId}`, waitMs: 25_000 })
 
-    await admin.from('morpho_loan_draws').update({
-      status: 'closed', repay_tx: repayTx, updated_at: new Date().toISOString(),
-    }).eq('loan_id', loanId)
+    // Close the draw + book the cost against net revenue, atomically.
+    await admin.rpc('record_morpho_unwind', {
+      p_loan_id: loanId,
+      p_cngn_repaid_micro: result.cngnUsed.toString(),
+      p_financing_cost_micro: result.financingCost.toString(),
+      p_repay_tx: result.repayTx || null,
+    })
   } catch (e) {
     console.error('[morpho-treasury] unwind failed (will retry)', { loanId, msg: e instanceof Error ? e.message : e })
     // Leave status as-is so the reconcile cron retries.

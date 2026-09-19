@@ -313,7 +313,13 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
     const val = holdingValue(h)
     const gain = val != null ? val - cost : null
     const gpct = gain != null && cost > 0 ? (gain / cost) * 100 : null
-    const sellable = h.asset_type === 'tokenized_stock'
+    // Sellable = anything the DEX desk can actually settle: a tokenized stock, or a
+    // pre-IPO token that trades on-chain (base_dex, e.g. SPCX). GetEquity RWAs
+    // (asset_type='rwa', provider='getequity', e.g. the DPRI IPO) have no DEX route —
+    // they stay non-sellable here and exit via redemption/maturity. Mirrors the
+    // server-side guard in migration 088 (place_equity_sell).
+    const sellable = (h.asset_type === 'tokenized_stock' || h.asset_type === 'pre_ipo')
+      && h.provider === 'base_dex'
     return (
       <div className="b">
         <button className="back" onClick={() => setSelectedHolding(null)}>← Back</button>

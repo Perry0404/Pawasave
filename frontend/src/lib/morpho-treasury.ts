@@ -27,6 +27,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { withLease } from './custody-lease'
 import { HYPERFX_ENABLED, convertUsdcToCngn, convertCngnToUsdc } from './hyperfx'
+import { custodyCngnBalance, cngnToShares, custodyLendShares, withdrawFromLend } from './custody'
 import {
   isMorphoLive, morphoSymbols, supplyCollateral, borrowUsdc, repayShares,
   withdrawCollateral, owedUsdcForShares,
@@ -34,6 +35,25 @@ import {
 
 const B20_DECIMALS = 8
 const DEFAULT_RATE = 1600
+
+/**
+ * Make sure custody holds `needMicro` of FREE cNGN before a HyperFX cNGN→USDC leg.
+ * The reconcile sweep keeps custody's working cNGN in the PawasaveLend pool (as psNGN
+ * shares) for yield, so custody's free balance is usually ~0 — redeem just enough back
+ * (plus 1% rounding buffer, capped at held shares). Mirrors equity-broker.ensureFreeCngn.
+ * MUST be called under the custody lease (withdrawFromLend signs). Throws if the pool
+ * can't cover it.
+ */
+async function ensureFreeCngn(needMicro: bigint): Promise<void> {
+  const free = await custodyCngnBalance()
+  if (free >= needMicro) return
+  const shortfall = needMicro - free
+  let shares = await cngnToShares(shortfall + shortfall / 100n)
+  const held = await custodyLendShares()
+  if (shares > held) shares = held
+  if (shares <= 0n) throw new Error('insufficient pool liquidity to free cNGN for unwind')
+  await withdrawFromLend(shares)
+}
 
 interface Leg {
   symbol: string; collateral_base: string; usdc_micro: string
@@ -174,6 +194,9 @@ export async function unwindLoanFromMorpho(admin: SupabaseClient, loanId: string
       // Buy back enough USDC via HyperFX (3% headroom for FX drift + interest tick).
       if (owed > 0n) {
         const cngnToConvert = (owed * BigInt(Math.round(rate)) * 103n) / 100n
+        // Custody's working cNGN lives in the lend pool — free up enough first, or the
+        // HyperFX transfer reverts ("transfer amount exceeds balance").
+        await ensureFreeCngn(cngnToConvert)
         const usdcGot = await convertCngnToUsdc(cngnToConvert)
         if (usdcGot < owed) throw new Error(`unwind FX short: got ${usdcGot} < owed ${owed}`)
         // Only the fraction of converted cNGN that actually clears the debt is a cost;

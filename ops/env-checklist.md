@@ -94,3 +94,25 @@ no secret to preserve; just **leave `BVN_HASH_SALT` unset** so existing hashes s
 Security follow-up (separate from the move): an unsalted 11-digit BVN hash is brute-forceable;
 adding a real pepper later means re-hashing, which needs the raw BVNs (not stored) — so treat
 as a known limitation to design around, not a quick fix.
+
+## Morpho-backed loan liquidity (phase 2 — DARK until configured)
+Lets custody fund naira loans by borrowing USDC on Morpho Blue (Base) against the
+Coinbase B20 stock a user pledged, then converting USDC→cNGN via HyperFX. Entirely
+inert until enabled; the user's loan works the same with it off (custody float backs it).
+- `MORPHO_ENABLED=true` — master switch.
+- `MORPHO_MARKETS` (JSON) — REQUIRED. Per-symbol Morpho market params, copied EXACTLY
+  from each market page on app.morpho.org (Base). loanToken defaults to USDC and
+  collateralToken defaults to the built-in B20 address, so usually just:
+  `{"SPCX":{"oracle":"0x…","irm":"0x…","lltv":"770000000000000000"},"AAPL":{…}}`
+  (lltv is 1e18-scaled). Wrong params risk liquidation — verify before enabling.
+- Optional: `MORPHO_BLUE_ADDRESS` (defaults to the Base singleton).
+- Reuses `HYPERFX_ENABLED` (+deps) and `CUSTODY_PRIVATE_KEY` — the cNGN legs need HyperFX.
+- **DB:** run migration `089` (morpho_loan_draws + config). Tunables in platform_settings:
+  `morpho_target_ltv_bps` (default 4000 = borrow only ~40% of collateral value, far under
+  Morpho's LLTV) and `morpho_health_warn_bps`.
+- **Cron:** add `/api/cron/morpho-reconcile` (every 15 min; set `HC_MORPHO_RECONCILE`) —
+  finishes no-solver USDC→cNGN draws and unwinds repaid/liquidated loans.
+- Sanity before real money: take ONE tiny stock-backed loan with `MORPHO_ENABLED`, confirm
+  the draw funds (supply+borrow tx on Base, cNGN received), then repay and confirm it unwinds
+  (repay + withdraw-collateral tx). Keep the user LTV (40%) well under Morpho's LLTV so
+  custody is never the one that gets liquidated.

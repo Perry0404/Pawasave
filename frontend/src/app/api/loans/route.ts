@@ -6,6 +6,8 @@ import { verifyPin } from '@/lib/pin-hash'
 import { pinLockGuard, recordPinResult } from '@/lib/pin-lockout'
 import { refreshEquityPrices, heldSymbols } from '@/lib/equity-prices'
 import { refreshRwaPrices } from '@/lib/getequity'
+import { isMorphoLive } from '@/lib/morpho'
+import { fundLoanFromMorpho, unwindLoanFromMorpho } from '@/lib/morpho-treasury'
 
 /**
  * /api/loans — custodial, in-app asset-backed lending.
@@ -40,14 +42,18 @@ async function agreementVersion(supabase: any): Promise<string> {
 /** Refresh the cNGN price cache for this user's stocks so the borrow limit is
  *  priced against live values. Best-effort: a price hiccup just means stale/omitted
  *  equity, never a wrong loan (the RPC ignores prices older than the max age). */
+function adminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } },
+  )
+}
+
 async function refreshUserEquityPrices(userId: string): Promise<void> {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return
   try {
-    const admin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY,
-      { auth: { persistSession: false } },
-    )
+    const admin = adminClient()
     const symbols = await heldSymbols(admin, userId)
     if (symbols.length) await refreshEquityPrices(admin, symbols)
     // Naira assets (GetEquity rwa) are priced from the Market, not Yahoo — no-op until
@@ -135,6 +141,14 @@ export async function POST(request: NextRequest) {
       p_agreement_version: await agreementVersion(supabase),
     })
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    // Treasury (dark unless MORPHO_ENABLED): in the background, back this disbursement
+    // with real cNGN borrowed on Morpho against the pledged stock. Best-effort — never
+    // affects the loan the user just received. The self-hosted node keeps running after
+    // we respond (same pattern as the equity sell flow).
+    const loanId = (data as any)?.loan_id
+    if (isMorphoLive() && loanId && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      void fundLoanFromMorpho(adminClient(), String(loanId)).catch(() => {})
+    }
     return NextResponse.json({ ok: true, ...(data as object) })
   }
 
@@ -151,6 +165,12 @@ export async function POST(request: NextRequest) {
       p_amount_micro: Math.floor(amountNgn * 1_000_000),
     })
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    // On full repayment, unwind this loan's Morpho position in the background
+    // (cNGN → USDC → repay → withdraw collateral). Best-effort; the reconcile cron
+    // retries if a leg fails. Dark unless MORPHO_ENABLED.
+    if (isMorphoLive() && (data as any)?.closed && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      void unwindLoanFromMorpho(adminClient(), String(body.loanId)).catch(() => {})
+    }
     return NextResponse.json({ ok: true, ...(data as object) })
   }
 

@@ -412,7 +412,7 @@ Stocks and Circles follow as two and three. Not yet explicitly confirmed.
 | Parent monorepo | `/home/tnxl/Pawasave/` → `github.com/Perry0404/Pawasave` |
 | Backend (Hono, port 3100) | `backend/` — separate git repo, 113 TS files |
 | Live API surface (today) | `frontend/src/app/api/**` — 76 route files, cookie auth |
-| Migrations | `supabase/migrations/` — 76 files, numbered to `086`, applied by hand |
+| Migrations | `supabase/migrations/` — numbered sequentially, applied by hand. `087` at time of writing; some numbers are skipped, so the count is lower than the highest number. |
 | Design reference | `~/zendfi/zendapp` (Flutter), spec in its `redesign.md` |
 | Design tokens | `frontend/src/app/globals.css`, `.ps` scope |
 | Equity implementation | `frontend/src/lib/equity-broker.ts` |

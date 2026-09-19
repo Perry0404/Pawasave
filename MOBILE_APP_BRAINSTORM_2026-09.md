@@ -2,6 +2,7 @@
 
 **Date:** 2026-09-18
 **Status:** Brainstorm complete, no spec written yet. Flutter scaffold shipped.
+Three of the four open questions are now decided — see §10. Phase 0 is unblocked.
 **Purpose:** Resume point for a fresh session. Self-contained: assumes no prior context.
 
 ---
@@ -340,9 +341,10 @@ First genuinely new backend primitive.
 Gift metadata and sticker catalog on the claim rail, reveal animation ported from zendapp,
 plus a web claim page on the Next app so non-users collect without installing first.
 
-### Phase 5 — Pools
+### Phase 5 — Circles (the Ajo revamp)
 
-Mostly client work; `085` and `circle_messages` already exist.
+Mostly client work; `085` and `circle_messages` already exist. Decided: reuse the existing
+primitive, no new `circle_type`.
 
 ### Phase 6 — stocks and gifting
 
@@ -350,21 +352,55 @@ Last, deliberately. Needs the per-order cap and buy-side floor first.
 
 ---
 
-## 10. Open questions (blocking spec work)
+## 10. Decisions and open questions
 
-1. **The CBN cap.** The founder cited "$2,000 in one go". This does not match the code:
-   everything is domestic naira (cNGN, naira wallets, NUBAN) and `/api/p2p/send` already
-   enforces **₦3M/day on `lite`** (BVN + NUBAN) and **₦10M/day on `full`**. Either the figure
-   refers to a cross-border/FX regime that does not apply to domestic NGN P2P, or tighter caps
-   are wanted than what is implemented. **Unresolved — needs a decision, and a compliance
-   answer rather than a guess.** It directly sets the limit policy in the send route.
-2. **Pools: rename or seventh `circle_type`?** Is "Pools" the consumer-facing name for all of
-   Circles, or a new type alongside the existing six? Cheap either way; it decides the IA.
-3. **PawaVibes claim: web page or app install required?** Recommendation is web claim then
-   upsell the install, since the distribution edge is the whole point.
-4. **v1 slice confirmation.** Proposed: P2P send/request + @handles + notes + activity feed +
-   PawaVibes cash gifts. One coherent product, all on mature rails, and it is the viral loop.
-   Stocks and Pools follow as two and three.
+### Decided (2026-09-18)
+
+**1. The CBN cap — RESOLVED, no change needed.** $2,000 is ~₦3M at prevailing rates, so the
+existing `lite` tier cap already expresses the intended limit. Keep `₦3M` lite / `₦10M` full
+as implemented.
+
+Verified how it actually behaves, since "one go" and the code differ in shape:
+
+- The cap is a **rolling 24-hour aggregate**, not a per-transaction ceiling
+  (`frontend/src/app/api/p2p/send/route.ts:93-108`: `since = now - 24h`, sums matching rows,
+  rejects when `sentTodayMicro + amountMicro > cap`).
+- Because the window starts at zero, a single transfer can never exceed ₦3M anyway. So the
+  implementation is **strictly stronger** than "₦3M in one go": it caps both the single
+  transfer and the daily total. No compliance gap.
+- **Claim sends count.** `p2p_send_claim` books its `transfer_out` row as `status =
+  'completed'` at send time (`083_p2p_transfers.sql:166-173`), with the reasoning in the
+  migration: the money has already left the sender's spendable balance. So PawaVibes and
+  email-claim gifts sit inside the cap rather than bypassing it.
+- **Not client-evadable.** `transactions` grants the client SELECT and INSERT only
+  (`001_initial.sql:56-57`), no UPDATE or DELETE. Extra inserts inflate your own usage, which
+  is self-harm, not evasion.
+
+Two notes for the spec, neither urgent:
+
+- The velocity guard reads `transactions`, which is the client-insertable table F1 is still
+  open on. Not exploitable today, but if this cap is the compliance control it would be
+  cleaner computed from `p2p_transfers`, which is server-authored only.
+- An immediately **cancelled** claim still consumes cap for the full 24h, because the guard
+  sums `transfer_out` and the refund books separately. Conservative direction, so a UX
+  annoyance rather than a hole. Auto-reverts happen at 7 days and are already outside the
+  window.
+
+**2. Circles, not a new type.** Reuse the existing `085` Circles primitive. Do **not** add a
+seventh `circle_type`; the six existing types act as templates underneath.
+
+> Open sub-question, cheap to settle later but it affects all copy: is the **consumer-facing
+> label** "Circles" or "Pools"? The original sketch said Pools; the decision above only
+> settles the data model, not the wording.
+
+**3. PawaVibes claims on the web.** Confirmed. Non-users claim from a web page on the Next
+app, then get upsold the install. Preserves the distribution loop.
+
+### Still open
+
+**4. v1 slice confirmation.** Proposed: P2P send/request + @handles + notes + activity feed +
+PawaVibes cash gifts. One coherent product, all on mature rails, and it is the viral loop.
+Stocks and Circles follow as two and three. Not yet explicitly confirmed.
 
 ---
 
@@ -376,7 +412,7 @@ Last, deliberately. Needs the per-order cap and buy-side floor first.
 | Parent monorepo | `/home/tnxl/Pawasave/` → `github.com/Perry0404/Pawasave` |
 | Backend (Hono, port 3100) | `backend/` — separate git repo, 113 TS files |
 | Live API surface (today) | `frontend/src/app/api/**` — 76 route files, cookie auth |
-| Migrations | `supabase/migrations/` — 76 files, numbered to `086`, applied by hand |
+| Migrations | `supabase/migrations/` — numbered sequentially, applied by hand. `087` at time of writing; some numbers are skipped, so the count is lower than the highest number. |
 | Design reference | `~/zendfi/zendapp` (Flutter), spec in its `redesign.md` |
 | Design tokens | `frontend/src/app/globals.css`, `.ps` scope |
 | Equity implementation | `frontend/src/lib/equity-broker.ts` |

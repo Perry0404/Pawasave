@@ -3,7 +3,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
-import { STRAILS_ENABLED, onboardUser, StrailsError } from '@/lib/strails'
+import { STRAILS_ENABLED, onboardUser, StrailsError, isStrailsInfraFailure } from '@/lib/strails'
 import { sendBvnFailedEmail } from '@/lib/notify-tx'
 
 /**
@@ -86,7 +86,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, status: 'processing', requestId: result.requestId })
   } catch (e) {
     const msg = e instanceof StrailsError ? e.message : 'Onboarding failed, please try again'
-    console.error('[strails/onboard] failed:', e instanceof Error ? e.message : e)
+    const code = e instanceof StrailsError ? e.code : undefined
+    const step = e instanceof StrailsError ? e.step : undefined
+    console.error('[strails/onboard] failed:', { code, step, msg })
+
+    // Our egress IP being refused, or the provider rate-blocking us, is not a bad BVN. Recording
+    // it as 'failed' and emailing "your details didn't match" is wrong, and it pushes the user to
+    // retry, which feeds the same failure-rate counter that blocked the account on 2026-09-18.
+    // Leave their onboarding state untouched so a retry after recovery is a clean first attempt.
+    if (isStrailsInfraFailure(e)) {
+      console.error('[strails/onboard] PROVIDER-SIDE, not the user:', code || msg)
+      return NextResponse.json(
+        { error: 'Naira account setup is briefly unavailable. Your BVN is fine, please try again shortly.' },
+        { status: 503 },
+      )
+    }
+
     try {
       await admin.rpc('set_strails_onboarding', {
         p_user_id: user.id, p_request_id: null, p_strails_uid: null, p_status: 'failed', p_bvn_hash: bvnHash,

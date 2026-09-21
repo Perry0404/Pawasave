@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { checkCronAuth } from '@/lib/cron-auth'
 
 /**
- * GET /api/strails/probe — TEMPORARY diagnostic (cron-auth gated).
+ * GET /api/strails/probe — allowlist diagnostic (cron-auth gated).
  *
  * Strails requires calls to come from a pre-allowlisted IP, but /manageipallowlist
  * must itself be reachable to bootstrap that (chicken-and-egg), so it is very likely
@@ -12,7 +12,10 @@ import { checkCronAuth } from '@/lib/cron-auth'
  *   2. register it via /manageipallowlist (payload shape undocumented → try several)
  *   3. immediately retry a read call on both prod and sandbox
  *
- * Delete once the integration is wired.
+ * Kept rather than deleted after the 2026-09-18 outage: it is the only way to check our egress
+ * IP and allowlist state WITHOUT calling /onboarduser, and every /onboarduser call counts
+ * against Strails' failure-rate limit. Step 3 returns counts and status only, never the
+ * customer virtual accounts themselves.
  */
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -74,9 +77,22 @@ export async function GET(request: NextRequest) {
   }
 
   // ── 3. retry the read on both environments ────────────────────────────────
+  // What we need to know is whether an authenticated read succeeds from this IP, not what it
+  // returns. The full body is a list of customer virtual accounts, names and account numbers
+  // included, so summarise it: the status and count answer the question on their own.
+  const summarise = (r: { status: number; body?: unknown; error?: string }) => {
+    const b = r.body as any
+    return {
+      status: r.status,
+      error: r.error ?? null,
+      providerStatus: b?.status ?? null,
+      message: b?.message ?? null,
+      virtualAccounts: Array.isArray(b?.data?.virtualAccounts) ? b.data.virtualAccounts.length : null,
+    }
+  }
   const after = {
-    prod: await call(`${PROD}/getfintechvirtualaccount`, 'GET'),
-    sandbox: await call(`${SANDBOX}/getfintechvirtualaccount`, 'GET'),
+    prod: summarise(await call(`${PROD}/getfintechvirtualaccount`, 'GET')),
+    sandbox: summarise(await call(`${SANDBOX}/getfintechvirtualaccount`, 'GET')),
   }
 
   return NextResponse.json({ ok: true, egressIp, allowlisted, allowlistAttempts, after })

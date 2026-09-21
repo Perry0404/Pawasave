@@ -32,7 +32,15 @@ const KEY = process.env.STRAILS_API_KEY || ''
 export const STRAILS_ENABLED = process.env.STRAILS_ENABLED === 'true' && Boolean(KEY)
 
 export class StrailsError extends Error {
-  constructor(message: string, readonly status: number, readonly body?: unknown) {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body?: unknown,
+    /** `data.details.error.code`, e.g. BVN_VALIDATION_FAILED. Absent on non-onboarding calls. */
+    readonly code?: string,
+    /** `data.details.error.step`, e.g. bvn_validation. */
+    readonly step?: string,
+  ) {
     super(message)
     this.name = 'StrailsError'
   }
@@ -78,13 +86,56 @@ async function call<T = any>(path: string, body?: unknown, method: 'POST' | 'GET
   try { json = JSON.parse(text) } catch { json = { raw: text } }
   // Strails signals business failures with { status: "Failed" } even on some 200s.
   if (!res.ok || /failed/i.test(String(json?.status ?? ''))) {
-    throw new StrailsError(pick(json, 'message', 'error') || `HTTP ${res.status}`, res.status, json)
+    // The useful part is nested at data.details.error. The top-level message is just
+    // "User registration failed", which told ops nothing during the 2026-09-18 outage.
+    const detail = json?.data?.details?.error
+    throw new StrailsError(
+      pick(detail, 'message') || pick(json, 'message', 'error') || `HTTP ${res.status}`,
+      res.status,
+      json,
+      pick(detail, 'code'),
+      pick(detail, 'step'),
+    )
   }
   // Successful bodies are wrapped as { ..., data: {...} } in the docs' examples.
   return (json?.data ?? json) as T
 }
 
 // ── Onboarding (BVN → permanent virtual account) ───────────────────────────────
+
+/**
+ * Infra-side refusals, where nothing about the user's BVN is wrong so retrying cannot help.
+ * Two shapes seen live: our egress IP rejected by the identity subsystem, and the provider
+ * blocking the account for too many failed validations.
+ */
+export function isStrailsInfraFailure(e: unknown): boolean {
+  if (!(e instanceof StrailsError)) return false
+  const s = `${e.code ?? ''} ${e.message}`.toLowerCase()
+  // onboarding_paused must be in here: it is the breaker's own error, and if it were treated as a
+  // real BVN failure the caller would mark the user failed and email them, which is the exact
+  // mislabelling the breaker exists to stop.
+  return /allowlist|not in the application|ip not allowed|too many failed|failure rate|onboarding_paused/.test(s)
+}
+
+/**
+ * Breaker for BVN onboarding.
+ *
+ * On 2026-09-18 the server moved to a new IP that Strails' gateway accepted but its BVN
+ * subsystem did not. Every signup then failed, and each attempt still counted toward the
+ * provider's failure-rate limit, which blocked the account outright. Without this, clearing
+ * the block just starts the same spiral again.
+ *
+ * Per-process and intentionally simple. With several replicas each holds its own breaker,
+ * which still cuts the attempt rate sharply and needs no schema.
+ */
+const BREAKER_MS = 15 * 60_000
+let breakerUntil = 0
+let breakerReason = ''
+
+export function onboardingBreaker(): { open: boolean; reason: string; retryAfterSec: number } {
+  const left = breakerUntil - Date.now()
+  return { open: left > 0, reason: breakerReason, retryAfterSec: Math.max(0, Math.ceil(left / 1000)) }
+}
 
 export type OnboardResult = { requestId?: string; userHash?: string; status?: string }
 
@@ -105,11 +156,35 @@ export async function onboardUser(input: {
   firstName?: string
   lastName?: string
 }): Promise<OnboardResult> {
-  const d = await call('/onboarduser', input)
-  return {
-    requestId: pick(d, 'requestId', 'request_id'),
-    userHash: pick(d, 'userHash', 'user_hash'),
-    status: pick(d, 'status'), // "processing"
+  const open = onboardingBreaker()
+  if (open.open) {
+    throw new StrailsError(
+      `Onboarding paused: ${open.reason}`,
+      503,
+      undefined,
+      'ONBOARDING_PAUSED',
+      'breaker',
+    )
+  }
+  try {
+    const d = await call('/onboarduser', input)
+    breakerUntil = 0
+    breakerReason = ''
+    return {
+      requestId: pick(d, 'requestId', 'request_id'),
+      userHash: pick(d, 'userHash', 'user_hash'),
+      status: pick(d, 'status'), // "processing"
+    }
+  } catch (e) {
+    if (isStrailsInfraFailure(e)) {
+      breakerUntil = Date.now() + BREAKER_MS
+      breakerReason = e instanceof StrailsError ? e.code || e.message : 'infrastructure failure'
+      console.error(
+        `[strails] onboarding breaker OPEN ${BREAKER_MS / 60_000}m, not the user's BVN:`,
+        breakerReason,
+      )
+    }
+    throw e
   }
 }
 

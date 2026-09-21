@@ -106,6 +106,13 @@ Both found in code. They set the build order.
 
 ### 4.1 The Flutter app cannot talk to the Next API
 
+> **SUPERSEDED — already resolved.** `backend-extraction` task 14 (Wave 3) landed after this was
+> written. All six `/api/p2p/*` routes are now registered in `backend/` and the session adapter
+> swapped the cookie-only `sessionUser()` for `getSupabaseUser()`, which accepts a bearer token.
+> **The real blocker is that the backend has never served traffic:** `api.pawasave.xyz` does not
+> resolve and there is no `.env`. See `pawasave/.kiro/specs/mobile-api-foundation/` §2. The
+> analysis below is kept because the reasoning about cookie-vs-bearer still holds.
+
 Every user-facing Next route authenticates by cookie. 38 route files under
 `frontend/src/app/api/` call `createServerClient` with `cookies()`. The only two files there
 mentioning `Authorization` are a webhook and a cron, not user auth.
@@ -297,15 +304,18 @@ and the implementation shipped green anyway. Code and spec disagree there. Follo
 - **Backend-first, per vertical slice.** Never write Dart against an endpoint that does not
   exist. Each slice: agree the JSON contract → build and test the route in `backend/` → then
   the Dart model and UI.
-- **One spec per slice** in `.kiro/specs/`, requirements → design → tasks, matching the three
-  existing specs.
+- **One spec per slice**, requirements → design → tasks, matching the three existing specs.
+  **Mobile specs live in the app repo** at `pawasave/.kiro/specs/`, not in the parent. `.kiro` is
+  gitignored in the parent but *not* in `pawasave`, so specs kept there are tracked and travel.
+  First one: `pawasave/.kiro/specs/mobile-api-foundation/`.
 - **Money writes keep the existing discipline:** server route authenticates the caller, then a
   `SECURITY DEFINER` RPC under `FOR UPDATE` moves balances, idempotent on a `reference`.
 - **Verification per slice:** `npm run typecheck && npm test` in `backend/` (parity gates
   included), `flutter analyze && flutter test` in the app. Both work today.
 - **Commits:** `type(scope): subject`, lowercase, imperative, under ~70 chars, per
-  `.kiro/steering/code-style.md`. New scope: `mobile`. Reference the spec task in the body
-  since `.kiro/` is gitignored and never appears in a commit.
+  `.kiro/steering/code-style.md`. New scope: `mobile`. In the **parent** repo `.kiro/` is
+  gitignored, so reference the spec task in the commit body rather than expecting the spec to
+  appear in the diff.
 
 ---
 
@@ -419,15 +429,22 @@ Stocks and Circles follow as two and three. Not yet explicitly confirmed.
 | Bearer auth shim | `backend/src/compat/auth-user.ts` |
 | Parity gates | `backend/test/parity.test.ts`, contract in `backend/spec/` |
 
-**Note:** `.kiro/` is gitignored (`.gitignore:26`), so specs and steering do not travel with
-the repo. This file lives at the repo root so it does.
+**Note on `.kiro/`:** gitignored in the **parent** repo (`.gitignore:26`), so the three specs
+there do not travel. It is **not** ignored in `pawasave`, so mobile specs kept at
+`pawasave/.kiro/specs/` are tracked and do travel. This file lives at the parent root for the
+same reason.
+
+The parent's `.kiro/steering/code-style.md` does not travel either. If `pawasave` is opened as a
+standalone workspace, that steering will not be in scope and would need copying in.
 
 ### Related reading, already in the repo
 
 - `PAWASAVE_AUDIT_2026-09_AND_PLAN.md` — 8 Critical / 14 High / 21 Medium. Read before
   building on any subsystem.
-- `.kiro/specs/backend-extraction/tasks.md` — open: 10, 14 (Wave 3), 18 (Wave 7), 19, 20, 21,
-  27, 28, 29, 30.
+- `.kiro/specs/backend-extraction/tasks.md` — open: 10, 18 (Wave 7), 19, 20, 21, 27, 28, 29, 30.
+  **Task 14 (Wave 3) has since landed**, which moved all six `/api/p2p/*` routes into `backend/`
+  and gave them bearer auth. That invalidates blocker §4.1 above: it is already resolved. See
+  `pawasave/.kiro/specs/mobile-api-foundation/` for the corrected reconnaissance.
 - `.kiro/specs/week1-critical-remediation/tasks.md` — open: tasks 1-3 (prod schema never
   captured or diffed), 17, 18, 21, F1-F5.
 - `AUDIT_V2_REMEDIATION.md` — 5 contract fixes are in source but need the v3 redeploy.

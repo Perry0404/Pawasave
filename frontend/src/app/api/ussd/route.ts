@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
-import { STRAILS_ENABLED, onboardUser } from '@/lib/strails'
+import { STRAILS_ENABLED, onboardUser, isStrailsInfraFailure } from '@/lib/strails'
 import { hashPin, verifyPin } from '@/lib/pin-hash'
 
 /**
@@ -106,6 +106,11 @@ export async function POST(req: NextRequest) {
           'We will text you your account number.',
         )
       } catch (e) {
+        // Don't read our own infrastructure trouble out to a USSD caller, and don't imply their
+        // BVN was wrong when it wasn't.
+        if (isStrailsInfraFailure(e)) {
+          return END('Sign-up is briefly unavailable. Your BVN is fine, please try again shortly.')
+        }
         return END('Sign-up could not be completed: ' + (e instanceof Error ? e.message : 'please try again later') + '.')
       }
     }

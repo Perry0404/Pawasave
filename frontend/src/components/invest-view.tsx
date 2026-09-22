@@ -143,7 +143,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
 
   useEffect(() => { loadHoldings(); loadNaira() }, [])
   // Lazy-load NGX prices the first time the tab is opened (keeps our free-tier quota tiny).
-  useEffect(() => { if (cat === 'ngx' && ngx.length === 0) loadNgx() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [cat])
+  useEffect(() => { if (cat === 'naira' && ngx.length === 0) loadNgx() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [cat])
 
   const list: Asset[] = cat === 'tokenized_stock' ? STOCKS : cat === 'pre_ipo' ? PREIPO : nairaAssets
   // A tokenized stock is buyable only if the broker verified an on-chain route for it.
@@ -450,15 +450,15 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
     <div className="b">
       <div className="pool rise">
         <div className="l">{cat === 'naira' ? 'Naira markets' : 'Global markets'}</div>
-        <div className="v" style={{ fontSize: 20 }}>{cat === 'naira' ? 'T-bills, funds & IPOs' : 'Own US stocks & pre-IPO'}</div>
+        <div className="v" style={{ fontSize: 20 }}>{cat === 'naira' ? 'T-bills, funds, IPOs & NGX' : 'Own US stocks & pre-IPO'}</div>
         <span className="apy">Buy with your cNGN · {cat === 'naira' ? 'regulated & on-chain' : 'backed 1:1'}</span>
       </div>
 
       {(cat === 'tokenized_stock' || cat === 'pre_ipo') && !brokerLive && <div className="note">Tokenized stocks &amp; pre-IPO are launching soon. Browse and register interest now.</div>}
       {cat === 'naira' && !nairaLive && <div className="note">Regulated Naira investments (T-bills, funds, REITs) are launching soon. Browse and register interest now.</div>}
 
-      <div className="terms" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginTop: 14 }}>
-        {([['naira', 'Naira'], ['ngx', 'NGX'], ['tokenized_stock', 'US'], ['pre_ipo', 'Pre-IPO']] as const).map(([id, label]) => (
+      <div className="terms" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginTop: 14 }}>
+        {([['naira', 'Naira'], ['tokenized_stock', 'US'], ['pre_ipo', 'Pre-IPO']] as const).map(([id, label]) => (
           <button key={id} className={`term${cat === id ? ' on' : ''}`} onClick={() => setCat(id)}>{label}</button>
         ))}
       </div>
@@ -491,9 +491,6 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
         </>
       )}
 
-      {cat === 'ngx' ? (
-        <NgxList stocks={ngx} asOf={ngxAsOf} enabled={ngxEnabled} />
-      ) : (
       <>
       <div className="sect"><span className="h">{cat === 'tokenized_stock' ? 'Stocks' : cat === 'pre_ipo' ? 'Pre-IPO companies' : 'Regulated Naira assets'}</span></div>
       <div className="rows">
@@ -522,9 +519,10 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
         })}
       </div>
 
-      <p className="p" style={{ margin: '14px 3px 0' }}>Tokenized equities are backed 1:1 and require identity verification (KYC).</p>
+      {cat === 'naira'
+        ? <div style={{ marginTop: 18 }}><NgxList stocks={ngx} asOf={ngxAsOf} enabled={ngxEnabled} /></div>
+        : <p className="p" style={{ margin: '14px 3px 0' }}>Tokenized equities are backed 1:1 and require identity verification (KYC).</p>}
       </>
-      )}
     </div>
   )
 }

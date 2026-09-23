@@ -102,6 +102,12 @@ const RWA_ABI = [
   'function hasPeriodicPayouts() view returns (bool)',
   'function calculatePayout(address user) view returns (uint256 payout, uint256 periodsElapsed)',
   'function claimPayout() external returns (uint256)',
+  // Yield metadata — verified live on Base Sepolia 2026-09-23 (not in the original
+  // docs' interface but present on every listed asset). interestRateBps is the annual
+  // rate in basis points (1620 = 16.20% p.a.), tenorDays the term. Both read 0 for
+  // pure-equity/REIT tokens (DPRI, CHDNRE). Best-effort — default 0 if absent.
+  'function interestRateBps() view returns (uint256)',
+  'function tenorDays() view returns (uint256)',
 ] as const
 
 const ERC20_ABI = [
@@ -123,6 +129,8 @@ export interface GetEquityAsset {
   hasMaturity: boolean
   maturityDate: number   // unix seconds (0 if none)
   hasPeriodicPayouts: boolean
+  interestRateBps: number // annual rate in bps (1620 = 16.20% p.a.); 0 for equity/REIT
+  tenorDays: number       // term in days (0 if none)
 }
 
 export interface BuyQuote { baseCost: bigint; fee: bigint; totalCost: bigint }
@@ -144,7 +152,7 @@ export async function listAssets(): Promise<GetEquityAsset[]> {
   return Promise.all(
     tokens.map(async (token) => {
       const rwa = new ethers.Contract(token, RWA_ABI, provider)
-      const [symbol, name, decimals, payoutToken, tradeable, hasMaturity, hasPayouts] =
+      const [symbol, name, decimals, payoutToken, tradeable, hasMaturity, hasPayouts, rateBps, tenor] =
         await Promise.all([
           rwa.symbol().catch(() => 'RWA'),
           rwa.name().catch(() => 'GetEquity Asset'),
@@ -153,6 +161,8 @@ export async function listAssets(): Promise<GetEquityAsset[]> {
           market.isAssetTradeable(token).catch(() => false),
           rwa.hasMaturity().catch(() => false),
           rwa.hasPeriodicPayouts().catch(() => false),
+          rwa.interestRateBps().catch(() => 0n),
+          rwa.tenorDays().catch(() => 0n),
         ])
       let maturityDate = 0
       if (hasMaturity) maturityDate = Number(await rwa.maturityDate().catch(() => 0n))
@@ -166,6 +176,8 @@ export async function listAssets(): Promise<GetEquityAsset[]> {
         hasMaturity: Boolean(hasMaturity),
         maturityDate,
         hasPeriodicPayouts: Boolean(hasPayouts),
+        interestRateBps: Number(rateBps),
+        tenorDays: Number(tenor),
       }
     }),
   )

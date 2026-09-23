@@ -45,6 +45,9 @@ async function getUser() {
 const PRODUCT_META: Record<string, { name: string; kind: 'term' | 'fund' | 'equity'; blurb: string }> = {
   DPRI:  { name: 'Dangote Refinery IPO',         kind: 'equity', blurb: 'Pre-IPO equity' },
   NTBS5: { name: 'Nigerian Treasury Bill Series 5', kind: 'term', blurb: 'Government-backed · fixed income' },
+  NTBL:  { name: 'Nigerian Treasury Bill',       kind: 'term', blurb: 'Government-backed · fixed income' },
+  NTBS8: { name: 'Nigerian Treasury Bill Series 8', kind: 'term', blurb: 'Government-backed · fixed income' },
+  ARMNGF:{ name: 'ARM NGN Mutual Fund',          kind: 'fund', blurb: 'Money-market fund · withdraw anytime' },
 }
 
 /**
@@ -71,6 +74,8 @@ type ProductCard = {
   blurb: string
   tradeable: boolean
   maturityDate: number
+  rateBps: number         // annual yield in bps (1620 = 16.20% p.a.); 0 for equity/REIT
+  tenorDays: number       // term in days (0 if none)
   minCngnMicro?: string   // real minimum buy (10 units at live price, grossed up for our fee)
 }
 
@@ -82,7 +87,7 @@ function previewCards(): ProductCard[] {
     .filter(([symbol]) => isAllowed(symbol, allow))
     .map(([symbol, m]) => ({
       token: null, symbol, name: m.name, kind: m.kind, blurb: m.blurb,
-      tradeable: false, maturityDate: 0,
+      tradeable: false, maturityDate: 0, rateBps: 0, tenorDays: 0,
     }))
 }
 
@@ -101,6 +106,8 @@ function toCard(a: GetEquityAsset): ProductCard {
     blurb: meta?.blurb ?? (kind === 'term' ? 'Fixed term' : kind === 'fund' ? 'Withdraw anytime' : 'Equity'),
     tradeable: a.tradeable,
     maturityDate: a.maturityDate,
+    rateBps: a.interestRateBps,
+    tenorDays: a.tenorDays,
   }
 }
 

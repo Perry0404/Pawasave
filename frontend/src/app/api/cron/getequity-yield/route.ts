@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { checkCronAuth } from '@/lib/cron-auth'
 import {
-  GETEQUITY_ENABLED, buyWithCngn, quoteSell, custodyAssetBalance, pendingPayout, claimPayout,
+  GETEQUITY_ENABLED, buyWithCngn, quoteSell, custodyAssetBalance, redeemIfMatured,
 } from '@/lib/getequity'
 import { custodyCngnBalance } from '@/lib/custody'
 import { withLease, LeaseUnavailableError } from '@/lib/custody-lease'
@@ -27,7 +27,12 @@ import { withLease, LeaseUnavailableError } from '@/lib/custody-lease'
  *  • DARK by default: does nothing unless GETEQUITY_ENABLED is set AND a route has a
  *    token + a POSITIVE cap. Not scheduled in ops/cron/crontab — add it when enabling.
  *
- * Each route per run: (1) claim accrued interest back into custody, then (2) top up
+ * YIELD MODEL: GetEquity has NO coupons — interest accrues into the Market PRICE, so a
+ * position's yield is captured in what it sells for (`quoteSell`). There is nothing to
+ * claim. The only cash event is at MATURITY, where `redeemPrincipal()` converts the
+ * (fully accrued) position back to cNGN — so each run first redeems any matured position.
+ *
+ * Each route per run: (1) redeem any matured position back to custody, then (2) top up
  * toward its cap with deployable idle float.
  */
 export const dynamic = 'force-dynamic'
@@ -43,18 +48,17 @@ const FLEX_CAP   = BigInt(process.env.GETEQUITY_YIELD_FLEX_MAX_MICRO || '0')
 const MIN_MICRO     = BigInt(process.env.GETEQUITY_YIELD_MIN_MICRO || '1000000000') // ₦1,000 min deploy
 const RESERVE_MICRO = BigInt(process.env.GETEQUITY_YIELD_RESERVE_MICRO || '0')      // liquid withdrawal float to keep
 
-/** Claim interest, then top a single asset toward its cap with deployable idle cNGN. */
+/** Redeem any matured position, then top a single asset toward its cap with idle cNGN. */
 async function deployRoute(label: string, token: string, capMicro: bigint): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { label, token, deployedMicro: '0' }
 
-  // 1) Claim accrued interest first — brings cNGN back into custody.
+  // 1) Redeem at maturity — the only cash event under the price-accrual model. Yield
+  //    otherwise lives in the position's price and is captured by quoteSell below.
   try {
-    if ((await pendingPayout(token)) > 0n) {
-      const { txHash } = await claimPayout(token)
-      out.claimedTx = txHash
-    }
+    const { redeemed, txHash } = await redeemIfMatured(token)
+    if (redeemed) out.redeemedTx = txHash
   } catch (e) {
-    out.claimError = e instanceof Error ? e.message : String(e)
+    out.redeemError = e instanceof Error ? e.message : String(e)
   }
 
   // 2) How much is already parked here (what we'd get back selling the position)?

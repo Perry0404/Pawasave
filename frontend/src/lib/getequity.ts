@@ -3,10 +3,19 @@
  *
  * GetEquity tokenises regulated Nigerian investment products (Treasury bills,
  * mutual funds, REITs, private raises) as ERC-20 "RWA tokens" on Base. Each token
- * trades against a single Market contract at an admin-set price, settles in a
- * per-asset payout token (cNGN or USDC — ALWAYS read `payoutToken()`, never assume),
- * and — for debt/fund instruments — accrues interest that is claimed via
- * `claimPayout()`. This is the yield inventory for PawaSave's Invest tab.
+ * trades against a single Market contract at a price that accrues interest, settles
+ * in a per-asset payout token (cNGN or USDC — ALWAYS read `payoutToken()`, never
+ * assume). This is the yield inventory for PawaSave's Invest tab.
+ *
+ * YIELD MODEL (confirmed on GetEquity's on-chain docs 2026-09-23): there are NO
+ * coupons and nothing to claim — the old `claimPayout()`/`calculatePayout()` were
+ * REMOVED upstream. Debt/fund tokens accrue interest INTO THE MARKET PRICE at the
+ * contractual annual rate (`interestRateBps`): the unit balance stays fixed and each
+ * unit becomes worth more every second. You realise the gain by (a) SELLING at the
+ * appreciated price (`calculateSellPayout` → `sell`), or (b) after maturity, calling
+ * `redeemPrincipal()` on the token. So realised/mark-to-market value = `quoteSell`,
+ * never a "pending payout". (Note: on Base Sepolia the accretion clock is not visibly
+ * ticking for every asset — verify realised appreciation on mainnet before relying on it.)
  *
  * We integrate at the CONTRACT layer (not their REST API) because PawaSave already
  * holds cNGN in custody and speaks Base — buying an RWA is the exact approve→call
@@ -100,8 +109,10 @@ const RWA_ABI = [
   'function hasMaturity() view returns (bool)',
   'function maturityDate() view returns (uint256)',
   'function hasPeriodicPayouts() view returns (bool)',
-  'function calculatePayout(address user) view returns (uint256 payout, uint256 periodsElapsed)',
-  'function claimPayout() external returns (uint256)',
+  // Exit at maturity — pays the accrued principal in the payout token (reverts
+  // "RWA: Not matured yet" before maturityDate). Replaces the removed claimPayout().
+  'function redeemPrincipal() external returns (uint256)',
+  'function paused() view returns (bool)',
   // Yield metadata — verified live on Base Sepolia 2026-09-23 (not in the original
   // docs' interface but present on every listed asset). interestRateBps is the annual
   // rate in basis points (1620 = 16.20% p.a.), tenorDays the term. Both read 0 for
@@ -207,13 +218,44 @@ export async function custodyAssetBalance(token: string): Promise<bigint> {
   return b(await rwa.balanceOf(cust))
 }
 
-/** Interest accrued and claimable by custody for a periodic-payout asset. */
-export async function pendingPayout(token: string): Promise<bigint> {
+/**
+ * Mark-to-market value (in the payout token) of custody's whole position in `token`,
+ * i.e. what selling it back to the Market would net right now. Under the price-accrual
+ * model this IS the accrued yield — there is no separate claimable payout. Returns 0
+ * when custody holds none.
+ */
+export async function positionValue(token: string): Promise<bigint> {
+  ensureEnabled()
+  const bal = await custodyAssetBalance(token)
+  if (bal <= 0n) return 0n
+  return (await quoteSell(token, bal)).netPayout
+}
+
+/** True once `token` has passed its maturity date (so redeemPrincipal will succeed). */
+export async function isMatured(token: string): Promise<boolean> {
   ensureEnabled()
   const rwa = new ethers.Contract(token, RWA_ABI, getProvider())
-  const cust = (await getSigner()).address
-  const [payout] = await rwa.calculatePayout(cust)
-  return b(payout)
+  const [has, when] = await Promise.all([
+    rwa.hasMaturity().catch(() => false),
+    rwa.maturityDate().catch(() => 0n),
+  ])
+  return Boolean(has) && Number(when) > 0 && Number(when) * 1000 <= Date.now()
+}
+
+/**
+ * Redeem custody's matured position back to cNGN via `redeemPrincipal()`. No-op
+ * (returns redeemed:false) if custody holds none or the asset hasn't matured — the
+ * contract reverts "RWA: Not matured yet" before maturityDate, so we gate on isMatured.
+ */
+export async function redeemIfMatured(token: string): Promise<{ redeemed: boolean; txHash?: string }> {
+  ensureEnabled()
+  if ((await custodyAssetBalance(token)) <= 0n) return { redeemed: false }
+  if (!(await isMatured(token))) return { redeemed: false }
+  const signer = await getSigner()
+  const rwa = new ethers.Contract(token, RWA_ABI, signer)
+  const tx = await rwa.redeemPrincipal({ gasLimit: GAS.claim })
+  const receipt = await tx.wait()
+  return { redeemed: true, txHash: receipt.hash }
 }
 
 // ── Writes (custody wallet) ───────────────────────────────────────────────────
@@ -361,17 +403,9 @@ export async function sellAsset(
   return { txHash: receipt.hash }
 }
 
-/** Claim accrued interest on a periodic-payout asset into custody. */
-export async function claimPayout(token: string): Promise<{ txHash: string; claimed: bigint }> {
-  ensureEnabled()
-  const signer = await getSigner()
-  const rwa = new ethers.Contract(token, RWA_ABI, signer)
-  const tx = await rwa.claimPayout({ gasLimit: GAS.claim })
-  const receipt = await tx.wait()
-  // claimPayout returns the amount; re-read pending after mine would be 0, so we
-  // surface the tx hash and let the caller reconcile the payout-token balance delta.
-  return { txHash: receipt.hash, claimed: 0n }
-}
+// NOTE: `claimPayout()`/`pendingPayout()` were removed — GetEquity's model has no
+// coupons. Use `positionValue()` for accrued mark-to-market and `redeemIfMatured()` /
+// `sellAsset()` to realise it. See the file header.
 
 // ── Collateral pricing (feeds the borrow engine) ──────────────────────────────
 

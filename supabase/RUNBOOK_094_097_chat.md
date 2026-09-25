@@ -284,3 +284,41 @@ bash supabase/tests/097_realtime_tickets_run.sh  # 12
 
 Each spins a disposable container, applies the migrations and asserts behaviour rather than shape.
 They need Docker and `psql`.
+
+---
+
+## 7. One query to confirm all four landed
+
+The per-step verifies above are the ones to trust while applying, because each says what specifically
+went wrong. This is the after-the-fact check: run it any time to answer "is this environment migrated?"
+without re-reading the file.
+
+```sql
+select
+  -- 094/095: the tables and the two functions the routes call.
+  (select count(*) from information_schema.tables
+    where table_schema = 'public'
+      and table_name in ('chat_rooms','chat_room_members','chat_messages')) as tables_of_3,
+  (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname in ('chat_room_for_pair','chat_post_message','chat_mark_read','chat_may_pair')
+  ) as functions_of_4,
+  -- 096: history is present and arrived already read, so nobody logs in to a wall of unread badges.
+  (select count(*) from chat_messages where kind = 'payment') as payment_messages,
+  (select count(*) from chat_room_members where unread_count > 0) as members_with_unread,
+  -- 097: the ticket table is unreadable by a session, and neither function is session-callable.
+  (select relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relname = 'realtime_tickets') as tickets_rls,
+  (select count(*) from pg_policies
+    where schemaname = 'public' and tablename = 'realtime_tickets') as tickets_policies;
+```
+
+Expect `tables_of_3 = 3`, `functions_of_4 = 4`, `tickets_rls = true`, `tickets_policies = 0`.
+
+`payment_messages` should match the completed-transfer count from step 0. `members_with_unread` is the
+one worth a second look: the backfill inserts directly rather than through `chat_post_message`
+precisely so history lands read, so a large number here means the backfill took the wrong path and
+every user has a badge for money they already knew about.
+
+**Applied to production 2026-09-18.** Confirmed by the founder running the per-step verifies; the
+numbers above were not independently re-read afterwards.

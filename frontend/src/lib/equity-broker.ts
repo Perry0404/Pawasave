@@ -254,6 +254,22 @@ const ROUTER_ABI = ['function exactInputSingle((address tokenIn,address tokenOut
 const AERO_QUOTER_ABI = ['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,int24 tickSpacing,uint160 sqrtPriceLimitX96)) returns (uint256 amountOut,uint160,uint32,uint256)']
 const AERO_ROUTER_ABI = ['function exactInputSingle((address tokenIn,address tokenOut,int24 tickSpacing,address recipient,uint256 deadline,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)']
 
+/**
+ * A quoter staticCall that fails because the pool doesn't exist reverts (CALL_EXCEPTION);
+ * anything else (429/403/timeout/network) means THIS RPC is unreliable. We must NOT treat
+ * an RPC failure like an absent pool — doing so silently drops the deep-pool tier and lets
+ * the "best" collapse onto a thin tier that happened to answer, which the fair-value guard
+ * then rejects (observed: AAPL quoted 1.48 USDC vs a real 3.31 when a public RPC flaked).
+ * So: swallow only genuine reverts; rethrow RPC errors so withBaseRead fails over.
+ */
+function isNoPoolRevert(e: unknown): boolean {
+  const code = (e as { code?: string })?.code
+  if (code === 'CALL_EXCEPTION') return true
+  const m = (e instanceof Error ? e.message : String(e)).toLowerCase()
+  return /missing revert data|execution reverted|no data present/.test(m)
+    && !/(429|403|rate.?limit|timeout|fetch failed|forbidden|cloudflare)/.test(m)
+}
+
 /** Best (feeTier, quotedOut) for tokenIn→tokenOut across V3 fee tiers, or null if no pool. */
 async function bestQuote(tokenIn: string, tokenOut: string, amountIn: bigint, preferFee?: number): Promise<{ fee: number; out: bigint } | null> {
   return withBaseRead(async (provider) => {
@@ -265,7 +281,9 @@ async function bestQuote(tokenIn: string, tokenOut: string, amountIn: bigint, pr
         const q = await quoter.quoteExactInputSingle.staticCall({ tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96: 0 })
         const out = b(q[0])
         if (out > 0n && (!best || out > best.out)) best = { fee, out }
-      } catch { /* no pool at this tier */ }
+      } catch (e) {
+        if (!isNoPoolRevert(e)) throw e // RPC flake → fail over, don't return a thin best
+      }
     }
     return best
   })
@@ -281,7 +299,9 @@ async function aeroBestQuote(tokenIn: string, tokenOut: string, amountIn: bigint
         const q = await quoter.quoteExactInputSingle.staticCall({ tokenIn, tokenOut, amountIn, tickSpacing, sqrtPriceLimitX96: 0 })
         const out = b(q[0])
         if (out > 0n && (!best || out > best.out)) best = { tickSpacing, out }
-      } catch { /* no CL pool at this tickSpacing */ }
+      } catch (e) {
+        if (!isNoPoolRevert(e)) throw e // RPC flake → fail over, don't return a thin best
+      }
     }
     return best
   })

@@ -22,10 +22,13 @@ const BASE_CHAIN_ID = 8453
 
 // Public last-resort endpoints. Kept short; the operator should configure a
 // paid primary via BASE_MAINNET_RPC_URL for real throughput.
+// NOTE: base.llamarpc.com was removed — it fronts requests with a Cloudflare
+// "Just a moment" challenge that returns 403 HTML to server-side calls, which is
+// worse than no endpoint (it poisons quote reads and hard-fails writes). Add only
+// endpoints that answer JSON-RPC directly from a datacenter IP.
 const PUBLIC_FALLBACKS = [
   'https://mainnet.base.org',
   'https://base.publicnode.com',
-  'https://base.llamarpc.com',
 ]
 
 /** Ordered, de-duplicated list of Base RPC URLs (primary first). */
@@ -80,7 +83,9 @@ export function writeRpcUrls(): string[] {
 function isEndpointFailure(err: unknown): boolean {
   const m = (err instanceof Error ? err.message : String(err)).toLowerCase()
   if (/nonce|revert|insufficient funds|already known|replacement|underpriced/.test(m)) return false
-  return /429|capacity|rate.?limit|quota|failed to detect network|timeout|socket|econnreset|fetch failed|502|503|504|server_error|network_error/.test(m)
+  // 403 / Cloudflare challenge ("just a moment", "enable javascript") = the endpoint is
+  // gating us, not the chain answering — fail over to the next RPC instead of hard-throwing.
+  return /429|403|capacity|rate.?limit|quota|forbidden|cloudflare|just a moment|enable javascript|failed to detect network|timeout|socket|econnreset|fetch failed|502|503|504|server_error|network_error/.test(m)
 }
 
 // Which endpoint we settled on. Sticky for the life of the process so sequential custody

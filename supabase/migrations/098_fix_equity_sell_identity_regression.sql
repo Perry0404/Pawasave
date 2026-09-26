@@ -1,5 +1,6 @@
--- 093_fix_equity_sell_identity_regression.sql
+-- 098_fix_equity_sell_identity_regression.sql
 -- Fix a regression that 088 introduced into place_equity_sell.
+-- (Renumbered 093 -> 098: main already shipped a 093_resolve_profiles + 094-097 chat.)
 --
 -- WHAT BROKE: migration 068 had relaxed place_equity_sell to (a) accept Strails BVN
 -- onboarding as identity (not only Sense 'verified'), and (b) reduce invested_cngn_micro

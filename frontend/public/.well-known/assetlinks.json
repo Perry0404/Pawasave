@@ -3,9 +3,9 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "com.pawasave.app",
+      "package_name": "xyz.pawasave.twa",
       "sha256_cert_fingerprints": [
-        "REPLACE_WITH_PLAY_APP_SIGNING_SHA256_FINGERPRINT"
+        "84:BE:E1:27:3A:71:B7:89:27:5E:4C:98:63:4D:D3:24:11:F0:09:1A:2E:9A:FF:6C:95:8E:D2:83:A9:17:1E:78"
       ]
     }
   }

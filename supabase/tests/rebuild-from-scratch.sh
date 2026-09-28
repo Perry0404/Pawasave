@@ -47,6 +47,15 @@ do $$ begin
   if not exists (select 1 from pg_roles where rolname='service_role')   then create role service_role;   end if;
   if not exists (select 1 from pg_roles where rolname='supabase_admin') then create role supabase_admin; end if;
 end $$;
+
+-- service_role BYPASSES RLS on Supabase, and a plain `create role` does not.
+--
+-- Without this a behaviour test running `set local role service_role` cannot read esusu_groups, so a
+-- group id looked up inside the role block comes back NULL and the function under test answers
+-- "circle not found". That is a harness artefact that reads exactly like a real bug, and it cost an
+-- afternoon once. Every backend route uses the service key precisely because it bypasses RLS.
+alter role service_role   bypassrls;
+alter role supabase_admin bypassrls;
 create extension if not exists "uuid-ossp";
 create extension if not exists pgcrypto;
 create schema if not exists auth;

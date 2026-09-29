@@ -65,10 +65,18 @@ create table if not exists auth.users (
   created_at timestamptz default now(), updated_at timestamptz default now(),
   aud text, role text, instance_id uuid, confirmation_token text, recovery_token text
 );
+-- nullif BEFORE the cast, not after.
+--
+-- `current_setting('request.jwt.claims', true)` returns an empty string, not null, when the setting
+-- has never been set in this transaction — and `''::jsonb` raises "invalid input syntax for type
+-- json". Any statement that reaches auth.uid() or auth.role() outside a simulated session then fails
+-- for a reason that has nothing to do with what is under test. It cost a wrong diagnosis once: the
+-- savings_goals insert trigger calls auth.role(), so a plain superuser insert blew up and looked like
+-- a broken migration. Supabase's own helpers tolerate this.
 create or replace function auth.uid() returns uuid language sql stable as $$
-  select nullif(current_setting('request.jwt.claims', true)::jsonb->>'sub','')::uuid $$;
+  select nullif(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'sub','')::uuid $$;
 create or replace function auth.role() returns text language sql stable as $$
-  select nullif(current_setting('request.jwt.claims', true)::jsonb->>'role','')::text $$;
+  select nullif(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role','')::text $$;
 grant usage on schema auth to anon, authenticated, service_role;
 grant execute on function auth.uid(), auth.role() to anon, authenticated, service_role;
 grant usage on schema public to anon, authenticated, service_role;

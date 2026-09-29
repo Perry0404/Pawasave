@@ -53,7 +53,10 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const { data } = await supabase
     .from('portfolio_holdings')
-    .select('symbol, asset_type, provider, invested_cngn_micro, shares, updated_at')
+    // pledged_loan_id so a client can tell a frozen holding from a free one. place_equity_sell
+    // refuses a pledged position (109), and without this a client would have to offer the sell and
+    // let it fail. Kept in step with the backend copy of this route.
+    .select('symbol, asset_type, provider, invested_cngn_micro, shares, updated_at, pledged_loan_id')
     .order('updated_at', { ascending: false })
   // Recent orders so the client can poll a background buy's outcome (processing→filled/refunded).
   const { data: orders } = await supabase

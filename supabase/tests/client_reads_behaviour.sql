@@ -140,5 +140,70 @@ begin
     coalesce(v_type,'(missing)'), v_type = 'uuid');
 end $$;
 
+-- 12. SavingsRepository.goalColumns
+--     'id, title, target_usdc_micro, saved_usdc_micro, contribution_usdc_micro, frequency,
+--      status, started_at, last_contributed_at, completed_at'
+--     created_at is in the ORDER BY rather than the select list, so it has to resolve too.
+do $$
+begin
+  perform id, title, target_usdc_micro, saved_usdc_micro, contribution_usdc_micro, frequency,
+          status, started_at, last_contributed_at, completed_at, created_at
+    from public.savings_goals limit 0;
+  insert into r values (12, 'savings_goals: the viewer''s goals', 'resolves', true);
+exception when others then
+  insert into r values (12, 'savings_goals: the viewer''s goals', SQLERRM, false);
+end $$;
+
+-- 13. SavingsRepository.lockColumns
+--     'id, amount_usdc_micro, projected_interest_micro, duration_days, unlocks_at, locked_at,
+--      status, effective_rate_at_creation, pledged_loan_id'
+--     locked_at, not created_at: both exist here, and locked_at is the one the domain means.
+do $$
+begin
+  perform id, amount_usdc_micro, projected_interest_micro, duration_days, unlocks_at, locked_at,
+          status, effective_rate_at_creation, pledged_loan_id
+    from public.savings_locks limit 0;
+  insert into r values (13, 'savings_locks: the viewer''s fixed locks', 'resolves', true);
+exception when others then
+  insert into r values (13, 'savings_locks: the viewer''s fixed locks', SQLERRM, false);
+end $$;
+
+-- 14. SavingsRepository.terms — 'duration_days, effective_rate_percent'
+do $$
+begin
+  perform duration_days, effective_rate_percent from public.fixed_savings_rates limit 0;
+  insert into r values (14, 'fixed_savings_rates: the terms on offer', 'resolves', true);
+exception when others then
+  insert into r values (14, 'fixed_savings_rates: the terms on offer', SQLERRM, false);
+end $$;
+
+-- 15. The stored rates are effective OVER THE TERM, not annualised.
+--
+-- Pinned because the difference is invisible in a column name and expensive in a UI. The web app
+-- treated these as annual, displayed 15% against the 30-day term, and passed it to lock_savings as
+-- p_apy, which then prorated by days/365 — so it advertised roughly twelve times what it paid. If
+-- somebody "corrects" 4.14 to 15 here, this fails and says why.
+do $$
+declare v_rate numeric;
+begin
+  select effective_rate_percent into v_rate
+    from public.fixed_savings_rates where duration_days = 30;
+  insert into r values (15, '30-day term pays 4.14% over the term, not per year',
+    coalesce(v_rate::text, '(no 30-day row)'), v_rate = 4.14);
+end $$;
+
+-- 16. The ids the client casts to String.
+do $$
+declare v_goal text; v_lock text;
+begin
+  select data_type into v_goal from information_schema.columns
+   where table_schema = 'public' and table_name = 'savings_goals' and column_name = 'id';
+  select data_type into v_lock from information_schema.columns
+   where table_schema = 'public' and table_name = 'savings_locks' and column_name = 'id';
+  insert into r values (16, 'savings goal and lock ids are uuids',
+    format('goal=%s lock=%s', coalesce(v_goal,'(missing)'), coalesce(v_lock,'(missing)')),
+    v_goal = 'uuid' and v_lock = 'uuid');
+end $$;
+
 select ord, name, detail, case when ok then 'PASS' else 'FAIL' end as result
 from r order by ord;

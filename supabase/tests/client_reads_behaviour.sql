@@ -50,10 +50,14 @@ exception when others then
   insert into r values (3, 'profiles: pin state', SQLERRM, false);
 end $$;
 
--- 4. SupabaseProfileRepository
+-- 4. SupabaseProfileRepository.profileColumns
+--    'display_name, tag, kyc_status, strails_onboard_status, strails_va_account_number'
+--    The three identity columns drive Profile.canInvest, which has to match has_invest_identity in
+--    the database. Reading two of the three would make the app stricter than the server.
 do $$
 begin
-  perform display_name, tag from public.profiles limit 0;
+  perform display_name, tag, kyc_status, strails_onboard_status, strails_va_account_number
+    from public.profiles limit 0;
   insert into r values (4, 'profiles: own profile', 'resolves', true);
 exception when others then
   insert into r values (4, 'profiles: own profile', SQLERRM, false);
@@ -203,6 +207,40 @@ begin
   insert into r values (16, 'savings goal and lock ids are uuids',
     format('goal=%s lock=%s', coalesce(v_goal,'(missing)'), coalesce(v_lock,'(missing)')),
     v_goal = 'uuid' and v_lock = 'uuid');
+end $$;
+
+-- 17. Profile.canInvest must agree with has_invest_identity, or the app offers a trade the server
+--     refuses, or hides one it would have allowed. Same three columns, same disjunction.
+do $$
+declare v_dart boolean; v_sql boolean; v_id uuid;
+begin
+  select id into v_id from public.profiles limit 1;
+
+  -- The Dart expression, transcribed. Kept in this shape on purpose so the two read alike.
+  select COALESCE(kyc_status,'') = 'verified'
+      OR COALESCE(strails_onboard_status,'') = 'completed'
+      OR COALESCE(strails_va_account_number,'') <> ''
+    INTO v_dart FROM public.profiles WHERE id = v_id;
+
+  v_sql := public.has_invest_identity(v_id);
+
+  insert into r values (17, 'the app''s invest gate matches the database''s',
+    format('app %s, db %s', v_dart, v_sql), v_dart = v_sql);
+exception when others then
+  insert into r values (17, 'the app''s invest gate matches the database''s', SQLERRM, false);
+end $$;
+
+-- 18. InvestRepository reads holdings through the route, but the route's select has to resolve.
+--     'symbol, asset_type, provider, invested_cngn_micro, shares, updated_at, pledged_loan_id'
+do $$
+begin
+  perform symbol, asset_type, provider, invested_cngn_micro, shares, updated_at, pledged_loan_id
+    from public.portfolio_holdings limit 0;
+  perform id, symbol, status, shares, error, created_at from public.equity_orders limit 0;
+  perform id, symbol, status, cngn_net_micro, error, created_at from public.equity_sales limit 0;
+  insert into r values (18, 'the invest snapshot columns', 'all three resolve', true);
+exception when others then
+  insert into r values (18, 'the invest snapshot columns', SQLERRM, false);
 end $$;
 
 select ord, name, detail, case when ok then 'PASS' else 'FAIL' end as result

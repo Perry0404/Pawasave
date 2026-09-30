@@ -23,7 +23,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
 const DAY_MS = 86_400_000
-const MIN_NGN = Number(process.env.P2P_MIN_NGN || 100)
+const MIN_NGN = Number(process.env.P2P_MIN_NGN || 10)
 const EXPIRY_DAYS = Number(process.env.P2P_CLAIM_EXPIRY_DAYS || 7)
 // KYC tiers: 'lite' = Tier 1 (BVN + NUBAN) — same standing as the ₦3M/day bank-withdrawal tier;
 // 'full' = Sense-verified, higher headroom. ('none' can't send at all — gated below.)

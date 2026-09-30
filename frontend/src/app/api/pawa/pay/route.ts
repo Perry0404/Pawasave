@@ -20,7 +20,7 @@ import { sendPawaSellerPaidEmail, sendPawaBuyerReceiptEmail } from '@/lib/notify
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
-const MIN_NGN = Number(process.env.PAWA_MIN_NGN || 100)
+const MIN_NGN = Number(process.env.PAWA_MIN_NGN || 10)
 const AUTO_RELEASE_DAYS = Number(process.env.PAWA_ESCROW_AUTO_RELEASE_DAYS || 3)
 const DAY_MS = 86_400_000
 const CAP_LITE_NGN = Number(process.env.PAWA_DAILY_CAP_LITE_NGN || 3_000_000)

@@ -57,7 +57,7 @@ test withdrawal — see [[strails-ramp]] / ngx doc notes),
 Strails off-ramp sweep quarantine (`STRAILS_OFFRAMP_SWEEP_QUARANTINE_MIN`, default 90 — how long the
 reconcile sweep leaves a user's Strails wallet alone after a Strails off-ramp, so an in-flight payout
 isn't swept back into the lend pool. Do NOT set below ~30),
-Pay with Pawa §3.6 (`PAWA_MIN_NGN` default 100, `PAWA_ESCROW_AUTO_RELEASE_DAYS` default 3,
+Pay with Pawa §3.6 (`PAWA_MIN_NGN` default 10, `PAWA_ESCROW_AUTO_RELEASE_DAYS` default 3,
 `PAWA_DAILY_CAP_LITE_NGN`/`PAWA_DAILY_CAP_FULL_NGN` default 3M/10M — all optional; the feature works
 on defaults once migration 086 is applied and the pawa-auto-release cron is installed),
 Circles §3.3 (`CIRCLE_MIN_CONTRIB_NGN` default 100 — optional; templated circles work once migration

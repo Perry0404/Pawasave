@@ -30,7 +30,7 @@ function serviceDb() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key, { auth: { persistSession: false } })
 }
 
-const MIN_NGN = Number(process.env.PAWA_MIN_NGN || 100)
+const MIN_NGN = Number(process.env.PAWA_MIN_NGN || 10)
 
 export async function POST(request: NextRequest) {
   try {

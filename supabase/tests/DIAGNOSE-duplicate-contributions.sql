@@ -245,3 +245,59 @@ select
 from public.platform_fees f
 where f.transaction_ref like 'esusu_114c9bac-d976-485a-81ff-d66ff2791cd8%'
 order by f.created_at;
+
+
+-- ── 9. WAS ANY OF THIS PAID OUT AS REAL MONEY? ──────────────────────────────────────────────
+--
+-- The question that matters more than the duplicate rows.
+--
+-- process_esusu_payout credits a real spendable balance:
+--   UPDATE public.wallets SET usdc_balance_micro = usdc_balance_micro + (v_net_payout_kobo * 10000)
+--
+-- So if a pot was inflated — by fabricated contributions, or by the owner writing pot_balance_kobo
+-- directly, which "Owner manages group" FOR ALL permitted until migration 112 — then a payout turned
+-- invented money into cNGN somebody can spend or withdraw.
+--
+-- Every esusu payout and creator cut ever credited, newest first. Check these against contributions
+-- that were actually funded: anything paid out of a circle whose contributions were all client
+-- inserts is money created from nothing.
+select
+  t.created_at,
+  coalesce(nullif(p.display_name,''), p.tag, t.user_id::text) as paid_to,
+  t.type,
+  t.amount_kobo / 100.0 as amount_ngn,
+  t.status,
+  t.description
+from public.transactions t
+left join public.profiles p on p.id = t.user_id
+where t.type in ('esusu_payout', 'creator_incentive')
+order by t.created_at desc;
+
+
+-- ── 10. THE SAME QUESTION, PER CIRCLE. ──────────────────────────────────────────────────────
+-- Funded contributions against what was paid out. A circle that paid out more than was genuinely
+-- contributed to it has produced cNGN from nothing, and the gap is the amount.
+select
+  g.name                                       as circle,
+  g.status,
+  count(c.id)                                  as contribution_rows,
+  count(c.id) filter (
+    where c.amount_kobo = g.contribution_amount_kobo
+                          - floor(g.contribution_amount_kobo * 0.005)
+  )                                            as rows_from_the_rpc,
+  count(c.id) filter (
+    where c.amount_kobo = g.contribution_amount_kobo
+  )                                            as rows_client_inserted,
+  coalesce(sum(c.amount_kobo) filter (
+    where c.amount_kobo = g.contribution_amount_kobo
+                          - floor(g.contribution_amount_kobo * 0.005)
+  ), 0) / 100.0                                as genuinely_contributed_ngn,
+  g.pot_balance_kobo / 100.0                   as pot_now_ngn,
+  g.emergency_pot_kobo / 100.0                 as emergency_pot_ngn,
+  (select count(*) from public.esusu_members mm
+    where mm.group_id = g.id and mm.has_collected) as members_collected
+from public.esusu_groups g
+left join public.esusu_contributions c on c.group_id = g.id
+group by g.id, g.name, g.status, g.contribution_amount_kobo, g.pot_balance_kobo, g.emergency_pot_kobo
+having count(c.id) > 0
+order by rows_client_inserted desc, g.name;

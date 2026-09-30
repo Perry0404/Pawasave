@@ -168,3 +168,80 @@ from (
   group by group_id, member_id, cycle_number
   having count(*) > 1
 ) x;
+
+
+-- ── 6. NET-VS-GROSS: the strongest tell that a row did not come from the RPC. ───────────────
+--
+-- esusu_contribute takes a 0.5% penalty and records the NET:
+--   v_penalty := floor(amount * 0.005); v_net := amount - v_penalty;
+--   INSERT INTO esusu_contributions (..., amount_kobo) VALUES (..., v_net_kobo);
+--
+-- So a ₦1,000 contribution through the RPC records ₦995, not ₦1,000. Every version since migration
+-- 009 has done this; only 005 and 007 recorded the gross, and neither wrote a `reference` at all.
+--
+-- A row holding a round multiple of the circle's contribution amount, with no penalty deducted, was
+-- therefore almost certainly written straight into the table by a browser — which RLS allowed until
+-- migration 100 closed it.
+select
+  g.name                                    as circle,
+  coalesce(nullif(p.display_name,''), p.tag) as member,
+  c.cycle_number,
+  c.amount_kobo                             as recorded_kobo,
+  g.contribution_amount_kobo                as expected_gross_kobo,
+  g.contribution_amount_kobo
+    - floor(g.contribution_amount_kobo * 0.005) as expected_net_kobo,
+  case
+    when c.amount_kobo = g.contribution_amount_kobo
+                         - floor(g.contribution_amount_kobo * 0.005)
+      then 'RPC — penalty deducted, money moved'
+    when c.amount_kobo = g.contribution_amount_kobo
+      then 'CLIENT INSERT — gross amount, no penalty taken'
+    else 'neither — look at this one by hand'
+  end                                       as origin,
+  c.paid_at,
+  c.id                                      as contribution_id
+from public.esusu_contributions c
+join public.esusu_groups g  on g.id = c.group_id
+join public.esusu_members m on m.id = c.member_id
+left join public.profiles p on p.id = m.user_id
+where c.cycle_number > 0
+order by origin, c.paid_at;
+
+
+-- ── 7. DID THE WALLET ACTUALLY LOSE THE MONEY? ──────────────────────────────────────────────
+--
+-- The decisive one, and it assumes nothing about reference formats. Every debit on the payer's
+-- wallet in a window around the duplicates. Five ₦1,000 debits means five real payments; one or none
+-- means the contribution rows were written without money moving.
+--
+-- Replace the two ids if you are checking a different pair.
+select
+  t.created_at,
+  t.type,
+  t.direction,
+  t.amount_kobo / 100.0 as amount_ngn,
+  t.status,
+  t.reference,
+  t.description
+from public.transactions t
+where t.user_id = (
+        select user_id from public.esusu_members
+        where id = '163da100-e6fb-4aae-92d6-f7173106f09d'
+      )
+  and t.created_at between timestamptz '2026-09-07 15:20:00+00'
+                       and timestamptz '2026-09-07 15:25:00+00'
+order by t.created_at;
+
+
+-- ── 8. AND DID THE PENALTY EVER GET BOOKED? ─────────────────────────────────────────────────
+-- esusu_contribute writes a platform_fees row of type 'esusu_penalty' on every funded contribution.
+-- No fee rows for this reference is more evidence the RPC never ran.
+select
+  f.created_at,
+  f.fee_type,
+  f.gross_amount_kobo / 100.0 as gross_ngn,
+  f.fee_amount_kobo / 100.0   as fee_ngn,
+  f.transaction_ref
+from public.platform_fees f
+where f.transaction_ref like 'esusu_114c9bac-d976-485a-81ff-d66ff2791cd8%'
+order by f.created_at;

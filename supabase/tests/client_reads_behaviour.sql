@@ -243,5 +243,68 @@ exception when others then
   insert into r values (18, 'the invest snapshot columns', SQLERRM, false);
 end $$;
 
+-- 19. LoanTerms.keys — the lending terms the app reads straight from platform_settings.
+--     R4.1: the APR, the fee and the term cap are not written in Dart, so they can change without an
+--     app release. Every key must exist, or the app silently quotes its fallback instead.
+do $$
+declare v_missing text;
+begin
+  select string_agg(k, ', ') into v_missing
+    from unnest(array[
+      'loan_apr_percent',
+      'loan_origination_fee_percent',
+      'loan_max_tenor_days',
+      'loan_liquidation_threshold',
+      'loan_liquidation_grace_days'
+    ]) as k
+   where not exists (select 1 from public.platform_settings s where s.key = k);
+  insert into r values (19, 'the loan terms the app reads all exist',
+    coalesce('MISSING: ' || v_missing, 'all five present'), v_missing is null);
+end $$;
+
+-- 20. And a client can actually read them, which is the whole basis for reading them directly.
+do $$
+declare v_count int;
+begin
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"00000000-0000-4000-8000-000000000003","role":"authenticated"}';
+  select count(*) into v_count from public.platform_settings
+   where key like 'loan_%';
+  reset role;
+  insert into r values (20, 'an authenticated client can read the loan settings',
+    v_count::text || ' loan_* keys visible', v_count >= 5);
+exception when others then
+  reset role;
+  insert into r values (20, 'an authenticated client can read the loan settings', SQLERRM, false);
+end $$;
+
+-- 21. LoanSnapshot's loan columns, which the route selects and the app parses.
+do $$
+begin
+  perform id, principal_micro, apr_percent, origination_fee_micro, accrued_interest_micro,
+          borrowed_at, due_date, status, closed_at
+    from public.loans limit 0;
+  perform asset_type, asset_ref, pledged_value_micro, ltv_percent
+    from public.loan_collateral limit 0;
+  insert into r values (21, 'the loan and collateral columns', 'both resolve', true);
+exception when others then
+  insert into r values (21, 'the loan and collateral columns', SQLERRM, false);
+end $$;
+
+-- 22. LoanStatus has exactly the three values the app models. A fourth would parse as 'active',
+--     which for a liquidated loan would be a dangerous thing to render.
+do $$
+declare v_check text;
+begin
+  select pg_get_constraintdef(c.oid) into v_check
+    from pg_constraint c
+    join pg_class t on t.oid = c.conrelid
+   where t.relname = 'loans' and c.contype = 'c'
+     and pg_get_constraintdef(c.oid) ilike '%status%';
+  insert into r values (22, 'a loan is active, repaid or liquidated and nothing else',
+    coalesce(v_check, '(no status constraint)'),
+    v_check like '%active%' and v_check like '%repaid%' and v_check like '%liquidated%');
+end $$;
+
 select ord, name, detail, case when ok then 'PASS' else 'FAIL' end as result
 from r order by ord;

@@ -34,5 +34,13 @@ export async function GET(request: NextRequest) {
   }
 
   console.log('Yield accrual result:', data)
-  return NextResponse.json({ ok: true, result: data })
+
+  // Goals: one day of interest on each active goal's actual balance, only while savings are
+  // backed by gNTB (migration 115). Idempotent per day. A failure here must not hide the
+  // pool result above, so it is reported separately.
+  const { data: goals, error: goalsErr } = await supabase.rpc('accrue_goal_interest')
+  if (goalsErr) console.error('accrue_goal_interest error:', goalsErr)
+  else console.log('Goal interest accrual:', goals)
+
+  return NextResponse.json({ ok: true, result: data, goals: goalsErr ? { error: goalsErr.message } : goals })
 }

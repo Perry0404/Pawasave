@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
+import { getApySettings } from '@/hooks/use-data'
 import { formatNaira, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
 import { siteBaseUrl } from '@/lib/site-url'
 import { CircleNotch, Copy, Check, Crown, ArrowUp, Users, CaretRight, Gift, ChatCircleDots, PaperPlaneRight, CheckCircle } from '@phosphor-icons/react'
@@ -31,6 +32,8 @@ const templateOf = (t?: CircleType) => CIRCLE_TEMPLATES.find((x) => x.type === t
 const isRotating = (g: Pick<EsusuGroup, 'payout_mode' | 'circle_type'>) => (g.payout_mode ?? (g.circle_type && g.circle_type !== 'rotating_ajo' ? 'collection' : 'rotating')) === 'rotating'
 
 export default function GroupsView({ user, wallet }: Props) {
+  const [ajoApy, setAjoApy] = useState<number | null>(null)
+  useEffect(() => { getApySettings().then((s) => setAjoApy(s.backed ? s.ajo : null)) }, [])
   const [groups, setGroups] = useState<(EsusuGroup & { member_count: number })[]>([])
   const [selected, setSelected] = useState<EsusuGroup | null>(null)
   const [members, setMembers] = useState<(EsusuMember & { profile_name?: string })[]>([])
@@ -294,7 +297,6 @@ export default function GroupsView({ user, wallet }: Props) {
         setFeedback('Crypto contribution recorded!')
         openGroup(selected)
         fetch('/api/esusu/contributed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: selected.id }) }).catch(() => {})
-        fetch('/api/esusu/yield', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deposit', group_id: selected.id, contribution_kobo: selected.contribution_amount_kobo }) }).catch(() => {})
       }
       setBusy(false); setTimeout(() => setFeedback(''), 3000); return
     }
@@ -313,13 +315,11 @@ export default function GroupsView({ user, wallet }: Props) {
       setFeedback('Contribution sent!')
       openGroup(selected)
       fetch('/api/esusu/contributed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: selected.id }) }).catch(() => {})
-      fetch('/api/esusu/yield', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deposit', group_id: selected.id, contribution_kobo: selected.contribution_amount_kobo }) }).catch(() => {})
       const { data: payoutResult } = await supabase.rpc('process_esusu_payout', { p_group_id: selected.id })
       if (payoutResult?.ok) {
         setPayoutMsg(payoutResult.completed ? '🎉 Circle complete! All members have been paid.' : `🎉 Cycle ${payoutResult.cycle} complete! Payout sent to the next member.`)
         setTimeout(() => setPayoutMsg(''), 6000)
         openGroup(selected)
-        fetch('/api/esusu/yield', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'payout', group_id: selected.id, recipient_user_id: payoutResult.paid_to }) }).catch(() => {})
       }
     }
     setBusy(false); setTimeout(() => setFeedback(''), 3000)
@@ -738,7 +738,7 @@ export default function GroupsView({ user, wallet }: Props) {
         </div>
       )}
 
-      <p className="p" style={{ margin: '16px 3px 0' }}>Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot. The pot earns 10.5% a year while members save.</p>
+      <p className="p" style={{ margin: '16px 3px 0' }}>Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot.{ajoApy != null ? ` The pot earns ${ajoApy}% a year while members save.` : ''}</p>
     </div>
   )
 }

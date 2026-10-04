@@ -218,6 +218,13 @@ export async function custodyAssetBalance(token: string): Promise<bigint> {
   return b(await rwa.balanceOf(cust))
 }
 
+/** The asset's contractual annual rate in basis points (1450 = 14.5%), 0 if it has none. */
+export async function assetRateBps(token: string): Promise<number> {
+  ensureEnabled()
+  const rwa = new ethers.Contract(token, RWA_ABI, getProvider())
+  return Number(await rwa.interestRateBps().catch(() => 0n))
+}
+
 /**
  * Mark-to-market value (in the payout token) of custody's whole position in `token`,
  * i.e. what selling it back to the Market would net right now. Under the price-accrual

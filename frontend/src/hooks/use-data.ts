@@ -364,6 +364,13 @@ export interface ApySettings {
   xautoUser: number
   mmUser: number
   cngnPool: number
+  ajo: number
+  goals: number
+  fixed: number
+  fixedEnabled: boolean
+  /** True once savings are really deployed into the backing asset (gNTB). Goals/Ajo rates
+   *  are only paid, and only shown, while this is on. */
+  backed: boolean
 }
 
 /**
@@ -372,7 +379,11 @@ export interface ApySettings {
  * rates. Falls back to the historical defaults if a key is unset.
  */
 export async function getApySettings(): Promise<ApySettings> {
-  const fallback: ApySettings = { flexible: 27, xautoUser: 27, mmUser: 27, cngnPool: 27 }
+  // Fail closed: if settings can't be read, show no return and keep fixed deposits shut.
+  const fallback: ApySettings = {
+    flexible: 0, xautoUser: 0, mmUser: 0, cngnPool: 0,
+    ajo: 10.5, goals: 12, fixed: 20, fixedEnabled: false, backed: false,
+  }
   try {
     const { data } = await supabase.rpc('get_apy_settings')
     const s = (data || {}) as Record<string, string>
@@ -385,6 +396,11 @@ export async function getApySettings(): Promise<ApySettings> {
       xautoUser: n(s.xauto_user_apy_percent, fallback.xautoUser),
       mmUser: n(s.mm_user_apy_percent, fallback.mmUser),
       cngnPool: n(s.cngn_pool_apy_percent, fallback.cngnPool),
+      ajo: n(s.ajo_user_apy_percent, fallback.ajo),
+      goals: n(s.goals_user_apy_percent, fallback.goals),
+      fixed: n(s.fixed_user_apy_percent, fallback.fixed),
+      fixedEnabled: s.fixed_savings_enabled === 'true',
+      backed: n(s.yield_backing_apy_percent, 0) > 0,
     }
   } catch {
     return fallback

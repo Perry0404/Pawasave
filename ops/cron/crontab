@@ -50,6 +50,8 @@ CRON_TZ=UTC
 # Release Pay-with-Pawa escrow to the seller once past auto_release_at (buyer never confirmed
 # and never disputed). Hourly so sellers aren't left waiting a long time after the window.
 0 * * * *     . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/pawa-auto-release "$HC_PAWA_AUTO_RELEASE"
+# Cooperative societies: raise dues when a period starts, auto-pay, expire stale payout votes.
+15 * * * *    . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/coop-dues "$HC_COOP_DUES"
 # Finish/unwind Morpho-backed loan liquidity draws (retry no-solver USDC→cNGN, unwind
 # repaid/liquidated loans). No-op unless MORPHO_ENABLED. Every 15 min so parked USDC
 # converts promptly and repaid loans free their Morpho collateral quickly.

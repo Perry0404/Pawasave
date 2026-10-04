@@ -38,9 +38,15 @@ export async function GET(request: NextRequest) {
   // Goals: one day of interest on each active goal's actual balance, only while savings are
   // backed by gNTB (migration 115). Idempotent per day. A failure here must not hide the
   // pool result above, so it is reported separately.
-  const { data: goals, error: goalsErr } = await supabase.rpc('accrue_goal_interest')
-  if (goalsErr) console.error('accrue_goal_interest error:', goalsErr)
-  else console.log('Goal interest accrual:', goals)
+  // Circles (migration 115) and cooperative funds (116) accrue the same way, each into its own
+  // pot/fund, with our spread booked the same day.
+  const savings: Record<string, unknown> = {}
+  for (const [key, fn] of [['goals', 'accrue_goal_interest'], ['circles', 'accrue_circle_interest'], ['coops', 'accrue_coop_interest']] as const) {
+    const { data: r, error: e } = await supabase.rpc(fn)
+    if (e) console.error(`${fn} error:`, e)
+    else console.log(`${fn}:`, r)
+    savings[key] = e ? { error: e.message } : r
+  }
 
-  return NextResponse.json({ ok: true, result: data, goals: goalsErr ? { error: goalsErr.message } : goals })
+  return NextResponse.json({ ok: true, result: data, ...savings })
 }

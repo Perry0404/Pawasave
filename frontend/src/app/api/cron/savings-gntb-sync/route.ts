@@ -9,10 +9,11 @@ import { withLease, LeaseUnavailableError } from '@/lib/custody-lease'
 /**
  * GET /api/cron/savings-gntb-sync   (every 10 min, see ops/cron/crontab)
  *
- * Puts Goals and Ajo money to work 1:1 in GetEquity's gNTB T-bill fund (migration 115).
+ * Puts Goals, Ajo/circle and cooperative money to work 1:1 in GetEquity's gNTB T-bill fund (migration 115).
  * Every naira in an active goal or an active Ajo pot is user money; this keeps custody's
  * savings gNTB worth exactly that much:
- *   target  = Σ active goals' saved balance + Σ active Ajo pots
+ *   target  = Σ active goals (saved + interest credited) + Σ circle pots (+ their interest)
+ *             + Σ cooperative funds
  *   holding = custody gNTB − gNTB that users bought directly in the marketplace
  *   buy the shortfall, sell the excess. No buffer: gNTB redeems at NAV, 0% fee.
  *
@@ -40,15 +41,20 @@ function admin() {
 }
 
 async function savingsTargetMicro(db: ReturnType<typeof admin>): Promise<bigint> {
-  const [{ data: goals, error: gErr }, { data: pots, error: pErr }] = await Promise.all([
-    db.from('savings_goals').select('saved_usdc_micro').eq('status', 'active').gt('saved_usdc_micro', 0).limit(10000),
-    db.from('esusu_groups').select('pot_balance_kobo').eq('status', 'active').gt('pot_balance_kobo', 0).limit(10000),
+  const [goals, pots, coops] = await Promise.all([
+    db.from('savings_goals').select('saved_usdc_micro, interest_earned_micro').eq('status', 'active').limit(10000),
+    db.from('esusu_groups').select('pot_balance_kobo, interest_accrued_micro').in('status', ['forming', 'active']).limit(10000),
+    db.from('cooperatives').select('fund_balance_micro').eq('status', 'active').gt('fund_balance_micro', 0).limit(10000),
   ])
-  if (gErr) throw new Error(`goals query: ${gErr.message}`)
-  if (pErr) throw new Error(`pots query: ${pErr.message}`)
+  if (goals.error) throw new Error(`goals query: ${goals.error.message}`)
+  if (pots.error) throw new Error(`pots query: ${pots.error.message}`)
+  if (coops.error) throw new Error(`coops query: ${coops.error.message}`)
+  const n = (v: unknown) => BigInt(Math.floor(Number(v) || 0))
   let t = 0n
-  for (const g of goals ?? []) t += BigInt(Math.floor(Number(g.saved_usdc_micro) || 0))
-  for (const p of pots ?? []) t += BigInt(Math.floor(Number(p.pot_balance_kobo) || 0)) * 10_000n
+  // What users are owed: principal plus the interest already credited to them.
+  for (const g of goals.data ?? []) t += n(g.saved_usdc_micro) + n(g.interest_earned_micro)
+  for (const p of pots.data ?? []) t += n(p.pot_balance_kobo) * 10_000n + n(p.interest_accrued_micro)
+  for (const c of coops.data ?? []) t += n(c.fund_balance_micro)
   return t
 }
 

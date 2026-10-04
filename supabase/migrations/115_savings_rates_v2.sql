@@ -14,10 +14,14 @@
 --     ACTUAL balance to interest_earned_micro. Completion pays principal + that figure.
 --     Breaking early forfeits it (071 already zeroes it). The day's spread (backing - user
 --     rate) is booked as revenue as it accrues.
---   * Ajo: process_esusu_payout() pays the pot's interest itself, from the contributions the
---     database recorded for the cycle, each earning from its own paid_at, to the recipient
---     the function chose. This replaces /api/esusu/yield, whose deposit call trusted a
---     browser-supplied amount and whose payout call let the caller pick the recipient.
+--   * Ajo and every other circle: accrue_circle_interest() runs daily and adds one day of
+--     interest on the pot's ACTUAL balance to esusu_groups.interest_accrued_micro, booking
+--     our spread the same day. The interest rides with the pot: process_esusu_payout() pays
+--     pot + interest to that cycle's recipient, circle_settle() pays it to the beneficiary.
+--     So with daily Ajo the pot earns for the day it sits, with weekly Ajo for the week; the
+--     member who collects gets contributions + interest, and our cut came in as it earned.
+--     This replaces /api/esusu/yield, whose deposit call trusted a browser-supplied amount
+--     and whose payout call let the caller pick the recipient.
 --
 -- FIXED SAVINGS: 20% a year, gated by fixed_savings_enabled until GetEquity's CP / credit
 -- fund (~23%) is live; gNTB alone cannot fund 20%.
@@ -32,9 +36,14 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- Written by the sync job, so a re-run of this migration must not reset it.
 INSERT INTO public.platform_settings (key, value) VALUES
-  ('yield_backing_apy_percent',     '0'),
-  ('goal_interest_last_accrued_on', '1970-01-01')
+  ('yield_backing_apy_percent',       '0'),
+  ('goal_interest_last_accrued_on',   '1970-01-01'),
+  ('circle_interest_last_accrued_on', '1970-01-01')
 ON CONFLICT (key) DO NOTHING;
+
+-- Interest a circle's pot has earned and not yet paid out (cNGN micro).
+ALTER TABLE public.esusu_groups
+  ADD COLUMN IF NOT EXISTS interest_accrued_micro BIGINT NOT NULL DEFAULT 0;
 
 -- ── 2a. Goals: daily accrual on the actual balance ────────────────────────────
 -- Idempotent per calendar day (UTC): a second call the same day does nothing.
@@ -133,7 +142,69 @@ END;
 $$;
 GRANT EXECUTE ON FUNCTION public.complete_savings_goal(UUID, UUID) TO authenticated, service_role;
 
--- ── 3. Ajo: 099's process_esusu_payout + the pot's interest, paid in-database ─
+-- ── 3a. Circles: daily accrual on the pot's actual balance ────────────────────
+-- Every circle with money in its pot (rotating Ajo, aso ebi, dues, harambee, group buy,
+-- chama) earns the Ajo rate on it for the day. The interest stays with the pot; the spread
+-- is ours the same day. Idempotent per UTC day.
+CREATE OR REPLACE FUNCTION public.accrue_circle_interest()
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_today   date    := (now() AT TIME ZONE 'utc')::date;
+  v_last    date    := COALESCE((SELECT value::date FROM public.platform_settings WHERE key = 'circle_interest_last_accrued_on'), '1970-01-01');
+  v_rate    numeric := COALESCE((SELECT value::numeric FROM public.platform_settings WHERE key = 'ajo_user_apy_percent'), 10.5);
+  v_backing numeric := COALESCE((SELECT value::numeric FROM public.platform_settings WHERE key = 'yield_backing_apy_percent'), 0);
+  r         record;
+  v_pot     bigint;
+  v_user_day bigint;
+  v_spread  bigint;
+  v_circles int    := 0;
+  v_total   bigint := 0;
+  v_spread_total bigint := 0;
+BEGIN
+  IF v_last >= v_today THEN
+    RETURN jsonb_build_object('ok', true, 'skipped', 'already accrued today');
+  END IF;
+  UPDATE public.platform_settings SET value = v_today::text WHERE key = 'circle_interest_last_accrued_on';
+
+  IF v_backing <= 0 THEN
+    RETURN jsonb_build_object('ok', true, 'skipped', 'not backed');
+  END IF;
+  v_rate := LEAST(v_rate, v_backing);
+
+  FOR r IN
+    SELECT id, owner_id, pot_balance_kobo FROM public.esusu_groups
+    WHERE status IN ('forming', 'active') AND pot_balance_kobo > 0
+    FOR UPDATE
+  LOOP
+    v_pot      := r.pot_balance_kobo * 10000;
+    v_user_day := floor(v_pot * (v_rate / 100.0) / 365.0);
+    v_spread   := floor(v_pot * ((v_backing - v_rate) / 100.0) / 365.0);
+    IF v_user_day > 0 THEN
+      UPDATE public.esusu_groups SET interest_accrued_micro = interest_accrued_micro + v_user_day WHERE id = r.id;
+      v_circles := v_circles + 1;
+      v_total   := v_total + v_user_day;
+    END IF;
+    IF v_spread > 0 THEN
+      INSERT INTO public.revenue_journal (user_id, revenue_type, amount_usdc_micro, description)
+      VALUES (r.owner_id, 'yield_spread', v_spread, format('Circle spread (%s): backing %s%% - user %s%%', r.id, v_backing, v_rate));
+      v_spread_total := v_spread_total + v_spread;
+    END IF;
+  END LOOP;
+
+  IF v_spread_total > 0 THEN
+    UPDATE public.platform_settings
+    SET value = (COALESCE(value::bigint, 0) + floor(v_spread_total / 10000))::text
+    WHERE key = 'platform_revenue_kobo';
+  END IF;
+
+  RETURN jsonb_build_object('ok', true, 'circles', v_circles, 'interest_micro', v_total,
+                            'spread_micro', v_spread_total, 'user_apy', v_rate, 'backing_apy', v_backing);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.accrue_circle_interest() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.accrue_circle_interest() TO service_role;
+
+-- ── 3b. Ajo payout: 099's process_esusu_payout + the pot's accrued interest ───
 CREATE OR REPLACE FUNCTION public.process_esusu_payout(p_group_id uuid)
 RETURNS jsonb AS $$
 DECLARE
@@ -142,10 +213,7 @@ DECLARE
   v_recipient public.esusu_members%rowtype;
   v_payout_kobo bigint; v_creator_cut_kobo bigint; v_net_payout_kobo bigint; v_clawback_kobo bigint := 0;
   v_next_cycle int;
-  v_rate    numeric := COALESCE((SELECT value::numeric FROM public.platform_settings WHERE key = 'ajo_user_apy_percent'), 10.5);
-  v_backing numeric := COALESCE((SELECT value::numeric FROM public.platform_settings WHERE key = 'yield_backing_apy_percent'), 0);
-  v_yield_micro  bigint := 0;
-  v_spread_micro bigint := 0;
+  v_yield_micro bigint := 0;
 BEGIN
   IF auth.uid() IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM public.esusu_members WHERE group_id = p_group_id AND user_id = auth.uid()
@@ -197,35 +265,16 @@ BEGIN
   VALUES (v_recipient.user_id, 'esusu_payout', 'credit', v_net_payout_kobo, (v_net_payout_kobo * 10000),
           'Ajo payout - Cycle ' || v_group.current_cycle || ' of "' || v_group.name || '"');
 
-  -- The pot's interest (new in 115). Each recorded contribution this cycle earns from its own
-  -- paid_at until now, at the Ajo rate, only while savings are backed by gNTB. Goes to the
-  -- recipient with the pot, as before.
-  IF v_backing > 0 THEN
-    v_rate := LEAST(v_rate, v_backing);
-    SELECT
-      COALESCE(SUM(floor(ec.amount_kobo * 10000 * (v_rate / 100.0) / 365.0
-                         * GREATEST(EXTRACT(EPOCH FROM (now() - ec.paid_at)) / 86400.0, 0))), 0),
-      COALESCE(SUM(floor(ec.amount_kobo * 10000 * ((v_backing - v_rate) / 100.0) / 365.0
-                         * GREATEST(EXTRACT(EPOCH FROM (now() - ec.paid_at)) / 86400.0, 0))), 0)
-    INTO v_yield_micro, v_spread_micro
-    FROM public.esusu_contributions ec
-    WHERE ec.group_id = p_group_id AND ec.cycle_number = v_group.current_cycle;
-
-    IF v_yield_micro > 0 THEN
-      UPDATE public.wallets SET usdc_balance_micro = usdc_balance_micro + v_yield_micro, updated_at = now()
-      WHERE user_id = v_recipient.user_id;
-      INSERT INTO public.transactions (user_id, type, direction, amount_kobo, amount_usdc_micro, description)
-      VALUES (v_recipient.user_id, 'esusu_payout', 'credit', floor(v_yield_micro / 10000), v_yield_micro,
-              format('Ajo interest - %s%% a year, Cycle %s of "%s"', v_rate, v_group.current_cycle, v_group.name));
-    END IF;
-    IF v_spread_micro > 0 THEN
-      INSERT INTO public.revenue_journal (user_id, revenue_type, amount_usdc_micro, description)
-      VALUES (v_recipient.user_id, 'yield_spread', v_spread_micro,
-              format('Ajo spread (group %s): backing %s%% - user %s%%', p_group_id, v_backing, v_rate));
-      UPDATE public.platform_settings
-      SET value = (COALESCE(value::bigint, 0) + floor(v_spread_micro / 10000))::text
-      WHERE key = 'platform_revenue_kobo';
-    END IF;
+  -- The pot's interest (new in 115): whatever accrue_circle_interest() added while this
+  -- cycle's money sat in the pot. It goes to the recipient with the pot. Our spread was
+  -- already booked day by day, so there is nothing to split here.
+  v_yield_micro := GREATEST(COALESCE(v_group.interest_accrued_micro, 0), 0);
+  IF v_yield_micro > 0 THEN
+    UPDATE public.wallets SET usdc_balance_micro = usdc_balance_micro + v_yield_micro, updated_at = now()
+    WHERE user_id = v_recipient.user_id;
+    INSERT INTO public.transactions (user_id, type, direction, amount_kobo, amount_usdc_micro, description)
+    VALUES (v_recipient.user_id, 'esusu_payout', 'credit', floor(v_yield_micro / 10000), v_yield_micro,
+            format('Ajo interest - Cycle %s of "%s"', v_group.current_cycle, v_group.name));
   END IF;
 
   IF v_creator_cut_kobo > 0 THEN
@@ -237,9 +286,9 @@ BEGIN
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM public.esusu_members WHERE group_id = p_group_id AND NOT removed AND NOT has_collected) THEN
-    UPDATE public.esusu_groups SET pot_balance_kobo = 0, current_cycle = v_next_cycle, cycle_started_at = now(), status = 'completed' WHERE id = p_group_id;
+    UPDATE public.esusu_groups SET pot_balance_kobo = 0, interest_accrued_micro = 0, current_cycle = v_next_cycle, cycle_started_at = now(), status = 'completed' WHERE id = p_group_id;
   ELSE
-    UPDATE public.esusu_groups SET pot_balance_kobo = 0, current_cycle = v_next_cycle, cycle_started_at = now() WHERE id = p_group_id;
+    UPDATE public.esusu_groups SET pot_balance_kobo = 0, interest_accrued_micro = 0, current_cycle = v_next_cycle, cycle_started_at = now() WHERE id = p_group_id;
   END IF;
 
   RETURN jsonb_build_object('ok',true,'paid_to',v_recipient.user_id,'amount_kobo',v_net_payout_kobo,
@@ -258,6 +307,68 @@ RETURNS jsonb LANGUAGE sql SECURITY DEFINER AS $$
   SELECT jsonb_build_object('ok', false, 'reason', 'retired_see_115');
 $$;
 REVOKE ALL ON FUNCTION public.esusu_claim_mm_position(uuid) FROM PUBLIC, anon, authenticated;
+
+-- ── 3c. Collection / chama settle: 085's circle_settle + the pot's interest ───
+CREATE OR REPLACE FUNCTION public.circle_settle(
+  p_group_id UUID,
+  p_actor    UUID
+) RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  g        public.esusu_groups%rowtype;
+  v_micro  BIGINT;
+  v_kobo   BIGINT;
+  v_int    BIGINT;
+  v_ref    TEXT;
+BEGIN
+  IF auth.uid() IS NOT NULL AND auth.uid() <> p_actor THEN
+    RAISE EXCEPTION 'circle_settle: unauthorized';
+  END IF;
+
+  SELECT * INTO g FROM public.esusu_groups WHERE id = p_group_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'circle_settle: circle not found'; END IF;
+  IF g.payout_mode NOT IN ('collection','investment') THEN
+    RAISE EXCEPTION 'circle_settle: only collection/investment circles settle this way';
+  END IF;
+  IF g.beneficiary_id IS NULL THEN RAISE EXCEPTION 'circle_settle: no beneficiary set'; END IF;
+  IF p_actor <> g.owner_id AND p_actor <> g.beneficiary_id THEN
+    RAISE EXCEPTION 'circle_settle: only the owner or beneficiary can settle';
+  END IF;
+  IF g.status = 'settled' THEN RETURN TRUE; END IF; -- idempotent
+  IF g.status NOT IN ('forming','active') THEN
+    RAISE EXCEPTION 'circle_settle: circle is % — cannot settle', g.status;
+  END IF;
+
+  v_kobo  := g.pot_balance_kobo;
+  v_int   := GREATEST(COALESCE(g.interest_accrued_micro, 0), 0);
+  v_micro := v_kobo * 10000 + v_int;
+
+  UPDATE public.esusu_groups
+    SET status = 'settled', pot_balance_kobo = 0, interest_accrued_micro = 0, settled_at = now()
+    WHERE id = p_group_id;
+
+  IF v_micro > 0 THEN
+    UPDATE public.wallets
+      SET usdc_balance_micro = usdc_balance_micro + v_micro, updated_at = now()
+      WHERE user_id = g.beneficiary_id;
+
+    v_ref := 'circle_settle_' || p_group_id::text;
+    INSERT INTO public.transactions
+      (user_id, type, direction, amount_kobo, amount_usdc_micro, description, reference, status, metadata)
+    VALUES
+      (g.beneficiary_id, 'esusu_payout', 'credit', v_kobo + floor(v_int / 10000), v_micro,
+       CASE WHEN v_int > 0
+            THEN format('Received from "%s" (includes N%s interest)', COALESCE(g.name,'Circle'), round(v_int / 1000000.0, 2))
+            ELSE 'Received from "' || COALESCE(g.name,'Circle') || '"' END,
+       v_ref, 'completed',
+       jsonb_build_object('circle_id', p_group_id, 'circle_type', g.circle_type, 'interest_micro', v_int));
+  END IF;
+
+  RETURN TRUE;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.circle_settle(UUID,UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.circle_settle(UUID,UUID) TO service_role;
 
 -- ── 4. Fixed savings: 099's hardened body + gate + 20% annual rate ────────────
 -- Keeps 099's owner check, offered-term guard (exact rows in fixed_savings_rates) and

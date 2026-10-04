@@ -3,9 +3,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { getApySettings } from '@/hooks/use-data'
-import { formatNaira, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
+import CooperativeView from '@/components/cooperative-view'
+import { formatNaira, formatCngn, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
 import { siteBaseUrl } from '@/lib/site-url'
-import { CircleNotch, Copy, Check, Crown, ArrowUp, Users, CaretRight, Gift, ChatCircleDots, PaperPlaneRight, CheckCircle } from '@phosphor-icons/react'
+import { CircleNotch, Copy, Check, Crown, ArrowUp, Users, CaretRight, Gift, ChatCircleDots, PaperPlaneRight, CheckCircle, Bank } from '@phosphor-icons/react'
 import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType, CircleType, CirclePayoutMode } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -48,6 +49,7 @@ export default function GroupsView({ user, wallet }: Props) {
   const [inviteCode, setInviteCode] = useState<string | null>(null)
   const [payoutMsg, setPayoutMsg] = useState('')
   const [swept, setSwept] = useState(false)
+  const [showCoop, setShowCoop] = useState(false)
 
   // Emergency vote
   const [showEmergency, setShowEmergency] = useState(false)
@@ -348,6 +350,9 @@ export default function GroupsView({ user, wallet }: Props) {
     </>
   )
 
+  // ══ COOPERATIVES (migration 116) ══
+  if (showCoop) return <CooperativeView onBack={() => setShowCoop(false)} />
+
   // ══ DETAIL — collection / investment circle ══
   if (selected && !isRotating(selected)) {
     const tpl = templateOf(selected.circle_type)
@@ -379,6 +384,7 @@ export default function GroupsView({ user, wallet }: Props) {
         <div className="info">
           <div className="l">{settled ? 'Paid out' : 'Collected so far'}</div>
           <div className="num" style={{ fontSize: 'var(--t-2xl)', fontWeight: 'var(--w-bold)', color: 'var(--ink)', margin: '2px 0' }}>{formatNaira(potKobo)}</div>
+          {!settled && (selected.interest_accrued_micro || 0) > 0 && <div style={{ fontSize: 'var(--t-2xs)', color: 'var(--green)', fontWeight: 'var(--w-semi)' }}>+{formatCngn(selected.interest_accrued_micro || 0)} interest earned, paid out with the pot</div>}
           {pct !== null && (
             <>
               <div style={{ height: 8, borderRadius: 6, background: 'var(--line)', overflow: 'hidden', margin: '6px 0 4px' }}>
@@ -517,6 +523,7 @@ export default function GroupsView({ user, wallet }: Props) {
             <div>
               <div className="l">This cycle&apos;s pot</div>
               <div className="v num">{formatNaira(potKobo)}</div>
+              {(selected.interest_accrued_micro || 0) > 0 && <div className="who" style={{ color: 'var(--green)' }}>+{formatCngn(selected.interest_accrued_micro || 0)} interest</div>}
               <div className="who">{recipient ? `${recipient.user_id === user?.id ? 'You receive' : (recipient.profile_name + ' receives')}` : `Cycle ${cycle} of ${selected.max_members}`}</div>
             </div>
           </div>
@@ -712,6 +719,12 @@ export default function GroupsView({ user, wallet }: Props) {
         <button className="cyclechip" onClick={() => { resetCreateForm(); setFeedback(''); setShowCreate(true) }} style={{ border: 0, cursor: 'pointer' }}>+ New</button>
       </div>
 
+      <button className="opt" onClick={() => setShowCoop(true)} style={{ marginTop: 8, borderRadius: 14, background: 'var(--green-soft)' }}>
+        <span className="ic"><Bank /></span>
+        <div className="mid"><div className="nm">Cooperative societies</div><div className="sub">Recurring dues, a shared fund, officer-approved payouts</div></div>
+        <span className="chev"><CaretRight /></span>
+      </button>
+
       {loading ? (
         <div style={{ display: 'grid', placeItems: 'center', padding: '48px 0' }}><CircleNotch className="w-6 h-6 animate-spin" style={{ color: 'var(--muted)' }} /></div>
       ) : groups.length === 0 ? (
@@ -738,7 +751,7 @@ export default function GroupsView({ user, wallet }: Props) {
         </div>
       )}
 
-      <p className="p" style={{ margin: '16px 3px 0' }}>Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot.{ajoApy != null ? ` The pot earns ${ajoApy}% a year while members save.` : ''}</p>
+      <p className="p" style={{ margin: '16px 3px 0' }}>Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot.{ajoApy != null ? ` The pot earns ${ajoApy}% a year while it sits, and the interest goes to whoever collects it.` : ''}</p>
     </div>
   )
 }

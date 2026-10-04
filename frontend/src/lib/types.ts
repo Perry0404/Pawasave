@@ -94,6 +94,8 @@ export interface EsusuGroup {
   circle_type?: CircleType
   payout_mode?: CirclePayoutMode
   goal_kobo?: number | null
+  /** Interest the pot has earned and not yet paid out (cNGN micro, migration 115). */
+  interest_accrued_micro?: number
   deadline?: string | null
   beneficiary_id?: string | null
   purpose?: string | null

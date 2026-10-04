@@ -108,6 +108,8 @@ export interface EsusuMember {
   user_id: string
   payout_position: number
   joined_at: string
+  /** Contribution is taken automatically when the cycle is due (migration 117). */
+  auto_debit?: boolean
 }
 
 export interface EsusuContribution {
@@ -181,6 +183,8 @@ export interface AdminFeeSummary {
   fee_count: number
   today_fees_kobo: number
   this_month_fees_kobo: number
+  /** Daily savings yield spread (revenue_journal, migrations 115-117); included in the totals above. */
+  total_yield_spread_kobo?: number
 }
 
 export interface SavingsGoal {
@@ -222,6 +226,9 @@ export interface AdminTxVolume {
   total_transfers_kobo: number
   total_tx_count: number
   pending_count: number
+  total_goal_saves_kobo?: number
+  total_circle_contrib_kobo?: number
+  total_coop_dues_kobo?: number
 }
 
 export interface EsusuCryptoDeposit {

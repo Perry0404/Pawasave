@@ -6,7 +6,7 @@ import { formatNaira, formatCngn, koboToMicroUsdc, microUsdcToKobo } from '@/lib
 import {
   useSavingsLocks, lockSavings, withdrawLock,
   useSavingsGoals, createSavingsGoal, contributeToGoal, completeSavingsGoal, breakSavingsGoal,
-  getApySettings, type ApySettings,
+  getApySettings, type ApySettings, setGoalAutoContribute,
 } from '@/hooks/use-data'
 import type { Wallet, SavingsLock, SavingsGoal } from '@/lib/types'
 import { useConfirm } from '@/components/confirm-dialog'
@@ -258,6 +258,21 @@ export default function SaveView({ wallet, refresh }: Props) {
               <button className="cta" onClick={() => doContribute(g)} disabled={busy}>Save {formatNaira(g.contribution_naira_kobo)} now</button>
             ) : (
               <button className="cta" onClick={() => doComplete(g)} disabled={busy}>Claim goal + interest 🎉</button>
+            )}
+            {!met && (
+              <label className="info" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={g.auto_contribute_enabled} disabled={busy}
+                  onChange={async (e) => {
+                    const on = e.target.checked
+                    setBusy(true)
+                    try { await setGoalAutoContribute(g.id, on); refreshGoals(); flash(on ? 'Auto-save is on' : 'Auto-save paused') }
+                    catch { flash('Could not change auto-save') } finally { setBusy(false) }
+                  }} />
+                <span style={{ fontSize: 13, color: 'var(--ink)' }}>
+                  <b>Auto-save</b> {formatNaira(g.contribution_naira_kobo)} {FREQ_LABELS[g.frequency]?.toLowerCase()} from my balance
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{g.auto_contribute_enabled ? 'Skipped automatically if your balance is short' : 'Paused, save manually above'}</span>
+                </span>
+              </label>
             )}
             <button className="cta ghost" onClick={() => doBreak(g)} disabled={busy} style={{ marginTop: 10 }}>Break goal early (no interest)</button>
           </>

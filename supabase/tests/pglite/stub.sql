@@ -32,3 +32,8 @@ CREATE TABLE public.fixed_savings_rates (duration_days int primary key);
 CREATE TABLE public.savings_locks (id uuid primary key default gen_random_uuid(), user_id uuid, amount_usdc_micro bigint, amount_kobo bigint,
   apy_percent numeric, duration_days int, projected_interest_micro bigint, effective_rate_at_creation numeric, unlocks_at timestamptz);
 CREATE FUNCTION public.lock_savings(uuid, bigint, bigint, int, numeric) RETURNS uuid LANGUAGE sql AS $$ SELECT null::uuid $$;
+-- for 117
+ALTER TABLE public.wallets ADD COLUMN cngn_yield_earned_micro bigint not null default 0, ADD COLUMN naira_balance_kobo bigint not null default 0;
+ALTER TABLE public.esusu_members ADD COLUMN missed_strikes int not null default 0;
+CREATE TABLE public.platform_fees (id bigserial primary key, user_id uuid, transaction_ref text, fee_type text, gross_amount_kobo bigint,
+  fee_amount_kobo bigint, fee_percent numeric, created_at timestamptz default now());

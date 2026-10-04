@@ -25,6 +25,11 @@ await db.exec(fs.readFileSync(REPO + '116_cooperatives.sql', 'utf8'))
 // Applying twice must be safe.
 await db.exec(fs.readFileSync(REPO + '115_savings_rates_v2.sql', 'utf8'))
 await db.exec(fs.readFileSync(REPO + '116_cooperatives.sql', 'utf8'))
+// esusu_contribute exactly as prod has it (099), then 117 twice.
+const m099 = fs.readFileSync(REPO + '099_savings_and_esusu_authz.sql', 'utf8')
+await db.exec(m099.slice(m099.indexOf('CREATE OR REPLACE FUNCTION public.esusu_contribute('), m099.indexOf('$ LANGUAGE plpgsql SECURITY DEFINER;', m099.indexOf('CREATE OR REPLACE FUNCTION public.esusu_contribute(')) + 36))
+await db.exec(fs.readFileSync(REPO + '117_autodebit_admin_volume_format_fix.sql', 'utf8'))
+await db.exec(fs.readFileSync(REPO + '117_autodebit_admin_volume_format_fix.sql', 'utf8'))
 console.log('migrations applied (twice)')
 
 const A = '00000000-0000-4000-8000-00000000000a', B = '00000000-0000-4000-8000-00000000000b', C = '00000000-0000-4000-8000-00000000000c'
@@ -144,5 +149,35 @@ ok((await val('select accrue_coop_interest()')).skipped === 'not backed', 'coop:
 ok((await val('select accrue_circle_interest()')).skipped === 'not backed', 'circle: no interest when unbacked')
 
 ok(Number(await val("select count(*) from transactions where metadata ? 'coop_id'")) >= 4, 'coop transactions recorded')
+
+// ── 117: format fix, Ajo auto-debit, admin volume + revenue ──
+await db.query("insert into platform_settings values ('mm_market_apy_percent','40') on conflict (key) do update set value='40'")
+await db.query('update wallets set cngn_pool_micro = $2 where user_id=$1', [B, String(N(1000))])
+const dy = await val('select accrue_daily_yield()')
+ok(dy.users_credited >= 1 && Number(dy.excess_captured_micro) > 0, 'accrue_daily_yield runs (no format error) ' + JSON.stringify(dy))
+ok(/Daily yield – 33.00% APY/.test(await val("select description from transactions where type='cngn_pool_in' limit 1")), 'yield description formatted')
+
+for (const u of [A, B]) await db.query('update wallets set usdc_balance_micro=$2 where user_id=$1', [u, String(N(50000))])
+const ag = await val("insert into esusu_groups (name, owner_id, contribution_amount_kobo, cycle_period, status, current_cycle, cycle_started_at) values ('AutoAjo', $1, 500000, 'weekly', 'active', 0, now() - interval '7 days') returning id", [A])
+await db.query('insert into esusu_members (group_id,user_id,payout_position) values ($1,$2,1),($1,$3,2)', [ag, A, B])
+const notDue = await val("insert into esusu_groups (name, owner_id, contribution_amount_kobo, cycle_period, status, current_cycle, cycle_started_at) values ('NotDue', $1, 500000, 'weekly', 'active', 0, now() - interval '2 days') returning id", [A])
+await db.query('insert into esusu_members (group_id,user_id,payout_position) values ($1,$2,1)', [notDue, A])
+await db.query("select set_config('request.jwt.claim.sub', $1, false)", [B])
+ok((await val('select esusu_set_auto_debit($1, true)', [ag])) === true, 'member can set own auto-debit')
+await db.query("select set_config('request.jwt.claim.sub', '', false)")
+const aBal0 = await bal(A)
+const ac = await val('select esusu_auto_contribute()')
+ok(ac.paid === 2 && ac.payouts === 1, 'auto-debit pays both due members and pays out ' + JSON.stringify(ac))
+ok(Number(await val('select count(*) from esusu_contributions where group_id=$1', [notDue])) === 0, 'not-due circle untouched')
+const ac2 = await val('select esusu_auto_contribute()')
+ok(ac2.paid === 0, 'next cycle not due yet, nothing taken ' + JSON.stringify(ac2))
+ok(aBal0 > 0n, 'balances ok')
+
+const vol = await one('select * from admin_tx_volume()')
+ok(Number(vol.total_coop_dues_kobo) > 0 && Number(vol.total_circle_contrib_kobo) >= 1000000, 'admin volume splits coop vs circles ' + JSON.stringify(vol))
+const fees = await one('select * from admin_fee_summary()')
+const spread = BigInt(await val("select coalesce(floor(sum(amount_usdc_micro)/10000),0) from revenue_journal where revenue_type='yield_spread'"))
+ok(BigInt(fees.total_yield_spread_kobo) === spread && spread > 0n, 'fee summary includes yield spread ' + spread)
+ok(BigInt(fees.total_fees_kobo) >= spread, 'total revenue includes spread')
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED')
 process.exit(fails ? 1 : 0)

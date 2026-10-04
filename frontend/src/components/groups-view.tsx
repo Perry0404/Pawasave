@@ -569,6 +569,28 @@ export default function GroupsView({ user, wallet }: Props) {
           <button className="cta" onClick={contribute} disabled={busy}>{busy ? 'Sending…' : `Contribute ${formatNaira(selected.contribution_amount_kobo)}`}</button>
         )}
 
+        {isMember && (() => {
+          const me = members.find((m) => m.user_id === user?.id)
+          const on = me?.auto_debit !== false
+          return (
+            <label className="info" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, cursor: 'pointer' }}>
+              <input type="checkbox" checked={on} disabled={busy}
+                onChange={async (e) => {
+                  const next = e.target.checked
+                  setBusy(true)
+                  const { error } = await supabase.rpc('esusu_set_auto_debit', { p_group_id: selected.id, p_on: next })
+                  setBusy(false)
+                  if (error) { setFeedback('Could not change auto-debit'); setTimeout(() => setFeedback(''), 3000); return }
+                  openGroup(selected)
+                }} />
+              <span style={{ fontSize: 13, color: 'var(--ink)' }}>
+                <b>Auto-debit</b> {formatNaira(selected.contribution_amount_kobo)} when each cycle is due
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{on ? 'Paid on time from your balance, so you never get a missed-payment strike' : 'Off: pay manually before the cycle ends'}</span>
+              </span>
+            </label>
+          )
+        })()}
+
         {feedback && <div className={`flash ${/sent|recorded/.test(feedback) ? 'ok' : 'err'}`}>{feedback}</div>}
         {payoutMsg && <div className="flash ok">{payoutMsg}</div>}
 

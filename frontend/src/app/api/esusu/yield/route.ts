@@ -8,7 +8,7 @@ import { sendPushToUser } from '@/lib/push-send'
 /**
  * POST /api/esusu/yield
  *
- * Manages the 27% APY yield position for an Esusu group pot.
+ * Manages the Ajo pot yield position (rate: platform_settings.ajo_user_apy_percent).
  * Contributions are held in the PawaSave merchant wallet.
  * Yield is calculated by the DB (esusu_claim_mm_position) and credited
  * from platform reserves on payout — no external XEND MM call needed.
@@ -101,27 +101,30 @@ export async function POST(request: NextRequest) {
     // Claim the group's position — resets counter, returns yield calculation
     const { data: claim, error: claimErr } = await supabase.rpc('esusu_claim_mm_position', {
       p_group_id: group_id,
+      p_recipient_user_id: recipient_user_id,
     })
 
     if (claimErr || !claim?.ok) {
       return NextResponse.json({ ok: false, reason: claim?.reason ?? claimErr?.message ?? 'no_position' })
     }
 
-    const { yield_usdc_micro, days } = claim as {
+    const { yield_usdc_micro, days, apy_percent } = claim as {
       deposited_usdc_micro: number
       yield_usdc_micro: number
       total_usdc_micro: number
+      apy_percent: number
       days: number
     }
 
-    // Credit yield bonus in NGN from platform reserves
+    // Credit the yield in cNGN. Never the legacy naira_balance_kobo: since 070/071
+    // nothing credits it, and doing so mints unbacked "phantom" naira.
     const yieldKobo = cngnMicroToKobo(yield_usdc_micro)
 
-    if (yieldKobo > 0) {
+    if (yield_usdc_micro > 0) {
       await supabase.rpc('credit_wallet', {
         p_user_id:    recipient_user_id,
-        p_naira_kobo: yieldKobo,
-        p_usdc_micro: 0,
+        p_naira_kobo: 0,
+        p_usdc_micro: yield_usdc_micro,
       })
 
       await supabase.from('transactions').insert({
@@ -129,7 +132,8 @@ export async function POST(request: NextRequest) {
         type:        'esusu_payout',
         direction:   'credit',
         amount_kobo: yieldKobo,
-        description: `Ajo yield bonus – 27% APY over ${days} days`,
+        amount_usdc_micro: yield_usdc_micro,
+        description: `Ajo yield bonus – ${apy_percent}% APY over ${days} days`,
         status:      'completed',
       })
     }

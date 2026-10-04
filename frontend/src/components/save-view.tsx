@@ -15,11 +15,15 @@ interface Props {
   refresh: () => void
 }
 
+// Display only: the rate is set server-side (platform_settings.fixed_user_apy_percent),
+// and lock_savings ignores any APY the client sends. Fixed deposits stay gated until
+// GetEquity's CP fund is live (fixed_savings_enabled), so FIXED_LIVE gates the entry points.
+const FIXED_LIVE = false
 const LOCK_DURATIONS = [
-  { days: 30, label: '30 days', apy: 15 },
-  { days: 90, label: '90 days', apy: 22 },
-  { days: 180, label: '6 months', apy: 30 },
-  { days: 365, label: '1 year', apy: 40 },
+  { days: 30, label: '30 days', apy: 20 },
+  { days: 90, label: '90 days', apy: 20 },
+  { days: 180, label: '6 months', apy: 20 },
+  { days: 365, label: '1 year', apy: 20 },
 ]
 const FREQ = ['daily', 'weekly', 'monthly'] as const
 const FREQ_LABELS: Record<string, string> = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' }
@@ -263,10 +267,10 @@ export default function SaveView({ wallet, refresh }: Props) {
       <div className="pool rise">
         <div className="l">Savings pool</div>
         <div className="v num">{formatNaira(poolKobo)}</div>
-        <span className="apy">Up to 40% a year · paid daily</span>
+        <span className="apy">Goals earn 12% · Ajo earns 10.5% a year</span>
       </div>
 
-      <div className="sect"><span className="h">Fixed deposits</span><button className="m" onClick={() => setScreen('lock')}>New</button></div>
+      <div className="sect"><span className="h">Fixed deposits</span>{FIXED_LIVE && <button className="m" onClick={() => setScreen('lock')}>New</button>}</div>
       <div className="rows">
         {activeLocks.map((l) => {
           const days = Math.max(0, Math.ceil((new Date(l.unlocks_at).getTime() - Date.now()) / 86400000))
@@ -282,10 +286,10 @@ export default function SaveView({ wallet, refresh }: Props) {
             </button>
           )
         })}
-        <button className="opt" onClick={() => setScreen('lock')}>
+        <button className="opt" onClick={() => FIXED_LIVE && setScreen('lock')} disabled={!FIXED_LIVE}>
           <span className="ic"><IconPlus /></span>
-          <div className="mid"><div className="nm">Start a fixed deposit</div><div className="sub">Lock 30–365 days · up to 40%</div></div>
-          <span className="chev"><Chevron /></span>
+          <div className="mid"><div className="nm">Start a fixed deposit</div><div className="sub">{FIXED_LIVE ? 'Lock in for 20% a year' : 'Coming soon · 20% a year'}</div></div>
+          {FIXED_LIVE && <span className="chev"><Chevron /></span>}
         </button>
       </div>
 

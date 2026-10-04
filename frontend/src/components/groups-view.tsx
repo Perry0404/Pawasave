@@ -738,7 +738,7 @@ export default function GroupsView({ user, wallet }: Props) {
         </div>
       )}
 
-      <p className="p" style={{ margin: '16px 3px 0' }}>Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot. The pot earns 27% a year via PawasaveLend while members save.</p>
+      <p className="p" style={{ margin: '16px 3px 0' }}>Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot. The pot earns 10.5% a year while members save.</p>
     </div>
   )
 }

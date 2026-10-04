@@ -7,7 +7,7 @@ import {
 import { withLease, LeaseUnavailableError } from '@/lib/custody-lease'
 
 /**
- * GET /api/cron/savings-gntb-sync   (every 10 min, see ops/cron/crontab)
+ * GET /api/cron/savings-gntb-sync   (every 5 min, see ops/cron/crontab)
  *
  * Puts Goals, Ajo/circle and cooperative money to work 1:1 in GetEquity's gNTB T-bill fund (migration 115).
  * Every naira in an active goal or an active Ajo pot is user money; this keeps custody's

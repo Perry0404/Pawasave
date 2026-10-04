@@ -143,6 +143,6 @@ await db.query("update platform_settings set value='1970-01-01' where key in ('c
 ok((await val('select accrue_coop_interest()')).skipped === 'not backed', 'coop: no interest when unbacked')
 ok((await val('select accrue_circle_interest()')).skipped === 'not backed', 'circle: no interest when unbacked')
 
-ok(Number(await val("select count(*) from transactions where type in ('coop_dues','coop_payout')")) >= 4, 'coop transactions recorded')
+ok(Number(await val("select count(*) from transactions where metadata ? 'coop_id'")) >= 4, 'coop transactions recorded')
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED')
 process.exit(fails ? 1 : 0)

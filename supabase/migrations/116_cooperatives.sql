@@ -122,21 +122,9 @@ END $$;
 INSERT INTO public.platform_settings (key, value) VALUES ('coop_interest_last_accrued_on', '1970-01-01')
 ON CONFLICT (key) DO NOTHING;
 
--- Two new ledger types for members' statements. NOT VALID: enforce for new rows without
--- re-checking history.
-ALTER TABLE public.transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
-ALTER TABLE public.transactions ADD CONSTRAINT transactions_type_check CHECK (type IN (
-  'deposit', 'withdrawal', 'save_to_vault', 'vault_withdraw',
-  'esusu_contribute', 'esusu_payout', 'emergency_payout',
-  'split_auto_save', 'split_auto_esusu',
-  'goal_contribute', 'goal_claim',
-  'creator_incentive', 'cngn_pool_in',
-  'loan_disbursement', 'loan_repayment', 'loan_liquidation',
-  'equity_buy', 'equity_sell', 'investment',
-  'transfer_in', 'transfer_out',
-  'pawa_pay', 'pawa_receive', 'pawa_refund',
-  'coop_dues', 'coop_payout'
-)) NOT VALID;
+-- Statement rows reuse the existing group-money types (esusu_contribute for dues paid,
+-- esusu_payout for money received) with metadata.coop_id, so transactions_type_check is not
+-- touched. They are deliberately not transfer_in/out, which count toward the P2P AML caps.
 
 -- ── helpers (internal, no grants) ─────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION public._coop_interval(p_period text)
@@ -214,7 +202,7 @@ BEGIN
   INSERT INTO public.transactions
     (user_id, type, direction, amount_kobo, amount_usdc_micro, description, reference, status, metadata)
   VALUES
-    (m.user_id, 'coop_dues', 'debit', floor(v_paid / 10000), v_paid,
+    (m.user_id, 'esusu_contribute', 'debit', floor(v_paid / 10000), v_paid,
      format('Paid %s to "%s"', CASE WHEN v_count = 1 THEN '1 charge' ELSE v_count || ' charges' END, c.name),
      p_reference, 'completed', jsonb_build_object('coop_id', c.id, 'charges', v_count));
 
@@ -246,7 +234,7 @@ BEGIN
   INSERT INTO public.transactions
     (user_id, type, direction, amount_kobo, amount_usdc_micro, description, reference, status, metadata)
   VALUES
-    (d.recipient_id, 'coop_payout', 'credit', floor(d.amount_micro / 10000), d.amount_micro,
+    (d.recipient_id, 'esusu_payout', 'credit', floor(d.amount_micro / 10000), d.amount_micro,
      format('From "%s": %s', c.name, d.reason), 'coop_disb_' || d.id, 'completed',
      jsonb_build_object('coop_id', c.id, 'disbursement_id', d.id));
   RETURN jsonb_build_object('ok', true, 'executed', true);

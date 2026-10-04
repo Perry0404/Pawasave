@@ -66,7 +66,11 @@ begin
   set local request.jwt.claims = '{"sub":"00000000-0000-4000-8000-000000000004","role":"authenticated"}';
   select count(*) into n from public.savings_locks where user_id = '00000000-0000-4000-8000-000000000004';
   reset role;
-  insert into ok values (4, 'read own savings locks', 'saw '||n||' lock(s)', n = 1);
+  -- At least one, not exactly one. This runs on the shared chain database after
+  -- 099_savings_and_esusu_authz_behaviour, which creates a real lock for this same user through
+  -- lock_savings. What is under test is that the holder can read their own locks at all, so pinning
+  -- the count just makes the test brittle about somebody else's fixtures.
+  insert into ok values (4, 'read own savings locks', 'saw '||n||' lock(s)', n >= 1);
 exception when others then
   reset role;
   insert into ok values (4, 'read own savings locks', 'FAILED: '||left(sqlerrm,60), false);
@@ -138,7 +142,8 @@ delete from public.savings_goals
  where user_id = '00000000-0000-4000-8000-000000000005'
    and title in ('Flow test goal', 'Cheeky goal');
 
-select case when works then 'works' else 'BROKEN' end as result, flow, detail
+-- PASS/FAIL, not works/BROKEN. The runner filters each test's output through
+-- `grep -E 'PASS|FAIL|ASSERTIONS'`, so these seven results were being dropped on the floor: the file
+-- ran, printed its table, and the harness showed nothing either way.
+select ord, flow, detail, case when works then 'PASS' else 'FAIL' end as result
 from ok order by ord;
-
-select count(*) filter (where not works) as broken, count(*) filter (where works) as working from ok;

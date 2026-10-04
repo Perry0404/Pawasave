@@ -6,10 +6,8 @@ import { CircleNotch, X, TrendUp, Lock, Check } from '@phosphor-icons/react'
 type Limit = {
   fixed_savings_micro: number
   equity_micro: number
-  rwa_micro?: number
   ltv_fixed_savings: number
   ltv_equity: number
-  ltv_rwa?: number
   borrow_limit_micro: number
   available_micro: number
   has_active_loan: boolean
@@ -114,7 +112,7 @@ export default function BorrowView({ wallet, refresh }: { wallet: any; refresh: 
 
   if (loading) return <div className="b" style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}><CircleNotch className="w-6 h-6 animate-spin" style={{ color: 'var(--muted)' }} /></div>
 
-  const noAssets = !limit || (limit.fixed_savings_micro === 0 && limit.equity_micro === 0 && (limit.rwa_micro || 0) === 0)
+  const noAssets = !limit || (limit.fixed_savings_micro === 0 && limit.equity_micro === 0)
 
   return (
     <div className="b">
@@ -174,13 +172,9 @@ export default function BorrowView({ wallet, refresh }: { wallet: any; refresh: 
               <div className="mid"><div className="nm">Fixed savings</div><div className="sub">{limit?.ltv_fixed_savings ?? 70}% power</div></div>
               <span className="v num">{naira(limit?.fixed_savings_micro || 0)}</span>
             </div>
-            {(limit?.rwa_micro || 0) > 0 && (
-              <div className="coll">
-                <span className="dot"><IconStock /></span>
-                <div className="mid"><div className="nm">Naira assets</div><div className="sub">{limit?.ltv_rwa ?? 80}% power · T-bills & funds</div></div>
-                <span className="v num">{naira(limit?.rwa_micro || 0)}</span>
-              </div>
-            )}
+            {/* No third row. There is no RWA collateral: loan_borrow_limit returns only
+                fixed_savings_micro and equity_micro, and create_loan pledges only savings locks and
+                stock holdings. A "Naira assets" row promised collateral that was never at stake. */}
           </div>
 
           {noAssets && (

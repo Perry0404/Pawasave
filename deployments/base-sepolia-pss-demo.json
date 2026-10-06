@@ -1,0 +1,13 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "contract": "PawaEquityToken",
+  "token": "pMTNN",
+  "address": "0xde5636D192bdF5DfD164107D804826B69b9DE35C",
+  "custodianSigner": "0x4FA6c44CfE8100c19596AF542d860635Eb5d68EC",
+  "deployedBy": "0x17E85Ed00196d6496BBF17d4D789BdC1eb919Ca7",
+  "deployedAt": "2026-10-06",
+  "purpose": "Testnet demonstration of the PSS-1 NGX equity token lifecycle (scripts/ngx-token-demo.ts). No real securities.",
+  "explorer": "https://sepolia.basescan.org/address/0xde5636D192bdF5DfD164107D804826B69b9DE35C",
+  "liveView": "/pss/demo?token=0xde5636D192bdF5DfD164107D804826B69b9DE35C"
+}

@@ -20,11 +20,19 @@ const blocked = (s: string) => line(`   ✖ blocked: ${s}`)
 async function expectRevert(p: Promise<unknown>, label: string) {
   try { await p; line(`   !! expected a revert: ${label}`) } catch (e: any) {
     const m = String(e?.shortMessage || e?.reason || e?.message || e).match(/reverted with reason string '([^']+)'|reason="([^"]+)"|'([^']+)'/)
-    blocked(`${label} → "${m?.[1] || m?.[2] || m?.[3] || "reverted"}"`)
+    // Live RPCs return the reason as text ("execution reverted: <reason>"); Hardhat decodes it.
+    const live = String(e?.message || "").match(/execution reverted: ([^"\n(]+)/)?.[1]?.trim()
+    blocked(`${label} → "${e?.revert?.args?.[0] || live || m?.[1] || m?.[2] || m?.[3] || "reverted"}"`)
   }
 }
 
+// Public RPCs load-balance across nodes that can lag a block or two; on a live network every
+// write waits for 2 confirmations and reads retry until the node has caught up.
+let CONF = 1
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
 async function main() {
+  if (network.name !== "hardhat" && network.name !== "localhost") CONF = 2
   let signers: any[]
   if (network.name === "hardhat" || network.name === "localhost") {
     signers = (await ethers.getSigners()).slice(0, 6)
@@ -36,7 +44,7 @@ async function main() {
     const others = Array.from({ length: 5 }, (_, i) => HDNodeWallet.fromSeed(keccak256(toUtf8Bytes(seed + ":" + i))).connect(ethers.provider))
     for (const w of others) {
       if ((await ethers.provider.getBalance(w.address)) < ethers.parseEther("0.0002")) {
-        await (await root.sendTransaction({ to: w.address, value: ethers.parseEther("0.0003") })).wait()
+        await (await root.sendTransaction({ to: w.address, value: ethers.parseEther("0.0003") })).wait(CONF)
       }
     }
     signers = [root, ...others]
@@ -51,15 +59,16 @@ async function main() {
   const token: any = await F.deploy("PawaSave MTN Nigeria", "pMTNN", "MTNN", "NGMTNN000002", admin.address, custodian.address, 10_000n, 100_000n)
   await token.waitForDeployment()
   const addr = await token.getAddress()
+  for (let i = 0; i < 30 && (await ethers.provider.getCode(addr)) === "0x"; i++) await sleep(2000)
   ok(`deployed at ${addr}`)
   ok(`custodian key: ${custodian.address}. Only this key can attest settled shares`)
   for (const r of ["REGISTRAR_ROLE", "RECONCILER_ROLE", "BURNER_ROLE", "PAUSER_ROLE", "MINTER_ROLE"]) {
-    await (await token.grantRole(await token[r](), ops.address)).wait()
+    await (await token.grantRole(ethers.id(r), ops.address)).wait(CONF)
   }
   ok("roles separated: admin (multisig in production) · custodian · PawaSave ops service")
 
   step(2, "KYC: Ada and Bayo pass verification and join the issuer's register")
-  await (await token.connect(ops).setVerifiedBatch([ada.address, bayo.address], true)).wait()
+  await (await token.connect(ops).setVerifiedBatch([ada.address, bayo.address], true)).wait(CONF)
   ok(`Ada ${ada.address.slice(0, 10)}… and Bayo ${bayo.address.slice(0, 10)}… are verified`)
 
   const chainId = (await ethers.provider.getNetwork()).chainId
@@ -72,7 +81,7 @@ async function main() {
   const dl = (await latest()) + 3600n
   const sig = await custodian.signTypedData(domain, types, { to: ada.address, amount: 100n, tradeRef: trade, deadline: dl })
   ok("custodian attestation signed for trade NGX-2026-10-07-MTNN-000123 (100 shares → Ada)")
-  await (await token.connect(ops).mintWithAttestation(ada.address, 100n, trade, dl, sig)).wait()
+  await (await token.connect(ops).mintWithAttestation(ada.address, 100n, trade, dl, sig)).wait(CONF)
   ok(`minted: Ada holds ${await token.balanceOf(ada.address)} pMTNN`)
 
   step(4, "Try to cheat the backing")
@@ -81,35 +90,35 @@ async function main() {
   await expectRevert(token.connect(ops).mintWithAttestation(ada.address, 100n, trade, dl, sig), "replaying the same settled trade")
 
   step(5, "Ada gifts 30 shares to Bayo, a verified PawaSave user, instantly and with no broker sale")
-  await (await token.connect(ada).transfer(bayo.address, 30n)).wait()
+  await (await token.connect(ada).transfer(bayo.address, 30n)).wait(CONF)
   ok(`Ada ${await token.balanceOf(ada.address)} · Bayo ${await token.balanceOf(bayo.address)}`)
   await expectRevert(token.connect(ada).transfer(stranger.address, 1n), "sending to an unverified wallet")
 
   step(6, "Daily reconciliation: the custodian's CSCS pool statement is posted on-chain")
-  await (await token.connect(ops).reportReserve(100n, keccak256(toUtf8Bytes("CSCS-STMT-2026-10-07")))).wait()
+  await (await token.connect(ops).reportReserve(100n, keccak256(toUtf8Bytes("CSCS-STMT-2026-10-07")))).wait(CONF)
   ok(`pool 100 shares ≥ supply ${await token.totalSupply()} tokens: fully backed, minting open`)
-  await (await token.connect(ops).reportReserve(95n, keccak256(toUtf8Bytes("CSCS-STMT-2026-10-08")))).wait()
+  await (await token.connect(ops).reportReserve(95n, keccak256(toUtf8Bytes("CSCS-STMT-2026-10-08")))).wait(CONF)
   ok(`simulated exception: pool 95 < supply 100 → mintHalted = ${await token.mintHalted()} (${await token.haltReason()})`)
   const t2 = keccak256(toUtf8Bytes("NGX-2026-10-08-MTNN-000124"))
   const sig2 = await custodian.signTypedData(domain, types, { to: bayo.address, amount: 5n, tradeRef: t2, deadline: dl })
   await expectRevert(token.connect(ops).mintWithAttestation(bayo.address, 5n, t2, dl, sig2), "any new mint while the reserve is short")
-  await (await token.connect(ops).reportReserve(100n, keccak256(toUtf8Bytes("CSCS-STMT-2026-10-08-R")))).wait()
-  await (await token.connect(ops).setMintHalt(false, "statement corrected")).wait()
+  await (await token.connect(ops).reportReserve(100n, keccak256(toUtf8Bytes("CSCS-STMT-2026-10-08-R")))).wait(CONF)
+  await (await token.connect(ops).setMintHalt(false, "statement corrected")).wait(CONF)
   ok("exception resolved: corrected statement posted, minting reopened")
 
   step(7, "Bayo redeems 30 for cash: lock first, burn only after settlement")
-  await (await token.connect(bayo).requestRedemption(30n, 0)).wait()
+  await (await token.connect(bayo).requestRedemption(30n, 0)).wait(CONF)
   ok(`locked: Bayo ${await token.balanceOf(bayo.address)}, locked ${await token.lockedSupply()}, supply still ${await token.totalSupply()} (shares not yet sold)`)
-  await (await token.connect(ops).completeRedemption(0, keccak256(toUtf8Bytes("NGX-SALE-000045 / cNGN payout")))).wait()
+  await (await token.connect(ops).completeRedemption(0, keccak256(toUtf8Bytes("NGX-SALE-000045 / cNGN payout")))).wait(CONF)
   ok(`sale settled and cNGN paid → burned. supply now ${await token.totalSupply()}`)
 
   step(8, "Ada redeems 10 for delivery to her own CSCS account; the transfer fails, so she is made whole")
-  await (await token.connect(ada).requestRedemption(10n, 1)).wait()
-  await (await token.connect(ops).cancelRedemption(1, "CHN mismatch at CSCS")).wait()
+  await (await token.connect(ada).requestRedemption(10n, 1)).wait(CONF)
+  await (await token.connect(ops).cancelRedemption(1, "CHN mismatch at CSCS")).wait(CONF)
   ok(`tokens returned in full: Ada holds ${await token.balanceOf(ada.address)}`)
 
   step(9, "Corporate action: a 1-for-1 bonus issue is recorded on-chain without moving balances")
-  await (await token.connect(admin).setMultiplier(2n * 10n ** 18n, "MTNN 1-for-1 bonus")).wait()
+  await (await token.connect(admin).setMultiplier(2n * 10n ** 18n, "MTNN 1-for-1 bonus")).wait(CONF)
   ok(`multiplier = ${Number(await token.multiplier()) / 1e18} share(s) per token; Ada's ${await token.balanceOf(ada.address)} tokens = ${Number(await token.balanceOf(ada.address)) * 2} shares`)
 
   line()

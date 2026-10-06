@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ethers } from 'ethers'
 
 /**
@@ -55,6 +55,7 @@ export default function PssDemo() {
   const [events, setEvents] = useState<Ev[]>([])
   const [err, setErr] = useState('')
   const provider = useMemo(() => new ethers.JsonRpcProvider(RPC), [])
+  const deployBlock = useRef<number | null>(null)
 
   useEffect(() => {
     const q = new URLSearchParams(window.location.search).get('token')
@@ -71,8 +72,21 @@ export default function PssDemo() {
       ])
       setS({ name, symbol, ngx, isin, supply, locked, reserve, reserveAt: Number(reserveAt), halted, haltReason, multiplier, custodian, paused })
 
+      // Public RPCs cap eth_getLogs at 500 blocks, so find the deployment block once (binary search
+      // on code presence) and read the trail in 500-block chunks from there.
       const head = await provider.getBlockNumber()
-      const logs = await provider.getLogs({ address: token, fromBlock: Math.max(0, head - 9_000), toBlock: head })
+      if (deployBlock.current == null) {
+        let lo = Math.max(0, head - 2_000_000), hi = head
+        while (lo < hi) {
+          const mid = Math.floor((lo + hi) / 2)
+          if ((await provider.getCode(token, mid)) === '0x') lo = mid + 1; else hi = mid
+        }
+        deployBlock.current = lo
+      }
+      const logs: ethers.Log[] = []
+      for (let from = deployBlock.current; from <= head && logs.length < 500; from += 500) {
+        logs.push(...await provider.getLogs({ address: token, fromBlock: from, toBlock: Math.min(head, from + 499) }))
+      }
       const iface = new ethers.Interface(ABI)
       const out: Ev[] = []
       for (const l of logs) {

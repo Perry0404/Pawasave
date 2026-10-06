@@ -106,9 +106,14 @@ export function settle(id: number, address: string) {
   return serial(async () => {
     const k = keys()
     const t = new ethers.Contract(PSS_DEMO_TOKEN, ABI, k.ops)
-    const r = await t.redemptions(id)
+    // The visitor's lock tx may not have reached the node we're reading from yet: retry.
+    let r: { holder: string; status: bigint } | null = null
+    for (let i = 0; i < 15 && !r; i++) {
+      try { r = await t.redemptions(id) } catch { await new Promise((s) => setTimeout(s, 2000)) }
+    }
+    if (!r) throw new Error('redemption not visible yet, try again')
     if (String(r.holder).toLowerCase() !== address.toLowerCase()) throw new Error('not your redemption')
-    if (Number(r.status) !== 0) throw new Error('redemption is not pending')
+    if (Number(r.status) !== 0) return { alreadySettled: true }
     const burnTx = await t.completeRedemption(id, ethers.keccak256(ethers.toUtf8Bytes(`NGX-DEMO-SALE-${id}`)))
     await burnTx.wait(1)
     const supply: bigint = await t.totalSupply()

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ethers } from 'ethers'
-import { demoEnabled, onboard, buy, settle } from '@/lib/pss-demo'
+import { demoEnabled, onboard, buy, transferIn, settle } from '@/lib/pss-demo'
 
 /**
- * POST /api/pss/demo   { action: 'onboard' | 'buy' | 'settle', address, quantity?, id? }
+ * POST /api/pss/demo   { action: 'onboard' | 'buy' | 'transfer_in' | 'settle', address, quantity?, id? }
  *
  * Testnet-only demo of the PSS-1 NGX token (see lib/pss-demo.ts). Rate-limited per IP so the
  * demo key's test ETH isn't drained.
@@ -33,10 +33,11 @@ export async function POST(request: NextRequest) {
     switch (body?.action) {
       case 'onboard':
         return NextResponse.json(await onboard(address))
-      case 'buy': {
+      case 'buy':
+      case 'transfer_in': {
         const q = Math.floor(Number(body.quantity))
-        if (!(q >= 1 && q <= 50)) return NextResponse.json({ error: 'Buy between 1 and 50 shares' }, { status: 400 })
-        return NextResponse.json(await buy(address, q))
+        if (!(q >= 1 && q <= 50)) return NextResponse.json({ error: 'Between 1 and 50 shares' }, { status: 400 })
+        return NextResponse.json(await (body.action === 'buy' ? buy : transferIn)(address, q))
       }
       case 'settle': {
         const id = Math.floor(Number(body.id))

@@ -69,18 +69,23 @@ export function onboard(address: string) {
 }
 
 /**
- * Buy: the broker "executes" on NGX and CSCS "settles", so the custodian's pool rises first and
- * is reported on-chain. The custodian then signs an attestation for this trade, and only then
- * does the minting service mint against it.
+ * Issue tokens against shares that have just landed in the custodian's CSCS pool. The pool rises
+ * first and is reported on-chain; the custodian then signs an attestation naming the settlement
+ * reference, and only then does the minting service mint against it.
+ *   buy         the broker bought on NGX and CSCS settled the trade into the pool
+ *   transferIn  the investor moved shares they already own from their current broker into the pool
  */
-export function buy(address: string, quantity: number) {
+export const buy = (address: string, quantity: number) => issue(address, quantity, 'NGX-DEMO')
+export const transferIn = (address: string, quantity: number) => issue(address, quantity, 'CSCS-XFER-IN')
+
+function issue(address: string, quantity: number, kind: 'NGX-DEMO' | 'CSCS-XFER-IN') {
   return serial(async () => {
     const k = keys()
     const t = new ethers.Contract(PSS_DEMO_TOKEN, ABI, k.ops)
     await topUp(k, k.ops.address, ethers.parseEther('0.0001'), ethers.parseEther('0.0002'))
     if (!(await t.verified(address))) throw new Error('wallet not verified')
 
-    const tradeId = `NGX-DEMO-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+    const tradeId = `${kind}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
     const tradeRef = ethers.keccak256(ethers.toUtf8Bytes(tradeId))
     const supply: bigint = await t.totalSupply()
     const reserveTx = await t.reportReserve(supply + BigInt(quantity), ethers.keccak256(ethers.toUtf8Bytes('CSCS-' + tradeId)))

@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ethers } from 'ethers'
 
 /**
- * "Try it live" for /pss/demo: a guided, four-step walkthrough on Base Sepolia.
+ * "Try it live" for /pss/demo: a guided, five-step walkthrough on Base Sepolia.
  * The visitor gets a throwaway test wallet (kept in this browser), passes mock KYC, then
- * buys, gifts, tries to break the rules, and cashes out. Every step is a real testnet
+ * buys or brings in shares, gifts, tries to break the rules, and cashes out. Every step is a real testnet
  * transaction; the server plays broker, custodian and minting service (lib/pss-demo.ts).
  */
 
@@ -25,7 +25,7 @@ const ABI = [
   'event RedemptionRequested(uint256 indexed id, address indexed holder, uint256 amount, uint8 kind)',
 ]
 
-type StepKey = 'buy' | 'gift' | 'protect' | 'cashout'
+type StepKey = 'buy' | 'bringin' | 'gift' | 'protect' | 'cashout'
 type Status = { state: 'idle' | 'working' | 'done' | 'protected' | 'error'; text?: string; txs?: { label: string; hash: string }[] }
 
 const C = {
@@ -63,9 +63,10 @@ export default function TryIt({ token, onChange }: { token: string; onChange: ()
   const [verified, setVerified] = useState(false)
   const [balance, setBalance] = useState<bigint>(0n)
   const [qty, setQty] = useState(5)
+  const [inQty, setInQty] = useState(20)
   const [starting, setStarting] = useState<Status>({ state: 'idle' })
   const [steps, setSteps] = useState<Record<StepKey, Status>>({
-    buy: { state: 'idle' }, gift: { state: 'idle' }, protect: { state: 'idle' }, cashout: { state: 'idle' },
+    buy: { state: 'idle' }, bringin: { state: 'idle' }, gift: { state: 'idle' }, protect: { state: 'idle' }, cashout: { state: 'idle' },
   })
   const busy = starting.state === 'working' || Object.values(steps).some((s) => s.state === 'working')
   const set = (k: StepKey, s: Status) => setSteps((x) => ({ ...x, [k]: s }))
@@ -126,6 +127,16 @@ export default function TryIt({ token, onChange }: { token: string; onChange: ()
     refresh().catch(() => {}); onChange()
   }
 
+  const bringIn = async () => {
+    set('bringin', { state: 'working', text: `Moving ${inQty} MTN shares from your current broker into the custodian's CSCS pool…` })
+    try {
+      const r = await api({ action: 'transfer_in', address: wallet!.address, quantity: inQty })
+      set('bringin', { state: 'done', text: `Your ${inQty} shares arrived in the custodian's pool and ${inQty} tokens were issued to you. They are the same shares, now transferable on-chain.`,
+        txs: [{ label: 'Pool confirmed', hash: r.reserveTx }, { label: 'Tokens issued', hash: r.mintTx }] })
+    } catch (e) { set('bringin', { state: 'error', text: friendly(e) }) }
+    refresh().catch(() => {}); onChange()
+  }
+
   const gift = async () => {
     set('gift', { state: 'working', text: 'Sending 1 share to Ada…' })
     try {
@@ -170,7 +181,7 @@ export default function TryIt({ token, onChange }: { token: string; onChange: ()
   const reset = () => {
     try { localStorage.removeItem(KEY) } catch { /* ignore */ }
     setWallet(null); setBalance(0n); setVerified(false); setStarting({ state: 'idle' })
-    setSteps({ buy: { state: 'idle' }, gift: { state: 'idle' }, protect: { state: 'idle' }, cashout: { state: 'idle' } })
+    setSteps({ buy: { state: 'idle' }, bringin: { state: 'idle' }, gift: { state: 'idle' }, protect: { state: 'idle' }, cashout: { state: 'idle' } })
   }
 
   // ── UI ───────────────────────────────────────────────────────────────────
@@ -248,7 +259,8 @@ export default function TryIt({ token, onChange }: { token: string; onChange: ()
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 12 }}>
+          <div style={{ margin: '4px 0 8px' }}><span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: C.muted }}>Get shares</span><span style={{ fontSize: 12, color: C.muted }}> · two ways in</span></div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 12, marginBottom: 18 }}>
             <Card n={1} title="Buy shares" desc="The broker buys real shares, the custodian confirms it holds them, and only then are tokens created." status={steps.buy}>
               <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
                 {[1, 5, 10].map((q) => (
@@ -261,15 +273,35 @@ export default function TryIt({ token, onChange }: { token: string; onChange: ()
               <Button onClick={buy} disabled={!verified}>{steps.buy.state === 'working' ? 'Buying…' : `Buy ${qty} MTN`}</Button>
             </Card>
 
-            <Card n={2} title="Gift a share" desc="Send a share to Ada, another verified investor. It arrives instantly, with no broker and no sale." status={steps.gift}>
+            <Card n={2} title="Bring shares you already own" desc="Already hold MTN with another broker? Move them in. Once the custodian confirms they've arrived, you get the same number of tokens." status={steps.bringin}>
+              <div style={{ background: C.soft, border: `1px solid ${C.line}`, borderRadius: 8, padding: '8px 10px', fontSize: 12, color: C.muted, marginBottom: 8, lineHeight: 1.6 }}>
+                <div>From: <b style={{ color: C.ink }}>your current stockbroker</b></div>
+                <div>CSCS account: <b style={{ color: C.ink }}>C-DEMO-{wallet.address.slice(2, 8).toUpperCase()}</b> · name matches KYC ✓</div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                {[10, 20, 50].map((q) => (
+                  <button key={q} onClick={() => setInQty(q)} disabled={busy}
+                    style={{ flex: 1, padding: '7px 0', borderRadius: 8, border: `1px solid ${inQty === q ? C.blue : C.line}`, background: inQty === q ? C.blueSoft : '#fff', color: inQty === q ? C.blue : C.ink, fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                    {q}
+                  </button>
+                ))}
+              </div>
+              <Button onClick={bringIn} disabled={!verified}>{steps.bringin.state === 'working' ? 'Transferring…' : `Move ${inQty} MTN to PawaSave`}</Button>
+            </Card>
+
+          </div>
+
+          <div style={{ margin: '4px 0 8px' }}><span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: C.muted }}>Use them</span><span style={{ fontSize: 12, color: C.muted }}> · the contract enforces the rules</span></div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            <Card n={3} title="Gift a share" desc="Send a share to Ada, another verified investor. It arrives instantly, with no broker and no sale." status={steps.gift}>
               <Button onClick={gift} disabled={balance < 1n}>{steps.gift.state === 'working' ? 'Sending…' : 'Send 1 share to Ada'}</Button>
             </Card>
 
-            <Card n={3} title="Try to break the rules" desc="Try sending to a stranger who hasn't done KYC. The contract itself should refuse." status={steps.protect}>
+            <Card n={4} title="Try to break the rules" desc="Try sending to a stranger who hasn't done KYC. The contract itself should refuse." status={steps.protect}>
               <Button onClick={protect} disabled={balance < 1n}>{steps.protect.state === 'working' ? 'Trying…' : 'Send to an unverified wallet'}</Button>
             </Card>
 
-            <Card n={4} title="Cash out" desc="The share is locked, sold and paid out in cNGN, and only then is the token burned." status={steps.cashout}>
+            <Card n={5} title="Cash out" desc="The share is locked, sold and paid out in cNGN, and only then is the token burned." status={steps.cashout}>
               <Button onClick={cashout} disabled={balance < 1n}>{steps.cashout.state === 'working' ? 'Cashing out…' : 'Cash out 1 share'}</Button>
             </Card>
           </div>

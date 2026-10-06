@@ -46,7 +46,7 @@ type State = {
   supply: bigint; locked: bigint; reserve: bigint; reserveAt: number
   halted: boolean; haltReason: string; multiplier: bigint; custodian: string; paused: boolean
 }
-type Ev = { block: number; tx: string; label: string; detail: string; tone: 'ok' | 'warn' | 'info' }
+type Ev = { block: number; tx: string; label: string; detail: string; tone: 'ok' | 'warn' | 'info'; routine?: boolean }
 
 const short = (a: string) => a.slice(0, 6) + '…' + a.slice(-4)
 
@@ -55,6 +55,7 @@ export default function PssDemo() {
   const [s, setS] = useState<State | null>(null)
   const [events, setEvents] = useState<Ev[]>([])
   const [err, setErr] = useState('')
+  const [showAll, setShowAll] = useState(false)
   const provider = useMemo(() => new ethers.JsonRpcProvider(RPC), [])
   const deployBlock = useRef<number | null>(null)
 
@@ -90,24 +91,31 @@ export default function PssDemo() {
       }
       const iface = new ethers.Interface(ABI)
       const out: Ev[] = []
+      const kinds = new Map<string, number>()
       for (const l of logs) {
         let p: ethers.LogDescription | null = null
         try { p = iface.parseLog(l) } catch { continue }
         if (!p) continue
         const a = p.args
-        const ev = (label: string, detail: string, tone: Ev['tone'] = 'info') => out.push({ block: l.blockNumber, tx: l.transactionHash, label, detail, tone })
+        const ev = (label: string, detail: string, tone: Ev['tone'] = 'info', routine = false) => out.push({ block: l.blockNumber, tx: l.transactionHash, label, detail, tone, routine })
+        const shares = (n: bigint) => `${n} share${n === 1n ? '' : 's'}`
         switch (p.name) {
-          case 'MintedAgainstSettlement': ev('Minted against settled shares', `${a.amount} → ${short(a.to)} · custodian-attested trade ${String(a.tradeRef).slice(0, 10)}…`, 'ok'); break
-          case 'ReserveReported': ev(a.shortfall ? 'Reserve shortfall' : 'Reserve reconciled', `CSCS pool ${a.reserveShares} vs supply ${a.supply}`, a.shortfall ? 'warn' : 'ok'); break
-          case 'MintHaltChanged': ev(a.halted ? 'Minting halted' : 'Minting reopened', a.reason, a.halted ? 'warn' : 'ok'); break
-          case 'RedemptionRequested': ev('Redemption locked', `#${a.id} · ${a.amount} from ${short(a.holder)} · ${Number(a.kind) === 0 ? 'cash' : 'share delivery'}`); break
-          case 'RedemptionCompleted': ev('Redemption settled → burned', `#${a.id}`, 'ok'); break
-          case 'RedemptionCancelled': ev('Redemption failed → tokens returned', `#${a.id} · ${a.reason}`, 'warn'); break
+          case 'MintedAgainstSettlement': ev('Shares issued', `${shares(a.amount)} to ${short(a.to)}, each backed by a share the custodian confirmed`, 'ok'); break
+          case 'ReserveReported':
+            if (a.shortfall) ev('Shortfall detected: issuing stopped', `custodian holds ${a.reserveShares}, tokens out ${a.supply}`, 'warn')
+            else ev('Custodian statement', `holds ${a.reserveShares} shares for ${a.supply} tokens: fully backed`, 'ok', true)
+            break
+          case 'MintHaltChanged': ev(a.halted ? 'Issuing stopped' : 'Issuing reopened', a.reason, a.halted ? 'warn' : 'ok'); break
+          case 'RedemptionRequested':
+            kinds.set(String(a.id), Number(a.kind))
+            ev(Number(a.kind) === 0 ? 'Cash-out started' : 'Withdrawal to CSCS started', `${shares(a.amount)} locked from ${short(a.holder)}`); break
+          case 'RedemptionCompleted': ev(kinds.get(String(a.id)) === 1 ? 'Delivered to CSCS account' : 'Cash-out paid', 'token burned after settlement', 'ok'); break
+          case 'RedemptionCancelled': ev('Withdrawal failed: tokens returned', a.reason, 'warn'); break
           case 'MultiplierChanged': ev('Corporate action', `${a.corporateAction} · ${Number(a.multiplier) / 1e18} share(s) per token`); break
-          case 'Verified': ev(a.status ? 'Wallet verified (KYC)' : 'Wallet de-registered', short(a.account)); break
+          case 'Verified': ev(a.status ? 'Investor verified (KYC)' : 'Investor removed', short(a.account), 'info', true); break
           case 'Transfer':
             if (a.from !== ethers.ZeroAddress && a.to !== ethers.ZeroAddress && a.from.toLowerCase() !== token.toLowerCase() && a.to.toLowerCase() !== token.toLowerCase())
-              ev('Transfer between verified wallets', `${a.value} · ${short(a.from)} → ${short(a.to)}`)
+              ev('Shares sent', `${shares(a.value)} · ${short(a.from)} → ${short(a.to)}, both verified`)
             break
         }
       }
@@ -178,16 +186,30 @@ export default function PssDemo() {
 
           <TryIt token={token} onChange={load} />
 
-          <h2 style={{ fontSize: 16, margin: '22px 0 8px' }}>On-chain trail</h2>
-          <div style={{ border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden' }}>
-            {events.length === 0 ? <div style={{ padding: 16, color: '#64748b' }}>No events in the recent block range.</div> : events.map((e, i) => (
-              <a key={i} href={`${EXPLORER}/tx/${e.tx}`} target="_blank" rel="noreferrer"
-                style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '10px 14px', borderTop: i ? '1px solid #f1f5f9' : 'none', textDecoration: 'none', color: 'inherit' }}>
-                <span><b style={{ color: tone[e.tone] }}>{e.label}</b><span style={{ color: '#475569' }}> · {e.detail}</span></span>
-                <span style={{ color: '#94a3b8', fontSize: 12, whiteSpace: 'nowrap' }}>block {e.block}</span>
-              </a>
-            ))}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '22px 0 8px', gap: 8, flexWrap: 'wrap' }}>
+            <h2 style={{ fontSize: 16, margin: 0 }}>Recent activity on-chain</h2>
+            <span style={{ fontSize: 12, color: '#64748b' }}>every row is a public transaction · click to verify</span>
           </div>
+          {(() => {
+            const list = showAll ? events : events.filter((e) => !e.routine).slice(0, 5)
+            return (
+              <div style={{ border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden' }}>
+                {list.length === 0 ? <div style={{ padding: 16, color: '#64748b' }}>No activity yet.</div> : list.map((e, i) => (
+                  <a key={e.tx + i} href={`${EXPLORER}/tx/${e.tx}`} target="_blank" rel="noreferrer"
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '11px 14px', borderTop: i ? '1px solid #f1f5f9' : 'none', textDecoration: 'none', color: 'inherit', fontSize: 14 }}>
+                    <span><b style={{ color: tone[e.tone] }}>{e.label}</b><span style={{ color: '#475569' }}> · {e.detail}</span></span>
+                    <span style={{ color: '#0052ff', fontSize: 12, whiteSpace: 'nowrap' }}>receipt ↗</span>
+                  </a>
+                ))}
+                {events.length > list.length || showAll ? (
+                  <button onClick={() => setShowAll((v) => !v)}
+                    style={{ width: '100%', padding: '10px 14px', border: 'none', borderTop: '1px solid #f1f5f9', background: '#f8fafc', color: '#0052ff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                    {showAll ? 'Show less' : `Show full history (${events.length} events, incl. custodian statements)`}
+                  </button>
+                ) : null}
+              </div>
+            )
+          })()}
           <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 14 }}>Testnet demonstration. No real securities are represented. Refreshes every 10 seconds.</p>
         </>
       )}

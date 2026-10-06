@@ -21,7 +21,7 @@ async function expectRevert(p: Promise<unknown>, label: string) {
   try { await p; line(`   !! expected a revert: ${label}`) } catch (e: any) {
     const m = String(e?.shortMessage || e?.reason || e?.message || e).match(/reverted with reason string '([^']+)'|reason="([^"]+)"|'([^']+)'/)
     // Live RPCs return the reason as text ("execution reverted: <reason>"); Hardhat decodes it.
-    const live = String(e?.message || "").match(/execution reverted: ([^"\n(]+)/)?.[1]?.trim()
+    const live = String(e?.message || "").match(/execution reverted:\s*"?([^"\n(]+)/)?.[1]?.trim()
     blocked(`${label} → "${e?.revert?.args?.[0] || live || m?.[1] || m?.[2] || m?.[3] || "reverted"}"`)
   }
 }

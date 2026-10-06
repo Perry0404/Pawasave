@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ethers } from 'ethers'
+import TryIt from './try-it'
 
 /**
  * /pss/demo — live view of a PSS-1 NGX equity token on Base Sepolia (testnet).
@@ -174,6 +175,8 @@ export default function PssDemo() {
               </div>
             </div>
           </div>
+
+          <TryIt token={token} onChange={load} />
 
           <h2 style={{ fontSize: 16, margin: '22px 0 8px' }}>On-chain trail</h2>
           <div style={{ border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden' }}>

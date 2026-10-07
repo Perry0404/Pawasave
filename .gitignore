@@ -25,3 +25,10 @@ public_key*
 =======
 .kiro
 PAWASAVE_AUDIT_2026-09_AND_PLAN.md
+
+# temp exclusion
+MARKETING_FINDINGS_BORDERLESS_SOCIAL_NAIRA.md
+supabase/migrations/107_chat_gif_sticker.sql
+supabase/migrations/108_p2p_attachment.sql
+supabase/migrations/111_resolve_contacts.sql
+supabase/migrations/113_chat_read_receipts.sql

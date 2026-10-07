@@ -156,6 +156,19 @@ describe("PawaEquityToken (NGX pilot)", function () {
       expect(await token.balanceOf(alice.address)).to.equal(10n)
       expect(await token.multiplier()).to.equal(2n * 10n ** 18n)
     })
+    it("after a bonus issue the reserve check counts shares, not tokens", async () => {
+      await mint(alice, 100n, ref("NGX-T1"))
+      await token.connect(admin).setMultiplier(2n * 10n ** 18n, "1-for-1 bonus")
+      expect(await token.sharesRequired()).to.equal(200n)
+      // The pool still holds only the pre-bonus 100 shares: that is a shortfall.
+      await expect(token.connect(ops).reportReserve(100n, ref("stmt-bonus")))
+        .to.emit(token, "ReserveReported").withArgs(100n, 100n, ref("stmt-bonus"), true)
+      expect(await token.mintHalted()).to.equal(true)
+      await expect(token.connect(ops).setMintHalt(false, "too early")).to.be.revertedWith("reserve still short")
+      await token.connect(ops).reportReserve(200n, ref("stmt-bonus-credited"))
+      await token.connect(ops).setMintHalt(false, "bonus shares credited")
+      expect(await token.mintHalted()).to.equal(false)
+    })
     it("rotating the custodian key invalidates attestations from the old key", async () => {
       await token.connect(admin).setCustodianSigner(stranger.address)
       await expect(mint(alice, 1n, ref("t1"))).to.be.revertedWith("not attested by custodian")

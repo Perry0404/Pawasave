@@ -3,11 +3,15 @@
   "chainId": 84532,
   "contract": "PawaEquityToken",
   "token": "pMTNN",
-  "address": "0xde5636D192bdF5DfD164107D804826B69b9DE35C",
+  "address": "0xD9305D9CD07643745A30Fa3B79C0e8455f1104d3",
+  "dividendDistributor": "0x7950439d39C58adE4530F96ca665c18C42Fd05B0",
+  "demoCngn": "0xF858125fA2cb724119366A5A20A298F5e4154D2d",
   "custodianSigner": "0x4FA6c44CfE8100c19596AF542d860635Eb5d68EC",
+  "trustee": "0xd90899790D22787182B54F08adb6c9fbDd2175D9",
   "deployedBy": "0x17E85Ed00196d6496BBF17d4D789BdC1eb919Ca7",
-  "deployedAt": "2026-10-06",
-  "purpose": "Testnet demonstration of the PSS-1 NGX equity token lifecycle (scripts/ngx-token-demo.ts). No real securities.",
-  "explorer": "https://sepolia.basescan.org/address/0xde5636D192bdF5DfD164107D804826B69b9DE35C",
-  "liveView": "/pss/demo?token=0xde5636D192bdF5DfD164107D804826B69b9DE35C"
+  "deployedAt": "2026-10-07",
+  "previous": "0xde5636D192bdF5DfD164107D804826B69b9DE35C (2026-10-06, before record-date snapshots and the dividend distributor)",
+  "purpose": "Testnet demonstration of the PSS-1 NGX equity token lifecycle (scripts/ngx-token-demo.ts). No real securities. Demo cNGN is a stand-in with no value.",
+  "explorer": "https://sepolia.basescan.org/address/0xD9305D9CD07643745A30Fa3B79C0e8455f1104d3",
+  "liveView": "/pss/demo"
 }

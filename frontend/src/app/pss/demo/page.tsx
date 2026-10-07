@@ -9,12 +9,15 @@ import TryIt from './try-it'
  *
  * Reads everything straight from the chain, so what it shows is what the contract enforces:
  * backing (custodian-reported CSCS pool vs token supply), mint status, locked redemptions,
- * the corporate-action multiplier and the event trail. Token address comes from ?token=0x…
- * or NEXT_PUBLIC_PSS_DEMO_TOKEN. Read-only; no wallet needed.
+ * the corporate-action multiplier and the event trail. Token address comes from ?token=0x…,
+ * NEXT_PUBLIC_PSS_DEMO_TOKEN, or the current testnet deployment.
  */
 
 const RPC = process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC || 'https://sepolia.base.org'
 const EXPLORER = 'https://sepolia.basescan.org'
+const DEMO_TOKEN = process.env.NEXT_PUBLIC_PSS_DEMO_TOKEN || '0xD9305D9CD07643745A30Fa3B79C0e8455f1104d3'
+// The first testnet deployment, before record-date snapshots and dividends. Old links land on the current one.
+const SUPERSEDED = ['0xde5636d192bdf5dfd164107d804826b69b9de35c']
 
 const ABI = [
   'function name() view returns (string)',
@@ -37,6 +40,7 @@ const ABI = [
   'event RedemptionCompleted(uint256 indexed id, bytes32 settlementRef)',
   'event RedemptionCancelled(uint256 indexed id, string reason)',
   'event MultiplierChanged(uint256 multiplier, string corporateAction)',
+  'event RecordDateSnapshot(uint256 indexed id, uint256 supply, string reason)',
   'event Verified(address indexed account, bool status)',
   'event Transfer(address indexed from, address indexed to, uint256 value)',
 ]
@@ -61,7 +65,7 @@ export default function PssDemo() {
 
   useEffect(() => {
     const q = new URLSearchParams(window.location.search).get('token')
-    setToken(q || process.env.NEXT_PUBLIC_PSS_DEMO_TOKEN || '')
+    setToken(q && !SUPERSEDED.includes(q.toLowerCase()) ? q : DEMO_TOKEN)
   }, [])
 
   const load = useCallback(async () => {
@@ -112,6 +116,7 @@ export default function PssDemo() {
           case 'RedemptionCompleted': ev(kinds.get(String(a.id)) === 1 ? 'Delivered to CSCS account' : 'Cash-out paid', 'token burned after settlement', 'ok'); break
           case 'RedemptionCancelled': ev('Withdrawal failed: tokens returned', a.reason, 'warn'); break
           case 'MultiplierChanged': ev('Corporate action', `${a.corporateAction} · ${Number(a.multiplier) / 1e18} share(s) per token`); break
+          case 'RecordDateSnapshot': ev('Dividend record date', `balances of all ${a.supply} shares fixed on-chain · ${a.reason}`, 'ok'); break
           case 'Verified': ev(a.status ? 'Investor verified (KYC)' : 'Investor removed', short(a.account), 'info', true); break
           case 'Transfer':
             if (a.from !== ethers.ZeroAddress && a.to !== ethers.ZeroAddress && a.from.toLowerCase() !== token.toLowerCase() && a.to.toLowerCase() !== token.toLowerCase())

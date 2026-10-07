@@ -1,7 +1,9 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: UNLICENSED
+// Copyright (c) 2026 CASEWINAI LIMITED (RC 9425438). All rights reserved. Proprietary and confidential.
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Snapshot.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
@@ -26,15 +28,18 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
  *    in full if it fails, so the holder never loses both the token and the proceeds.
  *  - CORPORATE ACTIONS: a published multiplier (shares per token, 18 dp) records splits and bonus
  *    issues without moving balances.
+ *  - DIVIDENDS: a record-date snapshot fixes every holder's balance on-chain. The dividend
+ *    distributor (PawaDividendDistributor) pays cNGN pro-rata against that snapshot.
  *  - ADMIN: roles are separated. In production DEFAULT_ADMIN_ROLE is a 2-of-3 multisig (issuer,
  *    trustee, CaseWinAI) behind a timelock; this contract is not upgradeable.
  */
-contract PawaEquityToken is ERC20, AccessControl, Pausable, EIP712 {
+contract PawaEquityToken is ERC20Snapshot, AccessControl, Pausable, EIP712 {
     bytes32 public constant REGISTRAR_ROLE = keccak256("REGISTRAR_ROLE");   // verified-wallet register
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");         // minting service
     bytes32 public constant BURNER_ROLE = keccak256("BURNER_ROLE");         // completes / cancels redemptions
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     bytes32 public constant RECONCILER_ROLE = keccak256("RECONCILER_ROLE"); // posts custodian statements
+    bytes32 public constant SNAPSHOT_ROLE = keccak256("SNAPSHOT_ROLE");     // takes record-date snapshots
 
     bytes32 private constant MINT_TYPEHASH =
         keccak256("MintAttestation(address to,uint256 amount,bytes32 tradeRef,uint256 deadline)");
@@ -48,6 +53,7 @@ contract PawaEquityToken is ERC20, AccessControl, Pausable, EIP712 {
         RedemptionKind kind;
         RedemptionStatus status;
         uint64 createdAt;
+        uint64 closedAt;                // when it was completed or cancelled
     }
 
     string public ngxSymbol;            // e.g. "MTNN"
@@ -73,6 +79,8 @@ contract PawaEquityToken is ERC20, AccessControl, Pausable, EIP712 {
 
     bool private _forcing;              // set only inside forcedTransfer
 
+    mapping(uint256 => uint64) public snapshotAt; // record-date snapshot id => time taken
+
     Redemption[] public redemptions;
     uint256 public lockedSupply;        // tokens held in pending redemptions
 
@@ -87,6 +95,7 @@ contract PawaEquityToken is ERC20, AccessControl, Pausable, EIP712 {
     event MultiplierChanged(uint256 multiplier, string corporateAction);
     event ForcedTransfer(address indexed from, address indexed to, uint256 amount, string legalBasis);
     event MintCapsChanged(uint256 maxPerTx, uint256 dailyCap);
+    event RecordDateSnapshot(uint256 indexed id, uint256 supply, string reason);
 
     constructor(
         string memory name_,
@@ -166,12 +175,18 @@ contract PawaEquityToken is ERC20, AccessControl, Pausable, EIP712 {
 
     // ── reconciliation ───────────────────────────────────────────────────────
 
+    /// @notice Shares the pool must hold for the tokens in issue: supply x multiplier, rounded up.
+    ///         After a 1-for-1 bonus, 100 tokens need 200 shares in the pool.
+    function sharesRequired() public view returns (uint256) {
+        return (totalSupply() * multiplier + 1e18 - 1) / 1e18;
+    }
+
     /// @notice Post the custodian's CSCS pool balance. A shortfall halts minting automatically.
     function reportReserve(uint256 reserveShares, bytes32 statementHash) external onlyRole(RECONCILER_ROLE) {
         lastReserveShares = reserveShares;
         lastStatementHash = statementHash;
         lastReserveAt = uint64(block.timestamp);
-        bool shortfall = reserveShares < totalSupply();
+        bool shortfall = reserveShares < sharesRequired();
         if (shortfall && !mintHalted) {
             mintHalted = true;
             haltReason = "reserve shortfall";
@@ -182,7 +197,7 @@ contract PawaEquityToken is ERC20, AccessControl, Pausable, EIP712 {
 
     /// @notice Reconciler can halt for any exception, and clears a halt once it is resolved.
     function setMintHalt(bool halted, string calldata reason) external onlyRole(RECONCILER_ROLE) {
-        if (!halted) require(lastReserveShares >= totalSupply(), "reserve still short");
+        if (!halted) require(lastReserveShares >= sharesRequired(), "reserve still short");
         mintHalted = halted;
         haltReason = reason;
         emit MintHaltChanged(halted, reason);
@@ -196,7 +211,7 @@ contract PawaEquityToken is ERC20, AccessControl, Pausable, EIP712 {
         _transfer(msg.sender, address(this), amount);
         lockedSupply += amount;
         id = redemptions.length;
-        redemptions.push(Redemption(msg.sender, amount, kind, RedemptionStatus.Pending, uint64(block.timestamp)));
+        redemptions.push(Redemption(msg.sender, amount, kind, RedemptionStatus.Pending, uint64(block.timestamp), 0));
         emit RedemptionRequested(id, msg.sender, amount, kind);
     }
 
@@ -205,6 +220,7 @@ contract PawaEquityToken is ERC20, AccessControl, Pausable, EIP712 {
         Redemption storage r = redemptions[id];
         require(r.status == RedemptionStatus.Pending, "not pending");
         r.status = RedemptionStatus.Completed;
+        r.closedAt = uint64(block.timestamp);
         lockedSupply -= r.amount;
         _burn(address(this), r.amount);
         emit RedemptionCompleted(id, settlementRef);
@@ -215,6 +231,7 @@ contract PawaEquityToken is ERC20, AccessControl, Pausable, EIP712 {
         Redemption storage r = redemptions[id];
         require(r.status == RedemptionStatus.Pending, "not pending");
         r.status = RedemptionStatus.Cancelled;
+        r.closedAt = uint64(block.timestamp);
         lockedSupply -= r.amount;
         _transfer(address(this), r.holder, r.amount);
         emit RedemptionCancelled(id, reason);
@@ -225,6 +242,13 @@ contract PawaEquityToken is ERC20, AccessControl, Pausable, EIP712 {
     }
 
     // ── corporate actions and admin ──────────────────────────────────────────
+
+    /// @notice Fix every holder's balance as at now (a dividend or voting record date).
+    function snapshot(string calldata reason) external onlyRole(SNAPSHOT_ROLE) returns (uint256 id) {
+        id = _snapshot();
+        snapshotAt[id] = uint64(block.timestamp);
+        emit RecordDateSnapshot(id, totalSupply(), reason);
+    }
 
     function setMultiplier(uint256 newMultiplier, string calldata corporateAction) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newMultiplier > 0, "zero multiplier");
@@ -267,7 +291,7 @@ contract PawaEquityToken is ERC20, AccessControl, Pausable, EIP712 {
 
     // ── transfer rule ────────────────────────────────────────────────────────
 
-    function _beforeTokenTransfer(address from, address to, uint256 amount) internal override {
+    function _beforeTokenTransfer(address from, address to, uint256 amount) internal override(ERC20Snapshot) {
         super._beforeTokenTransfer(from, to, amount);
         // Mint and burn are gated by their own functions. Moves into or out of this contract are
         // redemption locks and releases. Admin forced transfers bypass pause (court orders).

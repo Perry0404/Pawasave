@@ -4,16 +4,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ethers } from 'ethers'
 
 /**
- * "Try it live" for /pss/demo: a guided, five-step walkthrough on Base Sepolia.
+ * "Try it live" for /pss/demo: a guided, six-step walkthrough on Base Sepolia.
  * The visitor gets a throwaway test wallet (kept in this browser), passes mock KYC, then
- * buys or brings in shares, gifts, tries to break the rules, and cashes out. Every step is a real testnet
+ * buys or brings in shares, gifts, tries to break the rules, cashes out, and receives a dividend. Every step is a real testnet
  * transaction; the server plays broker, custodian and minting service (lib/pss-demo.ts).
  */
 
 const RPC = process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC || 'https://sepolia.base.org'
 const EXPLORER = 'https://sepolia.basescan.org'
 const ADA = '0xc943b344a66FE3D0FCa875c329120459CaA9A430' // a verified demo investor
-const KEY = 'pss_demo_wallet_v1'
+const CNGN = '0xF858125fA2cb724119366A5A20A298F5e4154D2d' // stand-in cNGN on the test network
+const KEY = 'pss_demo_wallet_v2' // v2: the demo moved to a new testnet token
 
 const ABI = [
   'function balanceOf(address) view returns (uint256)',
@@ -21,11 +22,11 @@ const ABI = [
   'function transfer(address to, uint256 amount) returns (bool)',
   'function requestRedemption(uint256 amount, uint8 kind) returns (uint256)',
   'function redemptionCount() view returns (uint256)',
-  'function redemptions(uint256) view returns (address holder, uint256 amount, uint8 kind, uint8 status, uint64 createdAt)',
+  'function redemptions(uint256) view returns (address holder, uint256 amount, uint8 kind, uint8 status, uint64 createdAt, uint64 closedAt)',
   'event RedemptionRequested(uint256 indexed id, address indexed holder, uint256 amount, uint8 kind)',
 ]
 
-type StepKey = 'buy' | 'bringin' | 'gift' | 'protect' | 'cashout'
+type StepKey = 'buy' | 'bringin' | 'gift' | 'protect' | 'cashout' | 'dividend'
 type Status = { state: 'idle' | 'working' | 'done' | 'protected' | 'error'; text?: string; txs?: { label: string; hash: string }[] }
 
 const C = {
@@ -62,11 +63,12 @@ export default function TryIt({ token, onChange }: { token: string; onChange: ()
   const [wallet, setWallet] = useState<ethers.Wallet | null>(null)
   const [verified, setVerified] = useState(false)
   const [balance, setBalance] = useState<bigint>(0n)
+  const [cngn, setCngn] = useState<bigint>(0n)
   const [qty, setQty] = useState(5)
   const [inQty, setInQty] = useState(20)
   const [starting, setStarting] = useState<Status>({ state: 'idle' })
   const [steps, setSteps] = useState<Record<StepKey, Status>>({
-    buy: { state: 'idle' }, bringin: { state: 'idle' }, gift: { state: 'idle' }, protect: { state: 'idle' }, cashout: { state: 'idle' },
+    buy: { state: 'idle' }, bringin: { state: 'idle' }, gift: { state: 'idle' }, protect: { state: 'idle' }, cashout: { state: 'idle' }, dividend: { state: 'idle' },
   })
   const busy = starting.state === 'working' || Object.values(steps).some((s) => s.state === 'working')
   const set = (k: StepKey, s: Status) => setSteps((x) => ({ ...x, [k]: s }))
@@ -78,8 +80,9 @@ export default function TryIt({ token, onChange }: { token: string; onChange: ()
   const refresh = useCallback(async () => {
     if (!wallet || !ethers.isAddress(token)) return
     const t = new ethers.Contract(token, ABI, provider)
-    const [b, v] = await Promise.all([t.balanceOf(wallet.address), t.verified(wallet.address)])
-    setBalance(b); setVerified(v)
+    const c = new ethers.Contract(CNGN, ABI, provider)
+    const [b, v, n] = await Promise.all([t.balanceOf(wallet.address), t.verified(wallet.address), c.balanceOf(wallet.address)])
+    setBalance(b); setVerified(v); setCngn(n)
   }, [wallet, token, provider])
 
   useEffect(() => {
@@ -178,10 +181,20 @@ export default function TryIt({ token, onChange }: { token: string; onChange: ()
     refresh().catch(() => {}); onChange()
   }
 
+  const dividend = async () => {
+    set('dividend', { state: 'working', text: 'MTN pays ₦10 a share → record date fixed on-chain → trustee approves → cNGN paid out…' })
+    try {
+      const r = await api({ action: 'dividend', address: wallet!.address })
+      set('dividend', { state: 'done', text: `₦${r.amount.toLocaleString()} cNGN paid to you: ₦${r.perShare} × the ${r.shares} shares you held at the record date. The contract worked out your share; the trustee had to approve first.`,
+        txs: [{ label: 'Record date', hash: r.snapshotTx }, { label: 'Trustee approval', hash: r.approveTx }, { label: 'Payment', hash: r.payTx }] })
+    } catch (e) { set('dividend', { state: 'error', text: friendly(e) }) }
+    refresh().catch(() => {}); onChange()
+  }
+
   const reset = () => {
     try { localStorage.removeItem(KEY) } catch { /* ignore */ }
-    setWallet(null); setBalance(0n); setVerified(false); setStarting({ state: 'idle' })
-    setSteps({ buy: { state: 'idle' }, bringin: { state: 'idle' }, gift: { state: 'idle' }, protect: { state: 'idle' }, cashout: { state: 'idle' } })
+    setWallet(null); setBalance(0n); setCngn(0n); setVerified(false); setStarting({ state: 'idle' })
+    setSteps({ buy: { state: 'idle' }, bringin: { state: 'idle' }, gift: { state: 'idle' }, protect: { state: 'idle' }, cashout: { state: 'idle' }, dividend: { state: 'idle' } })
   }
 
   // ── UI ───────────────────────────────────────────────────────────────────
@@ -251,6 +264,7 @@ export default function TryIt({ token, onChange }: { token: string; onChange: ()
               <div style={{ fontSize: 12, color: C.muted }}>Your holdings</div>
               <div style={{ fontSize: 28, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{String(balance)} <span style={{ fontSize: 15, fontWeight: 600, color: C.muted }}>MTN shares</span></div>
               <div style={{ fontSize: 12, color: C.muted }}>held for you by the custodian, as pMTNN tokens</div>
+              {cngn > 0n && <div style={{ fontSize: 13, color: C.green, fontWeight: 600, marginTop: 4 }}>+ ₦{(Number(cngn) / 1e6).toLocaleString()} cNGN in dividends received</div>}
             </div>
             <div style={{ textAlign: 'right', fontSize: 13 }}>
               <div><span style={{ color: C.muted }}>KYC </span><b style={{ color: verified ? C.green : C.amber }}>{verified ? 'Verified' : 'Pending…'}</b></div>
@@ -303,6 +317,13 @@ export default function TryIt({ token, onChange }: { token: string; onChange: ()
 
             <Card n={5} title="Cash out" desc="The share is locked, sold and paid out in cNGN, and only then is the token burned." status={steps.cashout}>
               <Button onClick={cashout} disabled={balance < 1n}>{steps.cashout.state === 'working' ? 'Cashing out…' : 'Cash out 1 share'}</Button>
+            </Card>
+          </div>
+
+          <div style={{ margin: '18px 0 8px' }}><span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: C.muted }}>Earn</span><span style={{ fontSize: 12, color: C.muted }}> · dividends follow the share</span></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+            <Card n={6} title="Receive a dividend" desc="MTN declares ₦10 a share. Everyone's holding on the record date is fixed on-chain, the money arrives for the pool, the trustee approves, and the contract pays each holder their exact share in cNGN." status={steps.dividend}>
+              <div style={{ maxWidth: 320 }}><Button onClick={dividend} disabled={balance < 1n}>{steps.dividend.state === 'working' ? 'Paying dividend…' : 'Simulate an MTN dividend'}</Button></div>
             </Card>
           </div>
         </>

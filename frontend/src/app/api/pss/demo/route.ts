@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ethers } from 'ethers'
-import { demoEnabled, onboard, buy, transferIn, settle } from '@/lib/pss-demo'
+import { demoEnabled, onboard, buy, transferIn, settle, dividend } from '@/lib/pss-demo'
 
 /**
- * POST /api/pss/demo   { action: 'onboard' | 'buy' | 'transfer_in' | 'settle', address, quantity?, id? }
+ * POST /api/pss/demo   { action: 'onboard' | 'buy' | 'transfer_in' | 'settle' | 'dividend', address, quantity?, id? }
  *
  * Testnet-only demo of the PSS-1 NGX token (see lib/pss-demo.ts). Rate-limited per IP so the
  * demo key's test ETH isn't drained.
@@ -44,6 +44,8 @@ export async function POST(request: NextRequest) {
         if (!(id >= 0)) return NextResponse.json({ error: 'Invalid redemption' }, { status: 400 })
         return NextResponse.json(await settle(id, address))
       }
+      case 'dividend':
+        return NextResponse.json(await dividend(address))
       default:
         return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
     }

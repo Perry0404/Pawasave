@@ -6,10 +6,13 @@ import { ethers } from 'ethers'
  *
  * TESTNET ONLY. NGX_DEMO_KEY is a Base Sepolia key with no mainnet value. The role keys are
  * derived from it exactly as scripts/ngx-token-demo.ts derives them:
- *   root (admin / gas), [0] custodian, [1] ops (registrar, minter, burner, reconciler).
+ *   root (admin / gas), [0] custodian, [1] ops (registrar, minter, burner, reconciler, snapshots,
+ *   dividend issuer), [5] trustee (approves dividends).
  */
 
-export const PSS_DEMO_TOKEN = process.env.NEXT_PUBLIC_PSS_DEMO_TOKEN || '0xde5636D192bdF5DfD164107D804826B69b9DE35C'
+export const PSS_DEMO_TOKEN = process.env.NEXT_PUBLIC_PSS_DEMO_TOKEN || '0xD9305D9CD07643745A30Fa3B79C0e8455f1104d3'
+export const PSS_DEMO_DISTRIBUTOR = '0x7950439d39C58adE4530F96ca665c18C42Fd05B0'
+export const PSS_DEMO_CNGN = '0xF858125fA2cb724119366A5A20A298F5e4154D2d' // stand-in cNGN, test network only
 const RPC = process.env.BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org'
 const CHAIN_ID = 84532n
 
@@ -18,7 +21,10 @@ const ABI = [
   'function totalSupply() view returns (uint256)',
   'function lastReserveShares() view returns (uint256)',
   'function mintHalted() view returns (bool)',
-  'function redemptions(uint256) view returns (address holder, uint256 amount, uint8 kind, uint8 status, uint64 createdAt)',
+  'function redemptions(uint256) view returns (address holder, uint256 amount, uint8 kind, uint8 status, uint64 createdAt, uint64 closedAt)',
+  'function balanceOf(address) view returns (uint256)',
+  'function snapshot(string reason) returns (uint256)',
+  'event RecordDateSnapshot(uint256 indexed id, uint256 supply, string reason)',
   'function setVerified(address account, bool status)',
   'function mintWithAttestation(address to, uint256 amount, bytes32 tradeRef, uint256 deadline, bytes custodianSignature)',
   'function reportReserve(uint256 reserveShares, bytes32 statementHash)',
@@ -34,7 +40,7 @@ function keys() {
   if (!seed) throw new Error('demo not configured')
   const provider = new ethers.JsonRpcProvider(RPC, Number(CHAIN_ID), { staticNetwork: true })
   const derive = (i: number) => ethers.HDNodeWallet.fromSeed(ethers.keccak256(ethers.toUtf8Bytes(seed + ':' + i))).connect(provider)
-  return { provider, root: new ethers.Wallet(seed, provider), custodian: derive(0), ops: derive(1) }
+  return { provider, root: new ethers.Wallet(seed, provider), custodian: derive(0), ops: derive(1), trustee: derive(5) }
 }
 
 // One server process signs for the ops and root keys; serialise so nonces never collide.
@@ -125,5 +131,53 @@ export function settle(id: number, address: string) {
     const reserveTx = await t.reportReserve(supply, ethers.keccak256(ethers.toUtf8Bytes(`CSCS-after-sale-${id}`)))
     await reserveTx.wait(1)
     return { burnTx: burnTx.hash, reserveTx: reserveTx.hash }
+  })
+}
+
+const DIST_ABI = [
+  'function declare(uint256 snapshotId, uint256 total, string paymentRef) returns (uint256)',
+  'function approve(uint256 id)',
+  'function pay(uint256 id, address account)',
+  'event DividendDeclared(uint256 indexed id, uint256 snapshotId, uint256 total, uint256 supplyAt, string paymentRef)',
+]
+const DIVIDEND_PER_SHARE_NAIRA = 10n
+// Each step depends on the one before it, and a lagging node would mis-estimate gas: set it.
+const G = { gasLimit: 400_000 }
+
+/**
+ * Dividend: the record date is fixed on-chain, the "registrar's payment" arrives as cNGN at the
+ * distributor, the issuer declares, the TRUSTEE approves, and the visitor is paid pro-rata.
+ */
+export function dividend(address: string) {
+  return serial(async () => {
+    const k = keys()
+    const t = new ethers.Contract(PSS_DEMO_TOKEN, ABI, k.ops)
+    const d = new ethers.Contract(PSS_DEMO_DISTRIBUTOR, DIST_ABI, k.ops)
+    const cngn = new ethers.Contract(PSS_DEMO_CNGN, ['function mint(address to, uint256 amount)'], k.root)
+    await topUp(k, k.ops.address, ethers.parseEther('0.0001'), ethers.parseEther('0.0002'))
+    await topUp(k, k.trustee.address, ethers.parseEther('0.00003'), ethers.parseEther('0.0001'))
+    const held: bigint = await t.balanceOf(address)
+    if (held === 0n) throw new Error('no shares held')
+
+    const snapTx = await t.snapshot('MTNN dividend (demo)', G)
+    const snapRc = await snapTx.wait(1)
+    const snap = snapRc!.logs.map((l: ethers.Log) => { try { return t.interface.parseLog(l) } catch { return null } })
+      .find((p: ethers.LogDescription | null) => p?.name === 'RecordDateSnapshot')
+    const snapshotId: bigint = snap!.args.id
+    const total: bigint = (snap!.args.supply as bigint) * DIVIDEND_PER_SHARE_NAIRA * 1_000_000n
+
+    const fundTx = await cngn.mint(PSS_DEMO_DISTRIBUTOR, total, G); await fundTx.wait(1)
+    const declareTx = await d.declare(snapshotId, total, `MTNN-DEMO-${Date.now()}`, G)
+    const declareRc = await declareTx.wait(1)
+    const declared = declareRc!.logs.map((l: ethers.Log) => { try { return d.interface.parseLog(l) } catch { return null } })
+      .find((p: ethers.LogDescription | null) => p?.name === 'DividendDeclared')
+    const id: bigint = declared!.args.id
+
+    const approveTx = await (d.connect(k.trustee) as ethers.Contract).approve(id, G); await approveTx.wait(1)
+    const payTx = await d.pay(id, address, G); await payTx.wait(1)
+    return {
+      shares: Number(held), perShare: Number(DIVIDEND_PER_SHARE_NAIRA), amount: Number(held * DIVIDEND_PER_SHARE_NAIRA),
+      snapshotTx: snapTx.hash, approveTx: approveTx.hash, payTx: payTx.hash,
+    }
   })
 }

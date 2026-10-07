@@ -238,6 +238,8 @@ export default function AdminView() {
     + (volume?.total_vault_saves_kobo || 0) + (volume?.total_loans_disbursed_kobo || 0)
     + (volume?.total_loans_repaid_kobo || 0) + (volume?.total_investments_kobo || 0)
     + (volume?.total_transfers_kobo || 0)
+    + (volume?.total_goal_saves_kobo || 0) + (volume?.total_circle_contrib_kobo || 0)
+    + (volume?.total_coop_dues_kobo || 0)
   const tvlKobo = (users?.total_naira_kobo || 0) + Math.floor((users?.total_usdc_micro || 0) / 10000)
 
   const tabs: { id: Tab; label: string }[] = [
@@ -355,6 +357,7 @@ export default function AdminView() {
             <StatCard tone="purple" icon={<Lock className="w-4 h-4" />} label="Penalties" value={formatNaira(fees?.total_penalty_fees || 0)} />
             <StatCard tone="teal" icon={<TrendingUp className="w-4 h-4" />} label="Loans (fee + interest)" value={formatNaira(fees?.total_loan_fees || 0)} />
             <StatCard tone="indigo" icon={<TrendingUp className="w-4 h-4" />} label="Stocks (sell fee)" value={formatNaira(fees?.total_investment_fees || 0)} />
+            <StatCard tone="emerald" icon={<TrendingUp className="w-4 h-4" />} label="Savings yield spread" value={formatNaira(fees?.total_yield_spread_kobo || 0)} />
           </div>
 
           {/* TVL detail */}
@@ -389,6 +392,9 @@ export default function AdminView() {
               <Row label="Loans Repaid" value={formatNaira(volume?.total_loans_repaid_kobo || 0)} tone="teal7" />
               <Row label="Investments" value={formatNaira(volume?.total_investments_kobo || 0)} tone="indigo" />
               <Row label="Transfers (P2P & Pawa)" value={formatNaira(volume?.total_transfers_kobo || 0)} tone="purple" />
+              <Row label="Goal Savings" value={formatNaira(volume?.total_goal_saves_kobo || 0)} tone="blue" />
+              <Row label="Ajo & Circles" value={formatNaira(volume?.total_circle_contrib_kobo || 0)} tone="emerald" />
+              <Row label="Cooperative Dues" value={formatNaira(volume?.total_coop_dues_kobo || 0)} tone="teal" />
               <div className="flex justify-between pt-2.5 mt-0.5 border-t border-slate-200">
                 <span className="font-semibold text-slate-700">Total Volume</span>
                 <span className="font-bold text-slate-900 tabular-nums">{formatNaira(totalVolume)}</span>

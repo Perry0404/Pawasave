@@ -1,11 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Lock, Plus, CaretRight } from '@phosphor-icons/react'
 import { formatNaira, formatCngn, koboToMicroUsdc, microUsdcToKobo } from '@/lib/format'
 import {
   useSavingsLocks, lockSavings, withdrawLock,
   useSavingsGoals, createSavingsGoal, contributeToGoal, completeSavingsGoal, breakSavingsGoal,
+  getApySettings, type ApySettings, setGoalAutoContribute,
 } from '@/hooks/use-data'
 import type { Wallet, SavingsLock, SavingsGoal } from '@/lib/types'
 import { useConfirm } from '@/components/confirm-dialog'
@@ -15,11 +16,14 @@ interface Props {
   refresh: () => void
 }
 
+// Display only: the rate is set server-side (platform_settings.fixed_user_apy_percent) and
+// lock_savings ignores any APY the client sends. Fixed deposits open only when
+// fixed_savings_enabled is on (gated until GetEquity's CP fund is live).
 const LOCK_DURATIONS = [
-  { days: 30, label: '30 days', apy: 15 },
-  { days: 90, label: '90 days', apy: 22 },
-  { days: 180, label: '6 months', apy: 30 },
-  { days: 365, label: '1 year', apy: 40 },
+  { days: 30, label: '30 days', apy: 20 },
+  { days: 90, label: '90 days', apy: 20 },
+  { days: 180, label: '6 months', apy: 20 },
+  { days: 365, label: '1 year', apy: 20 },
 ]
 const FREQ = ['daily', 'weekly', 'monthly'] as const
 const FREQ_LABELS: Record<string, string> = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' }
@@ -37,6 +41,9 @@ export default function SaveView({ wallet, refresh }: Props) {
   const [screen, setScreen] = useState<Screen>('main')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [apy, setApy] = useState<ApySettings | null>(null)
+  useEffect(() => { getApySettings().then(setApy) }, [])
+  const FIXED_LIVE = !!apy?.fixedEnabled
 
   // lock form
   const [lockAmt, setLockAmt] = useState('')
@@ -237,6 +244,11 @@ export default function SaveView({ wallet, refresh }: Props) {
           <div className="l">{g.title}</div>
           <div className="v num">{formatNaira(g.saved_naira_kobo)}</div>
           <span className="apy">of {formatNaira(g.target_naira_kobo)} · {FREQ_LABELS[g.frequency]}</span>
+          {(g.interest_earned_micro > 0 || apy?.backed) && (
+            <span className="apy" style={{ display: 'block', marginTop: 4 }}>
+              {apy?.backed ? `Earning ${apy.goals}% a year` : 'Interest paused'}{g.interest_earned_micro > 0 ? ` · +${formatCngn(g.interest_earned_micro)} earned so far` : ''}
+            </span>
+          )}
           <div className="bar" style={{ marginTop: 14, background: 'rgba(255,255,255,.2)' }}><i style={{ width: `${pct}%`, background: '#fff' }} /></div>
         </div>
         {msg && <div className={`flash ${isErr(msg) ? 'err' : 'ok'}`}>{msg}</div>}
@@ -246,6 +258,21 @@ export default function SaveView({ wallet, refresh }: Props) {
               <button className="cta" onClick={() => doContribute(g)} disabled={busy}>Save {formatNaira(g.contribution_naira_kobo)} now</button>
             ) : (
               <button className="cta" onClick={() => doComplete(g)} disabled={busy}>Claim goal + interest 🎉</button>
+            )}
+            {!met && (
+              <label className="info" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={g.auto_contribute_enabled} disabled={busy}
+                  onChange={async (e) => {
+                    const on = e.target.checked
+                    setBusy(true)
+                    try { await setGoalAutoContribute(g.id, on); refreshGoals(); flash(on ? 'Auto-save is on' : 'Auto-save paused') }
+                    catch { flash('Could not change auto-save') } finally { setBusy(false) }
+                  }} />
+                <span style={{ fontSize: 13, color: 'var(--ink)' }}>
+                  <b>Auto-save</b> {formatNaira(g.contribution_naira_kobo)} {FREQ_LABELS[g.frequency]?.toLowerCase()} from my balance
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{g.auto_contribute_enabled ? 'Skipped automatically if your balance is short' : 'Paused, save manually above'}</span>
+                </span>
+              </label>
             )}
             <button className="cta ghost" onClick={() => doBreak(g)} disabled={busy} style={{ marginTop: 10 }}>Break goal early (no interest)</button>
           </>
@@ -263,10 +290,10 @@ export default function SaveView({ wallet, refresh }: Props) {
       <div className="pool rise">
         <div className="l">Savings pool</div>
         <div className="v num">{formatNaira(poolKobo)}</div>
-        <span className="apy">Up to 40% a year · paid daily</span>
+        <span className="apy">{apy?.backed ? `Goals earn ${apy.goals}% · Ajo earns ${apy.ajo}% a year` : 'Save toward goals with your circle'}</span>
       </div>
 
-      <div className="sect"><span className="h">Fixed deposits</span><button className="m" onClick={() => setScreen('lock')}>New</button></div>
+      <div className="sect"><span className="h">Fixed deposits</span>{FIXED_LIVE && <button className="m" onClick={() => setScreen('lock')}>New</button>}</div>
       <div className="rows">
         {activeLocks.map((l) => {
           const days = Math.max(0, Math.ceil((new Date(l.unlocks_at).getTime() - Date.now()) / 86400000))
@@ -282,10 +309,10 @@ export default function SaveView({ wallet, refresh }: Props) {
             </button>
           )
         })}
-        <button className="opt" onClick={() => setScreen('lock')}>
+        <button className="opt" onClick={() => FIXED_LIVE && setScreen('lock')} disabled={!FIXED_LIVE}>
           <span className="ic"><IconPlus /></span>
-          <div className="mid"><div className="nm">Start a fixed deposit</div><div className="sub">Lock 30–365 days · up to 40%</div></div>
-          <span className="chev"><Chevron /></span>
+          <div className="mid"><div className="nm">Start a fixed deposit</div><div className="sub">{FIXED_LIVE ? `Lock in for ${apy?.fixed ?? 20}% a year` : `Coming soon · ${apy?.fixed ?? 20}% a year`}</div></div>
+          {FIXED_LIVE && <span className="chev"><Chevron /></span>}
         </button>
       </div>
 

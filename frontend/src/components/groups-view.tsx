@@ -2,9 +2,11 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { formatNaira, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
+import { getApySettings } from '@/hooks/use-data'
+import CooperativeView from '@/components/cooperative-view'
+import { formatNaira, formatCngn, getRate, koboToMicroUsdc, timeAgo } from '@/lib/format'
 import { siteBaseUrl } from '@/lib/site-url'
-import { CircleNotch, Copy, Check, Crown, ArrowUp, Users, CaretRight, Gift, ChatCircleDots, PaperPlaneRight, CheckCircle } from '@phosphor-icons/react'
+import { CircleNotch, Copy, Check, Crown, ArrowUp, Users, CaretRight, Gift, ChatCircleDots, PaperPlaneRight, CheckCircle, Bank } from '@phosphor-icons/react'
 import type { EsusuGroup, EsusuMember, EsusuContribution, Wallet as WalletType, CircleType, CirclePayoutMode } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -31,6 +33,8 @@ const templateOf = (t?: CircleType) => CIRCLE_TEMPLATES.find((x) => x.type === t
 const isRotating = (g: Pick<EsusuGroup, 'payout_mode' | 'circle_type'>) => (g.payout_mode ?? (g.circle_type && g.circle_type !== 'rotating_ajo' ? 'collection' : 'rotating')) === 'rotating'
 
 export default function GroupsView({ user, wallet }: Props) {
+  const [ajoApy, setAjoApy] = useState<number | null>(null)
+  useEffect(() => { getApySettings().then((s) => setAjoApy(s.backed ? s.ajo : null)) }, [])
   const [groups, setGroups] = useState<(EsusuGroup & { member_count: number })[]>([])
   const [selected, setSelected] = useState<EsusuGroup | null>(null)
   const [members, setMembers] = useState<(EsusuMember & { profile_name?: string })[]>([])
@@ -45,6 +49,7 @@ export default function GroupsView({ user, wallet }: Props) {
   const [inviteCode, setInviteCode] = useState<string | null>(null)
   const [payoutMsg, setPayoutMsg] = useState('')
   const [swept, setSwept] = useState(false)
+  const [showCoop, setShowCoop] = useState(false)
 
   // Emergency vote
   const [showEmergency, setShowEmergency] = useState(false)
@@ -294,7 +299,6 @@ export default function GroupsView({ user, wallet }: Props) {
         setFeedback('Crypto contribution recorded!')
         openGroup(selected)
         fetch('/api/esusu/contributed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: selected.id }) }).catch(() => {})
-        fetch('/api/esusu/yield', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deposit', group_id: selected.id, contribution_kobo: selected.contribution_amount_kobo }) }).catch(() => {})
       }
       setBusy(false); setTimeout(() => setFeedback(''), 3000); return
     }
@@ -313,13 +317,11 @@ export default function GroupsView({ user, wallet }: Props) {
       setFeedback('Contribution sent!')
       openGroup(selected)
       fetch('/api/esusu/contributed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: selected.id }) }).catch(() => {})
-      fetch('/api/esusu/yield', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deposit', group_id: selected.id, contribution_kobo: selected.contribution_amount_kobo }) }).catch(() => {})
       const { data: payoutResult } = await supabase.rpc('process_esusu_payout', { p_group_id: selected.id })
       if (payoutResult?.ok) {
         setPayoutMsg(payoutResult.completed ? '🎉 Circle complete! All members have been paid.' : `🎉 Cycle ${payoutResult.cycle} complete! Payout sent to the next member.`)
         setTimeout(() => setPayoutMsg(''), 6000)
         openGroup(selected)
-        fetch('/api/esusu/yield', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'payout', group_id: selected.id, recipient_user_id: payoutResult.paid_to }) }).catch(() => {})
       }
     }
     setBusy(false); setTimeout(() => setFeedback(''), 3000)
@@ -347,6 +349,9 @@ export default function GroupsView({ user, wallet }: Props) {
       </div>
     </>
   )
+
+  // ══ COOPERATIVES (migration 116) ══
+  if (showCoop) return <CooperativeView onBack={() => setShowCoop(false)} />
 
   // ══ DETAIL — collection / investment circle ══
   if (selected && !isRotating(selected)) {
@@ -379,6 +384,7 @@ export default function GroupsView({ user, wallet }: Props) {
         <div className="info">
           <div className="l">{settled ? 'Paid out' : 'Collected so far'}</div>
           <div className="num" style={{ fontSize: 'var(--t-2xl)', fontWeight: 'var(--w-bold)', color: 'var(--ink)', margin: '2px 0' }}>{formatNaira(potKobo)}</div>
+          {!settled && (selected.interest_accrued_micro || 0) > 0 && <div style={{ fontSize: 'var(--t-2xs)', color: 'var(--green)', fontWeight: 'var(--w-semi)' }}>+{formatCngn(selected.interest_accrued_micro || 0)} interest earned, paid out with the pot</div>}
           {pct !== null && (
             <>
               <div style={{ height: 8, borderRadius: 6, background: 'var(--line)', overflow: 'hidden', margin: '6px 0 4px' }}>
@@ -517,6 +523,7 @@ export default function GroupsView({ user, wallet }: Props) {
             <div>
               <div className="l">This cycle&apos;s pot</div>
               <div className="v num">{formatNaira(potKobo)}</div>
+              {(selected.interest_accrued_micro || 0) > 0 && <div className="who" style={{ color: 'var(--green)' }}>+{formatCngn(selected.interest_accrued_micro || 0)} interest</div>}
               <div className="who">{recipient ? `${recipient.user_id === user?.id ? 'You receive' : (recipient.profile_name + ' receives')}` : `Cycle ${cycle} of ${selected.max_members}`}</div>
             </div>
           </div>
@@ -561,6 +568,28 @@ export default function GroupsView({ user, wallet }: Props) {
         {isMember && (
           <button className="cta" onClick={contribute} disabled={busy}>{busy ? 'Sending…' : `Contribute ${formatNaira(selected.contribution_amount_kobo)}`}</button>
         )}
+
+        {isMember && (() => {
+          const me = members.find((m) => m.user_id === user?.id)
+          const on = me?.auto_debit !== false
+          return (
+            <label className="info" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, cursor: 'pointer' }}>
+              <input type="checkbox" checked={on} disabled={busy}
+                onChange={async (e) => {
+                  const next = e.target.checked
+                  setBusy(true)
+                  const { error } = await supabase.rpc('esusu_set_auto_debit', { p_group_id: selected.id, p_on: next })
+                  setBusy(false)
+                  if (error) { setFeedback('Could not change auto-debit'); setTimeout(() => setFeedback(''), 3000); return }
+                  openGroup(selected)
+                }} />
+              <span style={{ fontSize: 13, color: 'var(--ink)' }}>
+                <b>Auto-debit</b> {formatNaira(selected.contribution_amount_kobo)} when each cycle is due
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{on ? 'Paid on time from your balance, so you never get a missed-payment strike' : 'Off: pay manually before the cycle ends'}</span>
+              </span>
+            </label>
+          )
+        })()}
 
         {feedback && <div className={`flash ${/sent|recorded/.test(feedback) ? 'ok' : 'err'}`}>{feedback}</div>}
         {payoutMsg && <div className="flash ok">{payoutMsg}</div>}
@@ -712,6 +741,12 @@ export default function GroupsView({ user, wallet }: Props) {
         <button className="cyclechip" onClick={() => { resetCreateForm(); setFeedback(''); setShowCreate(true) }} style={{ border: 0, cursor: 'pointer' }}>+ New</button>
       </div>
 
+      <button className="opt" onClick={() => setShowCoop(true)} style={{ marginTop: 8, borderRadius: 14, background: 'var(--green-soft)' }}>
+        <span className="ic"><Bank /></span>
+        <div className="mid"><div className="nm">Cooperative societies</div><div className="sub">Recurring dues, a shared fund, officer-approved payouts</div></div>
+        <span className="chev"><CaretRight /></span>
+      </button>
+
       {loading ? (
         <div style={{ display: 'grid', placeItems: 'center', padding: '48px 0' }}><CircleNotch className="w-6 h-6 animate-spin" style={{ color: 'var(--muted)' }} /></div>
       ) : groups.length === 0 ? (
@@ -738,7 +773,7 @@ export default function GroupsView({ user, wallet }: Props) {
         </div>
       )}
 
-      <p className="p" style={{ margin: '16px 3px 0' }}>Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot. The pot earns 27% a year via PawasaveLend while members save.</p>
+      <p className="p" style={{ margin: '16px 3px 0' }}>Each cycle, one member receives the pooled contributions. 5% goes to an emergency pot.{ajoApy != null ? ` The pot earns ${ajoApy}% a year while it sits, and the interest goes to whoever collects it.` : ''}</p>
     </div>
   )
 }

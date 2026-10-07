@@ -19,6 +19,27 @@ update public.wallets set cngn_pool_micro = 100000 * 1000000::bigint
 delete from public.savings_locks
   where user_id = '00000000-0000-4000-8000-000000000004' and apy_percent in (50.37, 50.33);
 
+-- Migration 115 added a kill switch, fixed_savings_enabled, and ships it off: gNTB at ~14.5% cannot
+-- fund the 20% fixed rate until GetEquity's credit fund is live. The hardening this file is about —
+-- the owner check, the offered-term guard, p_apy being ignored — lives behind that switch, so it is
+-- turned on for the duration and restored at the end. Assertion 0 proves the switch itself works.
+do $$
+declare msg text;
+begin
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"00000000-0000-4000-8000-000000000004","role":"authenticated"}';
+  begin
+    perform public.lock_savings('00000000-0000-4000-8000-000000000004', 1000000, 100, 30, 999.99);
+    msg := 'ALLOWED';
+  exception when others then msg := SQLERRM;
+  end;
+  reset role;
+  insert into r values (0, 'fixed savings is refused while the gate is off', msg,
+    msg like '%coming soon%');
+end $$;
+
+update public.platform_settings set value = 'true' where key = 'fixed_savings_enabled';
+
 -- 1. The mint's first half: a term nobody offers is refused, so the caller cannot buy 100
 --    years of interest with a 36500-day lock.
 do $$
@@ -39,23 +60,36 @@ exception when others then
   insert into r values (1, 'a 36500-day term is refused', 'harness failed: '||SQLERRM, false);
 end $$;
 
--- 2. The rate comes from fixed_savings_rates, not from the caller. A 30-day lock of ₦1,000
---    must project 4.14% of principal whatever p_apy says.
+-- 2. The rate comes from the server, not from the caller. p_apy is accepted and ignored.
+--
+--    The figure changed with migration 115. 099 priced a term from
+--    fixed_savings_rates.effective_rate_percent, so 30 days paid 4.14%. 115 prices every offered
+--    term at fixed_user_apy_percent a year, prorated — 20% x 30/365 = 1.6438% — because the old
+--    tiers reached 49.7% over a year and nothing funds that. What this assertion is actually about
+--    is unchanged: the caller's p_apy of 999.99 has no effect either way.
 do $$
-declare v_lock uuid; v_proj bigint; v_apy numeric; v_eff numeric;
+declare v_lock uuid; v_proj bigint; v_eff numeric; v_annual numeric; v_expect numeric;
 begin
+  select value::numeric into v_annual from public.platform_settings
+   where key = 'fixed_user_apy_percent';
+  v_expect := round(v_annual * 30 / 365.0, 4);
+
   set local role authenticated;
   set local request.jwt.claims = '{"sub":"00000000-0000-4000-8000-000000000004","role":"authenticated"}';
   v_lock := public.lock_savings('00000000-0000-4000-8000-000000000004', 1000 * 1000000, 1000 * 100, 30, 999.99);
   reset role;
-  select projected_interest_micro, apy_percent, effective_rate_at_creation
-    into v_proj, v_apy, v_eff from public.savings_locks where id = v_lock;
-  insert into r values (2, 'p_apy is ignored and the table rate is used',
-    'projected '||v_proj||' micro, apy_percent '||v_apy||', effective '||v_eff,
-    v_proj = 41400000 and v_eff = 4.14 and v_apy = 50.37);
+  select projected_interest_micro, effective_rate_at_creation
+    into v_proj, v_eff from public.savings_locks where id = v_lock;
+  -- The projection is computed at 4 dp and the stored rate is narrowed to the column's 2, so a
+  -- 30-day term projects on 1.6438% and records 1.64. Compared separately rather than conflated,
+  -- because the figure that pays out is the projection.
+  insert into r values (2, 'p_apy is ignored and the server prices the term',
+    format('projected %s micro, effective %s, priced at %s (%s%% a year prorated)',
+           v_proj, v_eff, v_expect, v_annual),
+    v_eff = round(v_expect, 2) and v_proj = floor(1000 * 1000000 * v_expect / 100.0));
 exception when others then
   reset role;
-  insert into r values (2, 'p_apy is ignored and the table rate is used', 'failed: '||SQLERRM, false);
+  insert into r values (2, 'p_apy is ignored and the server prices the term', 'failed: '||SQLERRM, false);
 end $$;
 
 -- 3. The mint's second half: the matured branch refuses a lock that has not matured, so
@@ -221,6 +255,9 @@ exception when others then
   reset role;
   insert into r values (10, 'the autodebit cron is unaffected', 'failed: '||SQLERRM, false);
 end $$;
+
+-- Put the kill switch back as 115 ships it, or every later test in the run sees fixed savings on.
+update public.platform_settings set value = 'false' where key = 'fixed_savings_enabled';
 
 select ord, name, detail, case when ok then 'PASS' else 'FAIL' end as result
 from r order by ord;

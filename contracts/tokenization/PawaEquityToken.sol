@@ -78,6 +78,7 @@ contract PawaEquityToken is ERC20Snapshot, AccessControl, Pausable, EIP712 {
     uint64 public lastReserveAt;
 
     bool private _forcing;              // set only inside forcedTransfer
+    bool private _redeeming;            // set only while this contract moves redemption tokens
 
     mapping(uint256 => uint64) public snapshotAt; // record-date snapshot id => time taken
 
@@ -208,7 +209,9 @@ contract PawaEquityToken is ERC20Snapshot, AccessControl, Pausable, EIP712 {
     function requestRedemption(uint256 amount, RedemptionKind kind) external whenNotPaused returns (uint256 id) {
         require(verified[msg.sender], "holder not verified");
         require(amount > 0, "zero amount");
+        _redeeming = true;
         _transfer(msg.sender, address(this), amount);
+        _redeeming = false;
         lockedSupply += amount;
         id = redemptions.length;
         redemptions.push(Redemption(msg.sender, amount, kind, RedemptionStatus.Pending, uint64(block.timestamp), 0));
@@ -233,7 +236,9 @@ contract PawaEquityToken is ERC20Snapshot, AccessControl, Pausable, EIP712 {
         r.status = RedemptionStatus.Cancelled;
         r.closedAt = uint64(block.timestamp);
         lockedSupply -= r.amount;
+        _redeeming = true;
         _transfer(address(this), r.holder, r.amount);
+        _redeeming = false;
         emit RedemptionCancelled(id, reason);
     }
 
@@ -254,6 +259,15 @@ contract PawaEquityToken is ERC20Snapshot, AccessControl, Pausable, EIP712 {
         require(newMultiplier > 0, "zero multiplier");
         multiplier = newMultiplier;
         emit MultiplierChanged(newMultiplier, corporateAction);
+        // A bonus or split raises sharesRequired the instant it is recorded, so this is the one
+        // moment the contract creates its own shortfall. Halt here rather than waiting for the next
+        // daily reserve report, or minting stays open against a pool the contract already knows is
+        // short — a 1-for-1 bonus on 100 tokens needs 200 shares and the pool still holds 100.
+        if (lastReserveAt != 0 && lastReserveShares < sharesRequired() && !mintHalted) {
+            mintHalted = true;
+            haltReason = "reserve shortfall after corporate action";
+            emit MintHaltChanged(true, haltReason);
+        }
     }
 
     function setCustodianSigner(address signer) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -293,11 +307,28 @@ contract PawaEquityToken is ERC20Snapshot, AccessControl, Pausable, EIP712 {
 
     function _beforeTokenTransfer(address from, address to, uint256 amount) internal override(ERC20Snapshot) {
         super._beforeTokenTransfer(from, to, amount);
-        // Mint and burn are gated by their own functions. Moves into or out of this contract are
-        // redemption locks and releases. Admin forced transfers bypass pause (court orders).
+        // Mint and burn are gated by their own functions. Admin forced transfers bypass pause
+        // (court orders).
         if (from == address(0) || to == address(0)) return;
-        if (from == address(this) || to == address(this)) return;
         if (_forcing) return;
+        // Moves into or out of this contract are redemption locks and releases, and may only happen
+        // from inside requestRedemption / cancelRedemption.
+        //
+        // This was an unconditional exemption. A holder could therefore `transfer` straight to the
+        // token address: the tokens left their wallet with no Redemption record, so nothing could
+        // ever complete or cancel them, lockedSupply did not count them, and they stayed in
+        // totalSupply so the custodian had to keep holding shares against them for good. Worse, at a
+        // record date they sat in balanceOfAt(address(this)), where entitlement() returns zero and
+        // no payLocked can reach them — so they quietly made a slice of every future dividend
+        // unclaimable by anybody. Twenty tokens in a hundred cost the other holders nothing but put
+        // 20% of the payment beyond reach until the trustee's twelve-month sweep.
+        //
+        // Recovery of anything already stranded is forcedTransfer, which exists for exactly this
+        // kind of court-directed move.
+        if (from == address(this) || to == address(this)) {
+            require(_redeeming, "use requestRedemption");
+            return;
+        }
         require(!paused(), "paused");
         require(verified[from] && verified[to], "transfer between unverified wallets");
     }

@@ -32,7 +32,7 @@ describe("PawaEquityToken (NGX pilot)", function () {
     ;[admin, custodian, minter, ops, alice, bob, stranger] = await ethers.getSigners()
     const F = await ethers.getContractFactory("PawaEquityToken")
     token = await F.deploy("PawaSave MTN Nigeria", "pMTNN", "MTNN", "NGMTNN000002", admin.address, custodian.address, 10_000n, 50_000n)
-    for (const role of ["REGISTRAR_ROLE", "RECONCILER_ROLE", "BURNER_ROLE", "PAUSER_ROLE"]) {
+    for (const role of ["REGISTRAR_ROLE", "RECONCILER_ROLE", "BURNER_ROLE", "PAUSER_ROLE", "SNAPSHOT_ROLE"]) {
       await token.connect(admin).grantRole(await token[role](), ops.address)
     }
     await token.connect(admin).grantRole(await token.MINTER_ROLE(), minter.address)
@@ -98,6 +98,38 @@ describe("PawaEquityToken (NGX pilot)", function () {
       expect(await token.balanceOf(bob.address)).to.equal(4n)
       await expect(token.connect(alice).transfer(stranger.address, 1n)).to.be.revertedWith("transfer between unverified wallets")
     })
+
+    it("cannot be sent to the token contract by hand, only through a redemption", async () => {
+      // The exemption for moves in and out of this contract was unconditional, so a holder could
+      // transfer straight to the token address. The tokens left their wallet with no Redemption
+      // record: nothing could complete or cancel them, lockedSupply never counted them, and they
+      // stayed in totalSupply so the custodian had to keep shares against them indefinitely.
+      await mint(alice, 100n, ref("t1"))
+      await expect(token.connect(alice).transfer(await token.getAddress(), 40n))
+        .to.be.revertedWith("use requestRedemption")
+
+      // And the legitimate route still works.
+      await token.connect(alice).requestRedemption(40n, 0)
+      expect(await token.balanceOf(await token.getAddress())).to.equal(40n)
+      expect(await token.lockedSupply()).to.equal(40n)
+      expect(await token.redemptionCount()).to.equal(1n)
+    })
+
+    it("stranded tokens would have made part of every dividend unreachable", async () => {
+      // Why the rule above matters beyond tidiness. Tokens sitting at the token address are counted
+      // in totalSupplyAt, so they take a share of the record-date split, but entitlement() returns
+      // zero for that address and no payLocked can claim them. The slice is simply unpayable.
+      await mint(alice, 100n, ref("t1"))
+      await token.connect(alice).requestRedemption(20n, 0)
+      await token.connect(ops).snapshot("FY2026 final")
+
+      // 20 of 100 sit in the contract, and they are reachable only because a Redemption records
+      // whose they are.
+      expect(await token.balanceOfAt(await token.getAddress(), 1n)).to.equal(20n)
+      const r = await token.redemptions(0)
+      expect(r.holder).to.equal(alice.address)
+      expect(r.amount).to.equal(20n)
+    })
     it("stops when a holder is de-registered or the token is paused", async () => {
       await mint(alice, 10n, ref("t1"))
       await token.connect(ops).setVerified(alice.address, false)
@@ -156,6 +188,35 @@ describe("PawaEquityToken (NGX pilot)", function () {
       expect(await token.balanceOf(alice.address)).to.equal(10n)
       expect(await token.multiplier()).to.equal(2n * 10n ** 18n)
     })
+    it("a bonus issue that outruns the pool halts minting there and then", async () => {
+      // The contract creates this shortfall itself, so it must not wait for the next daily reserve
+      // report to notice. Before, minting stayed open and 50 more could be issued against a pool
+      // the contract already knew was 100 short.
+      await mint(alice, 100n, ref("NGX-T1"))
+      await token.connect(ops).reportReserve(100n, ref("stmt-1"))
+      expect(await token.mintHalted()).to.equal(false)
+
+      await expect(token.connect(admin).setMultiplier(2n * 10n ** 18n, "1-for-1 bonus"))
+        .to.emit(token, "MintHaltChanged").withArgs(true, "reserve shortfall after corporate action")
+
+      expect(await token.sharesRequired()).to.equal(200n)
+      await expect(mint(bob, 50n, ref("NGX-T2"))).to.be.revertedWith("minting halted")
+
+      // Resumes once the custodian credits the bonus shares.
+      await token.connect(ops).reportReserve(200n, ref("stmt-bonus-credited"))
+      await token.connect(ops).setMintHalt(false, "bonus shares credited")
+      await mint(bob, 50n, ref("NGX-T2"))
+      expect(await token.balanceOf(bob.address)).to.equal(50n)
+    })
+
+    it("a split that the pool already covers does not halt anything", async () => {
+      // The halt is for a genuine shortfall, not for every corporate action.
+      await mint(alice, 100n, ref("NGX-T1"))
+      await token.connect(ops).reportReserve(400n, ref("stmt-ample"))
+      await token.connect(admin).setMultiplier(2n * 10n ** 18n, "1-for-1 bonus")
+      expect(await token.mintHalted()).to.equal(false)
+    })
+
     it("after a bonus issue the reserve check counts shares, not tokens", async () => {
       await mint(alice, 100n, ref("NGX-T1"))
       await token.connect(admin).setMultiplier(2n * 10n ** 18n, "1-for-1 bonus")

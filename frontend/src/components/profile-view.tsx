@@ -33,13 +33,53 @@ const IconCheck = () => <Check size={12} weight="bold" />
 
 export default function ProfileView({ user, profile, wallet, theme, onThemeChange, onRefreshProfile, onStartKyc, onSignOut }: Props) {
   const confirm = useConfirm()
-  const [open, setOpen] = useState<null | 'pin' | 'bank' | 'personal' | 'support' | 'tag' | 'sell'>(null)
+  const [open, setOpen] = useState<null | 'pin' | 'bank' | 'personal' | 'support' | 'tag' | 'sell' | 'delete'>(null)
 
   // PIN change (server-verified via /api/security/pin — current PIN required when set)
   const [pin, setPin] = useState('')
   const [pinConfirm, setPinConfirm] = useState('')
   const [pinCurrent, setPinCurrent] = useState('')
   const [pinMsg, setPinMsg] = useState('')
+
+  // Account deletion (/api/account/delete). The account must be empty first; the server lists what's open.
+  const [delBlockers, setDelBlockers] = useState<string[] | null>(null)
+  const [delHasPin, setDelHasPin] = useState(true)
+  const [delPin, setDelPin] = useState('')
+  const [delConfirm, setDelConfirm] = useState('')
+  const [delReason, setDelReason] = useState('')
+  const [delMsg, setDelMsg] = useState('')
+  const [delBusy, setDelBusy] = useState(false)
+
+  useEffect(() => {
+    if (open !== 'delete') return
+    setDelBlockers(null); setDelMsg('')
+    fetch('/api/account/delete').then((r) => r.json()).then((d) => {
+      if (d?.error) { setDelMsg(d.error); return }
+      setDelBlockers(d.blockers || []); setDelHasPin(!!d.hasPin)
+    }).catch(() => setDelMsg('Could not check your account. Please try again.'))
+  }, [open])
+
+  const deleteAccount = async () => {
+    setDelMsg('')
+    if (delConfirm.trim() !== 'DELETE') { setDelMsg('Type DELETE to confirm'); return }
+    if (delHasPin && !/^\d{4}$/.test(delPin)) { setDelMsg('Enter your 4-digit PIN'); return }
+    if (!(await confirm({ title: 'Delete account', message: 'This permanently closes your PawaSave account. You will be signed out and cannot sign in again. Continue?', confirmText: 'Delete my account' }))) return
+    setDelBusy(true)
+    try {
+      const res = await fetch('/api/account/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: delPin, confirm: 'DELETE', reason: delReason }) })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        if (Array.isArray(data?.blockers)) setDelBlockers(data.blockers)
+        setDelMsg(data?.error || 'Could not delete your account')
+        return
+      }
+      onSignOut()
+    } catch {
+      setDelMsg('Could not delete your account. Please try again.')
+    } finally {
+      setDelBusy(false)
+    }
+  }
 
   // PawaSave @tag (the P2P handle)
   const [tagInput, setTagInput] = useState('')
@@ -176,7 +216,7 @@ export default function ProfileView({ user, profile, wallet, theme, onThemeChang
     }
   }
 
-  const toggle = (k: 'pin' | 'bank' | 'personal' | 'support' | 'tag' | 'sell') => setOpen(open === k ? null : k)
+  const toggle = (k: 'pin' | 'bank' | 'personal' | 'support' | 'tag' | 'sell' | 'delete') => setOpen(open === k ? null : k)
 
   if (showPawa) return <PawaHub onBack={() => setShowPawa(false)} />
 
@@ -392,6 +432,47 @@ export default function ProfileView({ user, profile, wallet, theme, onThemeChang
               <a className="cta ghost" style={{ marginTop: 0, color: 'var(--green)', textAlign: 'center', textDecoration: 'none', display: 'block' }}
                 href={`mailto:support@pawasave.xyz?subject=Support Request&body=Account: ${user?.email || ''}\n\n${supportMessage || ''}`}>Email support</a>
             </div>
+          </div>
+        )}
+
+        <button className="row" onClick={() => toggle('delete')}>
+          <span className="dot"><IconUser /></span>
+          <div className="mid"><div className="nm" style={{ color: 'var(--neg)' }}>Delete account</div><div className="sub">Permanently close your PawaSave account</div></div>
+          <span className="chev"><Chevron /></span>
+        </button>
+        {open === 'delete' && (
+          <div style={{ padding: '4px 15px 15px', borderTop: '1px solid var(--line)' }}>
+            {delBlockers === null && !delMsg && <p className="sub" style={{ marginTop: 12 }}>Checking your account…</p>}
+            {delBlockers && delBlockers.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <p style={{ fontSize: 'var(--t-sm)', margin: '0 0 8px' }}>Your account still holds money or open commitments. Please do these first:</p>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--t-sm)', lineHeight: 1.7 }}>
+                  {delBlockers.map((b) => <li key={b}>{b}</li>)}
+                </ul>
+              </div>
+            )}
+            {delBlockers && delBlockers.length === 0 && (
+              <div>
+                <p style={{ fontSize: 'var(--t-sm)', margin: '12px 0 0', lineHeight: 1.55 }}>
+                  Deleting removes your name, phone number, @tag and PIN, signs you out, and closes your login for good. By law we keep transaction and identity-verification records for at least six years; they are not used for anything else.
+                </p>
+                <label className="lab" style={{ marginTop: 12 }}>Why are you leaving? (optional)</label>
+                <input className="field" type="text" maxLength={300} value={delReason} onChange={(e) => setDelReason(e.target.value)} placeholder="Tell us how we could do better" />
+                {delHasPin && (
+                  <>
+                    <label className="lab" style={{ marginTop: 12 }}>Transaction PIN</label>
+                    <input className="field" type="password" inputMode="numeric" maxLength={4} value={delPin} onChange={(e) => setDelPin(e.target.value.replace(/\D/g, ''))} placeholder="••••" />
+                  </>
+                )}
+                <label className="lab" style={{ marginTop: 12 }}>Type DELETE to confirm</label>
+                <input className="field" type="text" value={delConfirm} onChange={(e) => setDelConfirm(e.target.value)} placeholder="DELETE" autoCapitalize="characters" />
+                <button className="cta" onClick={deleteAccount} disabled={delBusy}
+                  style={{ marginTop: 12, background: 'var(--neg)', borderColor: 'var(--neg)' }}>
+                  {delBusy ? 'Deleting…' : 'Delete my account'}
+                </button>
+              </div>
+            )}
+            {delMsg && <div className="flash err">{delMsg}</div>}
           </div>
         )}
       </div>

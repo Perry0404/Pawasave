@@ -14,9 +14,9 @@ export const PSS_DEMO_TOKEN = process.env.NEXT_PUBLIC_PSS_DEMO_TOKEN || '0xD9305
 export const PSS_DEMO_DISTRIBUTOR = '0x7950439d39C58adE4530F96ca665c18C42Fd05B0'
 export const PSS_DEMO_CNGN = '0xF858125fA2cb724119366A5A20A298F5e4154D2d' // stand-in cNGN, test network only
 const RPC = process.env.BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org'
-const CHAIN_ID = 84532n
+export const CHAIN_ID = 84532n
 
-const ABI = [
+export const ABI = [
   'function verified(address) view returns (bool)',
   'function totalSupply() view returns (uint256)',
   'function lastReserveShares() view returns (uint256)',
@@ -35,7 +35,7 @@ export function demoEnabled(): boolean {
   return !!process.env.NGX_DEMO_KEY
 }
 
-function keys() {
+export function keys() {
   const seed = process.env.NGX_DEMO_KEY
   if (!seed) throw new Error('demo not configured')
   const provider = new ethers.JsonRpcProvider(RPC, Number(CHAIN_ID), { staticNetwork: true })
@@ -45,13 +45,13 @@ function keys() {
 
 // One server process signs for the ops and root keys; serialise so nonces never collide.
 let chain: Promise<unknown> = Promise.resolve()
-function serial<T>(fn: () => Promise<T>): Promise<T> {
+export function serial<T>(fn: () => Promise<T>): Promise<T> {
   const next = chain.then(fn, fn)
   chain = next.catch(() => {})
   return next
 }
 
-async function topUp(k: ReturnType<typeof keys>, to: string, min: bigint, amount: bigint) {
+export async function topUp(k: ReturnType<typeof keys>, to: string, min: bigint, amount: bigint) {
   if ((await k.provider.getBalance(to)) < min) {
     await (await k.root.sendTransaction({ to, value: amount })).wait(1)
   }
@@ -134,15 +134,15 @@ export function settle(id: number, address: string) {
   })
 }
 
-const DIST_ABI = [
+export const DIST_ABI = [
   'function declare(uint256 snapshotId, uint256 total, string paymentRef) returns (uint256)',
   'function approve(uint256 id)',
   'function pay(uint256 id, address account)',
   'event DividendDeclared(uint256 indexed id, uint256 snapshotId, uint256 total, uint256 supplyAt, string paymentRef)',
 ]
-const DIVIDEND_PER_SHARE_NAIRA = 10n
+export const DIVIDEND_PER_SHARE_NAIRA = 10n
 // Each step depends on the one before it, and a lagging node would mis-estimate gas: set it.
-const G = { gasLimit: 400_000 }
+export const G = { gasLimit: 400_000 }
 
 /**
  * Dividend: the record date is fixed on-chain, the "registrar's payment" arrives as cNGN at the

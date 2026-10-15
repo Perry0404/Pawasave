@@ -144,6 +144,8 @@ export default function PssDemo() {
         Read directly from the contract. Tokens mint only against a custodian-signed attestation of settled shares, transfers are limited to verified wallets, and minting halts automatically if the custodian&apos;s CSCS pool is ever below supply.
       </p>
 
+      <p style={{ fontSize: 13, margin: '-8px 0 18px' }}><a href="/pss/custodian" style={{ color: '#0052ff' }}>Custodian or trustee? See the console they use →</a></p>
+
       {!ethers.isAddress(token) && <div style={{ padding: 14, background: '#f1f5f9', borderRadius: 10 }}>Add <code>?token=0x…</code> to the URL to load a deployed token.</div>}
       {err && <div style={{ padding: 12, background: '#fef2f2', color: '#991b1b', borderRadius: 10, marginBottom: 12 }}>{err}</div>}
 

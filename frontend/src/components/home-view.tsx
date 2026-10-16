@@ -7,6 +7,8 @@ import { talkback } from '@/lib/voice'
 // Bank aliased: `Bank` is already the bank-list type from @/lib/flint.
 import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard, CircleNotch, ArrowLeft, Copy, Check, CaretDown, FileText, Bank as BankIcon, PaperPlaneTilt, Users, Storefront } from '@phosphor-icons/react'
 import PawaHub from './pawa-hub'
+import { strailsOnrampFeeNgn, STRAILS_ONRAMP_MIN_NGN } from '@/lib/strails-fees'
+import { depositFeeNgn } from '@/lib/deposit-fee'
 import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
 
@@ -40,6 +42,7 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   const [addrCopied, setAddrCopied] = useState(false)
   const [bvn, setBvn] = useState('')
   const [acctCopied, setAcctCopied] = useState(false)
+  const [depositPreview, setDepositPreview] = useState('') // naira the user plans to send, for the fee preview
   const [liveRate, setLiveRate] = useState<number>(getRate())
   const [depositAddr, setDepositAddr] = useState<string | null>(wallet?.deposit_address ?? null)
   const [ccChains, setCcChains] = useState<{ key: string; name: string }[]>([])
@@ -475,6 +478,47 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
                 Deposits from someone else&apos;s account are automatically returned.
               </p>
             </div>
+
+            {/* What actually lands: the bank partner deducts its fee before the money reaches us. */}
+            <label className="lab" style={{ marginTop: 'var(--s-4)' }}>How much will you send? (optional)</label>
+            <input
+              type="number"
+              inputMode="numeric"
+              value={depositPreview}
+              onChange={(e) => setDepositPreview(e.target.value.replace(/[^0-9]/g, ''))}
+              placeholder="e.g. 10000"
+              className="field num"
+            />
+            {(() => {
+              const gross = parseInt(depositPreview || '0', 10)
+              if (!(gross > 0)) {
+                return (
+                  <p className="hint">
+                    Our bank partner charges 0.75% on each deposit, with a minimum of ₦{STRAILS_ONRAMP_MIN_NGN.toLocaleString('en-NG')}.
+                    Fewer, larger deposits cost less.
+                  </p>
+                )
+              }
+              const partnerFee = strailsOnrampFeeNgn(gross)
+              const ourFee = depositFeeNgn(gross)
+              const net = gross - partnerFee - ourFee
+              const share = Math.round(((partnerFee + ourFee) / gross) * 100)
+              return (
+                <>
+                  <div className="breakdown">
+                    <div className="r"><span>You send</span><span className="num">₦{gross.toLocaleString('en-NG')}</span></div>
+                    <div className="r"><span>Bank partner fee (0.75%, min ₦{STRAILS_ONRAMP_MIN_NGN.toLocaleString('en-NG')})</span><span>−₦{partnerFee.toLocaleString('en-NG')}</span></div>
+                    <div className="r"><span>PawaSave fee</span><span>{ourFee ? `−₦${ourFee.toLocaleString('en-NG')}` : 'Free'}</span></div>
+                    <div className="tot"><span>You receive</span><span className="num">{net > 0 ? `₦${net.toLocaleString('en-NG')}` : '₦0'}</span></div>
+                  </div>
+                  {net <= 0 ? (
+                    <div className="flash err">This amount is smaller than the bank partner&apos;s ₦{STRAILS_ONRAMP_MIN_NGN.toLocaleString('en-NG')} minimum fee, so nothing would arrive. Please send more.</div>
+                  ) : share >= 10 ? (
+                    <div className="note"><p style={{ lineHeight: 1.5 }}>Fees take about {share}% of this deposit because of the bank partner&apos;s ₦{STRAILS_ONRAMP_MIN_NGN.toLocaleString('en-NG')} minimum. Sending a larger amount at once costs proportionally less.</p></div>
+                  ) : null}
+                </>
+              )
+            })()}
           </>
         ) : pending ? (
           <div className="mt-6 text-center">

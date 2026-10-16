@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { STRAILS_ENABLED, listTransactions, getUserDetails, addExternalWallet, withdrawAsset, onboardStatus, StrailsError } from '@/lib/strails'
-import { sendBvnFailedEmail } from '@/lib/notify-tx'
+import { sendBvnFailedEmail, sendAccountChangedEmail } from '@/lib/notify-tx'
 import { custodyAddress, custodyCngnBalance, cngnBalanceOf, supplyToLend } from '@/lib/custody'
 import { withLease, LeaseUnavailableError } from '@/lib/custody-lease'
 import { sendDepositEmail } from '@/lib/notify-tx'
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY,
     { auth: { persistSession: false } },
   )
-  const result = { credited: 0, creditedNgn: 0, onboarded: 0, onboardFailed: 0, swept: 0, sweptCngn: 0, supplied: '0', errors: [] as string[] }
+  const result = { credited: 0, creditedNgn: 0, onboarded: 0, onboardFailed: 0, accountsChanged: 0, swept: 0, sweptCngn: 0, supplied: '0', errors: [] as string[] }
 
   // ── 1. credit completed deposits the webhook didn't ────────────────────────
   let txs: any[] = []
@@ -171,6 +171,28 @@ export async function GET(request: NextRequest) {
           } else {
             result.onboarded++
             console.info('[strails-reconcile] onboarded (webhook missed)', { user: u.id, acct: details.account.accountNumber })
+          }
+        } else if (
+          u.strails_va_account_number && details.account.accountNumber &&
+          /^\d{10}$/.test(details.account.accountNumber) &&
+          details.account.accountNumber !== u.strails_va_account_number
+        ) {
+          // Strails re-issued the user's permanent account (October 2026: old accounts stop
+          // accepting deposits). Show the new number everywhere and tell the user once.
+          const { error: upErr } = await admin
+            .from('profiles')
+            .update({
+              strails_va_account_number: details.account.accountNumber,
+              strails_va_account_name: details.account.accountName || null,
+              strails_va_bank_name: details.account.bankName || null,
+            })
+            .eq('id', u.id)
+          if (upErr) {
+            result.errors.push(`account change ${u.id}: ${upErr.message}`)
+          } else {
+            result.accountsChanged++
+            sendAccountChangedEmail(u.id, details.account, u.strails_va_account_number as string).catch(() => {})
+            console.info('[strails-reconcile] permanent account re-issued', { user: u.id })
           }
         }
 

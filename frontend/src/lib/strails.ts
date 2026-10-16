@@ -210,9 +210,24 @@ export async function onboardStatus(requestId: string): Promise<{
 
 export type VirtualAccount = { accountNumber?: string; accountName?: string; bankName?: string }
 
+// October 2026: Strails re-issued every permanent virtual account and the old ones stop accepting
+// deposits. If a response lists more than one, prefer one that isn't flagged inactive, then the
+// newest by creation date, else the first (where Strails puts the current account).
+function isInactiveAccount(va: any): boolean {
+  const s = String(va?.status ?? va?.accountStatus ?? va?.state ?? '').toLowerCase()
+  return va?.isActive === false || va?.active === false || /inactive|disabled|closed|deprecated|legacy|retired/.test(s)
+}
+function currentAccount(list: any[]): any {
+  const live = list.filter((v) => !isInactiveAccount(v))
+  const pool = live.length ? live : list
+  const created = (v: any) => Date.parse(v?.createdAt ?? v?.created_at ?? v?.dateCreated ?? '')
+  const dated = pool.filter((v) => Number.isFinite(created(v)))
+  return dated.length === pool.length && pool.length > 1 ? [...dated].sort((a, b) => created(b) - created(a))[0] : pool[0]
+}
+
 function parseVirtualAccount(d: any): VirtualAccount {
-  // The account can arrive flat, nested under virtualAccount(s), or as the 1st of an array.
-  const va = d?.virtualAccount ?? (Array.isArray(d?.virtualAccounts) ? d.virtualAccounts[0] : d?.virtualAccounts) ?? d
+  // The account can arrive flat, nested under virtualAccount(s), or as an array.
+  const va = d?.virtualAccount ?? (Array.isArray(d?.virtualAccounts) ? currentAccount(d.virtualAccounts) : d?.virtualAccounts) ?? d
   return {
     accountNumber: pick(va, 'accountNumber', 'account_number', 'nuban', 'number'),
     accountName: pick(va, 'accountName', 'account_name'),

@@ -455,6 +455,38 @@ export async function sendBvnFailedEmail(userId: string, reason?: string | null)
   })
 }
 
+/** Tell a user their permanent deposit account number has changed (Strails re-issue, Oct 2026). */
+export async function sendAccountChangedEmail(
+  userId: string,
+  account: { accountNumber?: string; accountName?: string; bankName?: string },
+  oldAccountNumber?: string,
+): Promise<void> {
+  if (!mailerConfigured() || !account.accountNumber) return
+  const r = await recipient(userId)
+  if (!r) return
+  const url = siteBaseUrl()
+  const rows: [string, string][] = [
+    ['New account number', account.accountNumber],
+    ['Bank', account.bankName || '—'],
+    ['Account name', account.accountName || '—'],
+  ]
+  if (oldAccountNumber) rows.push(['Old number (stop using)', oldAccountNumber])
+  const html = shell({
+    heading: 'Your PawaSave account number has changed',
+    sub: `Hi ${r.name}, our banking partner has upgraded its accounts, so your permanent PawaSave Naira account has a new number.`,
+    amount: account.accountNumber,
+    amountColor: '#0B6B3A',
+    rows,
+    note: `Please send deposits only to your new number from now on, and update it anywhere you've saved the old one. The old number no longer accepts transfers. Your balance and savings are unchanged. You can always see your current number in the app at ${url}. Questions? Just reply to this email.`,
+  })
+  await sendMail({
+    to: r.email,
+    subject: 'Your PawaSave account number has changed',
+    html,
+    text: `Hi ${r.name}, your permanent PawaSave Naira account has a new number: ${account.accountNumber}${account.bankName ? ` (${account.bankName})` : ''}. Please send deposits only to this number. ${oldAccountNumber ? `The old number ${oldAccountNumber} no longer accepts transfers. ` : ''}Your balance is unchanged.`,
+  })
+}
+
 /** Tell the sender their unclaimed transfer was returned (expiry) or their cancel refunded. */
 export async function sendP2pRevertedEmail(userId: string, p: { amountNgn: number; toLabel: string; reason: 'expired' | 'cancelled'; reference?: string | null }): Promise<void> {
   if (!mailerConfigured()) return

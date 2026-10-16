@@ -7,7 +7,7 @@ import { talkback } from '@/lib/voice'
 // Bank aliased: `Bank` is already the bank-list type from @/lib/flint.
 import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard, CircleNotch, ArrowLeft, Copy, Check, CaretDown, FileText, Bank as BankIcon, PaperPlaneTilt, Users, Storefront } from '@phosphor-icons/react'
 import PawaHub from './pawa-hub'
-import { strailsOnrampFeeNgn, STRAILS_ONRAMP_MIN_NGN } from '@/lib/strails-fees'
+import { estimateStrailsOnrampFeeNgn, STRAILS_ONRAMP_ESTIMATE_PERCENT } from '@/lib/strails-fees'
 import { depositFeeNgn } from '@/lib/deposit-fee'
 import type { Profile, Wallet as WalletType, Transaction } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
@@ -43,6 +43,18 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
   const [bvn, setBvn] = useState('')
   const [acctCopied, setAcctCopied] = useState(false)
   const [depositPreview, setDepositPreview] = useState('') // naira the user plans to send, for the fee preview
+  // The bank partner's exact fee for that amount, from Strails' tiered fee preview (estimate if unreachable).
+  const [partnerFee, setPartnerFee] = useState<{ amount: number; feeNgn: number; percent?: number; estimate: boolean } | null>(null)
+  useEffect(() => {
+    const amount = parseInt(depositPreview || '0', 10)
+    if (!(amount > 0)) { setPartnerFee(null); return }
+    const t = setTimeout(() => {
+      fetch(`/api/strails/fee-preview?amount=${amount}`).then((r) => r.json()).then((d) => {
+        if (typeof d?.feeNgn === 'number') setPartnerFee({ amount, feeNgn: d.feeNgn, percent: d.percent, estimate: !!d.estimate })
+      }).catch(() => {})
+    }, 400)
+    return () => clearTimeout(t)
+  }, [depositPreview])
   const [liveRate, setLiveRate] = useState<number>(getRate())
   const [depositAddr, setDepositAddr] = useState<string | null>(wallet?.deposit_address ?? null)
   const [ccChains, setCcChains] = useState<{ key: string; name: string }[]>([])
@@ -494,29 +506,23 @@ export default function HomeView({ wallet, transactions, user, refresh, profile,
               if (!(gross > 0)) {
                 return (
                   <p className="hint">
-                    Our bank partner charges 0.75% on each deposit, with a minimum of ₦{STRAILS_ONRAMP_MIN_NGN.toLocaleString('en-NG')}.
-                    Fewer, larger deposits cost less.
+                    Our bank partner deducts a small fee (around {STRAILS_ONRAMP_ESTIMATE_PERCENT}%) before your deposit arrives. Enter an amount to see exactly what you&apos;ll receive.
                   </p>
                 )
               }
-              const partnerFee = strailsOnrampFeeNgn(gross)
+              const live = partnerFee && partnerFee.amount === gross ? partnerFee : null
+              const fee = live ? live.feeNgn : estimateStrailsOnrampFeeNgn(gross)
+              const estimate = !live || live.estimate
               const ourFee = depositFeeNgn(gross)
-              const net = gross - partnerFee - ourFee
-              const share = Math.round(((partnerFee + ourFee) / gross) * 100)
+              const net = Math.max(0, Math.round((gross - fee - ourFee) * 100) / 100)
+              const ngn = (n: number) => n.toLocaleString('en-NG', { maximumFractionDigits: 2 })
               return (
-                <>
-                  <div className="breakdown">
-                    <div className="r"><span>You send</span><span className="num">₦{gross.toLocaleString('en-NG')}</span></div>
-                    <div className="r"><span>Bank partner fee (0.75%, min ₦{STRAILS_ONRAMP_MIN_NGN.toLocaleString('en-NG')})</span><span>−₦{partnerFee.toLocaleString('en-NG')}</span></div>
-                    <div className="r"><span>PawaSave fee</span><span>{ourFee ? `−₦${ourFee.toLocaleString('en-NG')}` : 'Free'}</span></div>
-                    <div className="tot"><span>You receive</span><span className="num">{net > 0 ? `₦${net.toLocaleString('en-NG')}` : '₦0'}</span></div>
-                  </div>
-                  {net <= 0 ? (
-                    <div className="flash err">This amount is smaller than the bank partner&apos;s ₦{STRAILS_ONRAMP_MIN_NGN.toLocaleString('en-NG')} minimum fee, so nothing would arrive. Please send more.</div>
-                  ) : share >= 10 ? (
-                    <div className="note"><p style={{ lineHeight: 1.5 }}>Fees take about {share}% of this deposit because of the bank partner&apos;s ₦{STRAILS_ONRAMP_MIN_NGN.toLocaleString('en-NG')} minimum. Sending a larger amount at once costs proportionally less.</p></div>
-                  ) : null}
-                </>
+                <div className="breakdown">
+                  <div className="r"><span>You send</span><span className="num">₦{ngn(gross)}</span></div>
+                  <div className="r"><span>Bank partner fee{live?.percent !== undefined ? ` (${live.percent}%)` : ''}{estimate ? ' (estimate)' : ''}</span><span>−₦{ngn(fee)}</span></div>
+                  <div className="r"><span>PawaSave fee</span><span>{ourFee ? `−₦${ngn(ourFee)}` : 'Free'}</span></div>
+                  <div className="tot"><span>You receive{estimate ? ' about' : ''}</span><span className="num">₦{ngn(net)}</span></div>
+                </div>
               )
             })()}
           </>

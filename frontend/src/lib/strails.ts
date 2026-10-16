@@ -420,3 +420,20 @@ export function verifyStrailsWebhook(
   }
   return { ok: false }
 }
+// ── Fee preview ────────────────────────────────────────────────────────────────
+
+/**
+ * Strails' own on-ramp fee for a deposit of `amountNgn`, from POST /fees/strails/preview
+ * (tiered by amount; the docs' example is 1.7% on small deposits, and a live ₦1,000 deposit
+ * paid ₦17). Amounts on that endpoint are in kobo. Returns null when the answer is missing or
+ * implausible, so callers fall back to an estimate rather than show a wrong number.
+ */
+export async function previewOnrampFeeNgn(amountNgn: number): Promise<{ feeNgn: number; percent?: number } | null> {
+  const d: any = await call('/fees/strails/preview', { amount: Math.round(amountNgn * 100), transactionType: 'onramp' })
+  const finalKobo = Number(d?.finalFee ?? d?.calculatedFee)
+  if (!Number.isFinite(finalKobo) || finalKobo < 0) return null
+  const feeNgn = finalKobo / 100
+  if (feeNgn > amountNgn * 0.1) return null // more than 10% means we misread the units
+  const percent = Number(d?.feePercentage)
+  return { feeNgn, percent: Number.isFinite(percent) ? percent : undefined }
+}

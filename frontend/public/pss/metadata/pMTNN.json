@@ -1,0 +1,20 @@
+{
+  "contract_address": "0xb200000000000000000000AEA61A0DfB920606fB",
+  "chain_id": 84532,
+  "name": "PawaSave MTN Nigeria",
+  "symbol": "pMTNN",
+  "image": "https://pawasave.xyz/icon-512.png",
+  "external_url": "https://pawasave.xyz/pss/demo",
+  "description": "PawaSave MTN Nigeria (pMTNN) is a TESTNET reference implementation of PSS-1, PawaSave's standard for Nigerian Exchange (NGX) listed shares on Base, built on the B20 Asset precompile. It is not an offer of securities and has no value.\n\nOne token represents one whole ordinary share of MTN Nigeria Communications Plc (ISIN NGMTNN000002, NGX: MTNN) held in custody, with the legal register kept by the Central Securities Clearing System (CSCS). Tokens are minted only against a custodian attestation, transfer in whole shares through an allowlisted router (TRANSFER_EXECUTOR_POLICY), and can be held only by verified wallets. Cash dividends are paid pro rata in cNGN; corporate actions are reflected through the multiplier.",
+  "extra_metadata": {
+    "isin": "NGMTNN000002",
+    "csd": "CSCS",
+    "venue_mic": "XNSA",
+    "jurisdiction": "NG",
+    "regulator": "SEC Nigeria",
+    "custodian": "Licensed Nigerian custodian (testnet: PawaSave demo custodian)",
+    "dividend_mode": "cash",
+    "dividend_token": "0xF858125fA2cb724119366A5A20A298F5e4154D2d",
+    "transfer_unit": "1"
+  }
+}

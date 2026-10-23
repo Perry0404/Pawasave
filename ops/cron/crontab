@@ -66,4 +66,7 @@ CRON_TZ=UTC
 45 * * * *    . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/compliance-scan   "$HC_COMPLIANCE_SCAN"
 
 # Fixed Savings v2 (migration 120): pays matured locks into savers' balances automatically.
-15 * * * *    . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/fixed-savings-mature "$HC_FIXED_MATURE"
+# Every 45 minutes: cron has no 45-min step, so three lines cover a 3-hour cycle (00:00, 00:45, 01:30, 02:15, 03:00 ...).
+0,45 */3 * * *       . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/fixed-savings-mature "$HC_FIXED_MATURE"
+30   1-22/3 * * *    . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/fixed-savings-mature "$HC_FIXED_MATURE"
+15   2-23/3 * * *    . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/fixed-savings-mature "$HC_FIXED_MATURE"

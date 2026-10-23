@@ -198,7 +198,7 @@ GRANT EXECUTE ON FUNCTION public.withdraw_lock(uuid,uuid,boolean) TO authenticat
 REVOKE ALL ON FUNCTION public.withdraw_lock(uuid,uuid,boolean) FROM PUBLIC, anon;
 
 -- ── 5. Automatic payout at maturity ──────────────────────────────────────────
--- Service role only; run hourly. Idempotent three ways: the row lock (SKIP LOCKED, so two
+-- Service role only; run every 45 minutes. Idempotent three ways: the row lock (SKIP LOCKED, so two
 -- runs never take the same lock), paid_out_at, and the unique transactions.reference.
 -- Pays into the spendable balance so the money is the saver's to use the moment it lands.
 -- The spread (backing rate − saver rate over the term) is booked as revenue at payout.

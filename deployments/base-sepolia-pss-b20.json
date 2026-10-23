@@ -16,5 +16,6 @@
   "trustee": "0xd90899790D22787182B54F08adb6c9fbDd2175D9",
   "admin": "0x17E85Ed00196d6496BBF17d4D789BdC1eb919Ca7",
   "ops": "0x8e45681fEe5A06705689e7d2Fca1F9Cb7bEaA913",
-  "finding": "2026-10-16: TRANSFER_EXECUTOR_POLICY is enforced on transferFrom (non-initiator reverts PolicyForbids) but NOT on a holder's direct transfer(); a half share was sent directly in tx 0x045383405764c4dcfe3f97a15d32f4e5f3f2cc4180c3516b5a46952039234171. Reported to Base."
+  "finding": "2026-10-16: TRANSFER_EXECUTOR_POLICY is enforced on transferFrom (non-initiator reverts PolicyForbids) but NOT on a holder's direct transfer(); a half share was sent directly in tx 0x045383405764c4dcfe3f97a15d32f4e5f3f2cc4180c3516b5a46952039234171. Reported to Base.",
+  "findingStatus": "2026-10-23: fixed by Denim (Sepolia 2026-10-21; mainnet targeted Nov 2026). Probe: 40/40 as documented. Holder ada has a 1-unit self-allowance (tx 0x7c4701861db933231139d9597ab9d8eecf6792c0edfc345094b8ea76e2668585) so the self-transferFrom executor check is reachable."
 }

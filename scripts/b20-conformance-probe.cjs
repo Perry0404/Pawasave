@@ -36,6 +36,7 @@ const REG = new ethers.Interface([
   'function createPolicy(address,uint8) returns (uint64)', 'function createPolicyWithAccounts(address,uint8,address[]) returns (uint64)',
   'function updateAllowlist(uint64,bool,address[])', 'function createCompositePolicy(address,uint8,uint64[]) returns (uint64)',
   'function isAuthorized(uint64,address) view returns (bool)', 'function policyExists(uint64) view returns (bool)',
+  'function invertedPolicyId(uint64) view returns (uint64)', 'function policyAdmin(uint64) view returns (address)',
 ])
 const FACTORY = new ethers.Interface([
   ...ERRORS,
@@ -81,7 +82,11 @@ async function main() {
   await check('transfer to the zero address', 'IB20.transfer: InvalidReceiver when to == address(0)', 'InvalidReceiver', () => call(ada.address, T, TOKEN, 'transfer', [ethers.ZeroAddress, 1n]))
   await check('transfer to the token itself', 'IB20.transfer: InvalidReceiver when to == address(this) (Denim)', 'InvalidReceiver', () => call(ada.address, T, TOKEN, 'transfer', [T, 1n]))
   await check('transfer by a holder not on the executor allowlist', 'IB20.transfer: PolicyForbids(TRANSFER_EXECUTOR_POLICY) (Denim)', 'PolicyForbids', () => call(ada.address, T, TOKEN, 'transfer', [bayo.address, 1n]))
-  await check('self-transferFrom by a holder not on the executor allowlist', 'Denim changelog: executor check when msg.sender == from', 'PolicyForbids', () => call(ada.address, T, TOKEN, 'transferFrom', [ada.address, bayo.address, 1n]))
+  // Denim order for transferFrom: pause, receiver, zero sender, ALLOWANCE, executor, sender, receiver, balance.
+  // So a self-transferFrom with no self-allowance fails on allowance first; the executor check is
+  // only reached once the holder has approved themselves (ada holds a 1-unit self-allowance on Sepolia).
+  await check('self-transferFrom with no self-allowance', 'Denim transferFrom order: allowance is checked before the executor policy', 'InsufficientAllowance', () => call(bayo.address, T, TOKEN, 'transferFrom', [bayo.address, ada.address, 1n]))
+  await check('self-transferFrom with a self-allowance, holder not on the executor allowlist', 'Denim: TRANSFER_EXECUTOR_POLICY applies to every transfer path, incl. msg.sender == from', 'PolicyForbids', () => call(ada.address, T, TOKEN, 'transferFrom', [ada.address, bayo.address, 1n]))
   await check('transferFrom by a third party with no allowance', 'IB20.transferFrom: InsufficientAllowance', 'InsufficientAllowance', () => call(root.address, T, TOKEN, 'transferFrom', [ada.address, bayo.address, 1n]))
   await check('transfer with ETH attached', 'IB20: NonPayable on non-payable selectors', 'NonPayable', () => call(ada.address, T, TOKEN, 'transfer', [bayo.address, 1n], 1n))
   await check('zero-amount transfer by the router (allowlisted executor)', 'ERC-20: zero-value transfers are allowed', 'succeeds', () => call(d.router, T, TOKEN, 'transferFrom', [ada.address, bayo.address, 0n]))
@@ -124,6 +129,24 @@ async function main() {
   await check('composite with a sentinel child (0)', 'IPolicyRegistry: InvalidChildPolicy', 'InvalidChildPolicy', () => call(root.address, R, REG, 'createCompositePolicy', [root.address, 2, [verified, 0n]]))
   await check('isAuthorized on a malformed ID never reverts', 'IPolicyRegistry.isAuthorized: never reverts, false for malformed', 'succeeds', () => call(root.address, R, REG, 'isAuthorized', [2n ** 64n - 1n, ada.address]))
   await check('allowlist policy with the wrong update function (blocklist op)', 'IPolicyRegistry: IncompatiblePolicyType', 'Unauthorized', () => call(root.address, R, REG, 'updateAllowlist', [verified, false, [ada.address]]))
+
+  // ── NOT / inverted policies (Denim: bit 63 of a policy ID is an invert flag)
+  const INV = 1n << 63n
+  const value = async (fn, args) => { const r = await call(root.address, R, REG, fn, args); return r.ok ? r.out[0] : r.name }
+  const expectValue = async (label, doc, want, fn, args) => {
+    const got = await value(fn, args)
+    const pass = typeof got !== 'string' && got === want
+    results.push({ label, doc, expect: String(want), got: String(got), pass })
+    console.log(`${pass ? 'OK  ' : 'DIFF'} ${label}\n       documented: ${want} · live: ${got}`)
+  }
+  await expectValue('invertedPolicyId sets bit 63', 'invertedPolicyId toggles INVERTED_POLICY_BIT', verified | INV, 'invertedPolicyId', [verified])
+  await expectValue('invertedPolicyId is involutive', 'invertedPolicyId(invertedPolicyId(x)) == x', verified, 'invertedPolicyId', [verified | INV])
+  await expectValue('inverted allowlist: a member is NOT authorized', 'isAuthorized negates the base result', false, 'isAuthorized', [verified | INV, ada.address])
+  await expectValue('inverted allowlist: a non-member IS authorized', 'isAuthorized negates the base result', true, 'isAuthorized', [verified | INV, ethers.Wallet.createRandom().address])
+  await expectValue('inverted ID whose base does not exist is never allow-all', 'unknown/malformed base under the flag returns false', false, 'isAuthorized', [(verified + 1_000_000n) | INV, ada.address])
+  await expectValue('policyExists strips the flag', 'getters read the base record', true, 'policyExists', [verified | INV])
+  await check('composite with an inverted allowlist child', 'createCompositePolicy accepts inverted ALLOWLIST/BLOCKLIST children', 'succeeds', () => call(root.address, R, REG, 'createCompositePolicy', [root.address, 2, [verified, BigInt(d.executorPolicyId) | INV]]))
+  await check('composite with an inverted sentinel child', 'sentinels revert InvalidChildPolicy with or without the flag', 'InvalidChildPolicy', () => call(root.address, R, REG, 'createCompositePolicy', [root.address, 2, [verified, INV]]))
 
   // ── factory
   const params = (dec) => ethers.AbiCoder.defaultAbiCoder().encode(['tuple(uint8,string,string,address,uint8)'], [[1, 'Probe', 'PRB', root.address, dec]])

@@ -4,7 +4,7 @@ import { checkCronAuth } from '@/lib/cron-auth'
 import { sendLockMaturedEmail } from '@/lib/notify-tx'
 
 /**
- * GET /api/cron/fixed-savings-mature   (hourly, see ops/cron/crontab)
+ * GET /api/cron/fixed-savings-mature   (every 45 min, see ops/cron/crontab)
  *
  * Pays out every Fixed Savings v2 lock that has reached its date (migration 120):
  * principal + the interest quoted at signup lands in the saver's spendable balance, and

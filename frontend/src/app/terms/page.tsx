@@ -124,7 +124,10 @@ export default function TermsPage() {
               <span className="text-white font-semibold">Fixed Savings:</span> Fixed Savings pays the annual rate shown when you open it, for the term you choose. The amount and payout date are fixed at that moment. Your money is placed in the asset named on the screen, for example Nigerian Treasury Bills held through GetEquity.
             </p>
             <p className="leading-relaxed">
-              <span className="text-white font-semibold">No early withdrawal:</span> Fixed Savings <span className="text-white font-medium">cannot be withdrawn, broken or used as loan collateral before its payout date</span>, for any reason. You must confirm this before opening one.
+              <span className="text-white font-semibold">No early withdrawal:</span> Fixed Savings <span className="text-white font-medium">cannot be withdrawn or broken before its payout date</span>, for any reason. You must confirm this before opening one.
+            </p>
+            <p className="leading-relaxed">
+              <span className="text-white font-semibold">Borrowing against Fixed Savings:</span> You may borrow against Fixed Savings. It is never sold early to recover a loan. If the loan is not repaid by its due date, it keeps accruing interest and is repaid from your payout on the payout date. Anything left after the loan is cleared goes to your balance. Other collateral pledged to the same loan may still be sold under section 12.
             </p>
             <p className="leading-relaxed">
               <span className="text-white font-semibold">Automatic payout:</span> On the payout date your savings and the interest are paid automatically to your PawaSave balance, and we email you. PawaSave keeps any difference between what the backing asset earns and the rate paid to you.

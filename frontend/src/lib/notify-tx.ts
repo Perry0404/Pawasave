@@ -480,6 +480,36 @@ export async function sendPinResetEmail(userId: string): Promise<void> {
   })
 }
 
+/** A Fixed Savings v2 lock matured and paid itself out into the spendable balance (migration 120). */
+export async function sendLockMaturedEmail(
+  userId: string,
+  l: { principalNgn: number; payoutNgn: number },
+): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(userId)
+  if (!r) return
+  const ngn = (v: number) => `₦${v.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const interest = Math.max(0, l.payoutNgn - l.principalNgn)
+  const html = shell({
+    heading: 'Your fixed savings has matured',
+    sub: `Hi ${r.name}, your fixed savings reached its date and has been paid into your PawaSave balance.`,
+    amount: ngn(l.payoutNgn),
+    amountColor: '#0B6B3A',
+    rows: [
+      ['You saved', ngn(l.principalNgn)],
+      ['Interest earned', ngn(interest)],
+      ['Paid to', 'Your PawaSave balance'],
+    ],
+    note: 'The money is yours to use now. You can start a new fixed savings any time from the Save tab.',
+  })
+  await sendMail({
+    to: r.email,
+    subject: `Your fixed savings paid out ${ngn(l.payoutNgn)}`,
+    html,
+    text: `Hi ${r.name}, your fixed savings matured. ${ngn(l.payoutNgn)} (${ngn(l.principalNgn)} saved + ${ngn(interest)} interest) is now in your PawaSave balance.`,
+  })
+}
+
 /** Tell a user their permanent deposit account number has changed (Strails re-issue, Oct 2026). */
 export async function sendAccountChangedEmail(
   userId: string,

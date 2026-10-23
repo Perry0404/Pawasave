@@ -64,3 +64,6 @@ CRON_TZ=UTC
 
 # Transaction monitoring (migration 119): opens compliance flags, holds high-risk accounts.
 45 * * * *    . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/compliance-scan   "$HC_COMPLIANCE_SCAN"
+
+# Fixed Savings v2 (migration 120): pays matured locks into savers' balances automatically.
+15 * * * *    . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/fixed-savings-mature "$HC_FIXED_MATURE"

@@ -70,13 +70,19 @@ export async function POST(request: NextRequest) {
       // service role bypasses RLS.
       const { data: lock } = await admin
         .from('savings_locks')
-        .select('id, user_id, amount_usdc_micro, effective_rate_at_creation, created_at, status')
+        .select('*')
         .eq('id', lockId)
         .eq('user_id', user.id)
         .maybeSingle()
       if (!lock) return NextResponse.json({ error: 'Lock not found' }, { status: 404 })
       if (lock.status !== 'active') {
         return NextResponse.json({ error: 'Lock is not active' }, { status: 409 })
+      }
+      // Fixed Savings v2 (migration 120): no early exit, and paid out automatically at
+      // maturity. withdraw_lock refuses too; this just answers before any forfeiture work.
+      if (lock.breakable === false) {
+        const date = new Date(lock.unlocks_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })
+        return NextResponse.json({ error: `This fixed savings is locked until ${date} and pays out automatically on that day` }, { status: 409 })
       }
 
       let forfeited = 0

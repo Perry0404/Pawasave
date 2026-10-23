@@ -348,6 +348,7 @@ export async function buyWithCngn(
   token: string,
   cngnMicroBudget: bigint,
   slippageBps = 100,
+  opts: { wholeUnits?: boolean } = {},
 ): Promise<{ txHash: string; units: number }> {
   ensureEnabled()
   if (cngnMicroBudget <= 0n) throw new Error('Zero budget')
@@ -359,7 +360,10 @@ export async function buyWithCngn(
   const per = await quoteBuy(token, ONE)
   if (per.totalCost <= 0n) throw new Error('Could not price asset')
   // Units (18-dp base) the budget affords, floored so cost never exceeds budget.
-  const unitsBase = (cngnMicroBudget * ONE) / per.totalCost
+  let unitsBase = (cngnMicroBudget * ONE) / per.totalCost
+  // Pooled backing (fixed savings) buys whole units only; the remainder stays as cNGN
+  // until a later run tops it up to another whole unit.
+  if (opts.wholeUnits) unitsBase = (unitsBase / ONE) * ONE
   if (unitsBase <= 0n) throw new Error('Amount too small for this asset')
   // GetEquity enforces a minimum lot size (default 10 units) — a smaller buy reverts
   // on-chain. Guard here so we never send a doomed tx (configurable via env).

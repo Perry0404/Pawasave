@@ -332,6 +332,38 @@ export async function lockSavings(usdcMicro: number, kobo: number, durationDays:
   return data
 }
 
+// ── Fixed Savings v2 (migration 120): no early exit, paid out automatically ──
+
+export interface FixedOffer {
+  open: boolean
+  enabled: boolean
+  ratePercent: number
+  terms: { days: number; payoutDate: string }[]
+  minAmountMicro: number
+  backingName: string
+}
+
+export async function getFixedOffer(): Promise<FixedOffer | null> {
+  try {
+    const res = await fetch('/api/savings/fixed', { cache: 'no-store' })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+export async function openFixedSavings(p: { amountMicro: number; durationDays: number; consent: boolean; pin: string }) {
+  const res = await fetch('/api/savings/fixed', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(p),
+  })
+  const out = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(out?.error || 'Could not open fixed savings')
+  return out.lock as { id: string; amount_usdc_micro: number; projected_interest_micro: number; apy_percent: number; unlocks_at: string }
+}
+
 export async function withdrawLock(lockId: string, early: boolean = false) {
   // Server route, not an RPC. The forfeited interest on an early exit has to be worked out
   // from the stored lock, and the withdrawal has to follow it in the same request, or a

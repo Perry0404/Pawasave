@@ -118,7 +118,19 @@ export default function TermsPage() {
               Fixed Savings Locks let you lock cNGN for a set term (30 to 365 days) at an indicative, term-based APY. Rates are variable, depend on prevailing money-market rates and PawaSave&apos;s treasury management, and are indicative targets rather than guarantees.
             </p>
             <p className="leading-relaxed">
-              <span className="text-white font-semibold">Early withdrawal:</span> You may withdraw a fixed lock before maturity, but you forfeit all accrued interest and incur a <span className="text-white font-medium">0.5% penalty</span> on the principal. The penalty is retained by PawaSave as a platform fee.
+              <span className="text-white font-semibold">Early withdrawal (earlier locks only):</span> A fixed lock opened before Fixed Savings (below) may be withdrawn before maturity, but you forfeit all accrued interest and incur a <span className="text-white font-medium">0.5% penalty</span> on the principal. The penalty is retained by PawaSave as a platform fee.
+            </p>
+            <p className="leading-relaxed">
+              <span className="text-white font-semibold">Fixed Savings:</span> Fixed Savings pays the annual rate shown when you open it, for the term you choose. The amount and payout date are fixed at that moment. Your money is placed in the asset named on the screen, for example Nigerian Treasury Bills held through GetEquity.
+            </p>
+            <p className="leading-relaxed">
+              <span className="text-white font-semibold">No early withdrawal:</span> Fixed Savings <span className="text-white font-medium">cannot be withdrawn, broken or used as loan collateral before its payout date</span>, for any reason. You must confirm this before opening one.
+            </p>
+            <p className="leading-relaxed">
+              <span className="text-white font-semibold">Automatic payout:</span> On the payout date your savings and the interest are paid automatically to your PawaSave balance, and we email you. PawaSave keeps any difference between what the backing asset earns and the rate paid to you.
+            </p>
+            <p className="leading-relaxed">
+              <span className="text-white font-semibold">Exceptional events:</span> Payouts depend on the backing asset being redeemed as agreed. If a regulator or court requires, or the asset issuer defaults, we will tell you promptly and act in your interest.
             </p>
           </div>
         </section>

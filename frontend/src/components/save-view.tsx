@@ -7,6 +7,7 @@ import {
   useSavingsLocks, lockSavings, withdrawLock,
   useSavingsGoals, createSavingsGoal, contributeToGoal, completeSavingsGoal, breakSavingsGoal,
   getApySettings, type ApySettings, setGoalAutoContribute,
+  getFixedOffer, openFixedSavings, type FixedOffer,
 } from '@/hooks/use-data'
 import type { Wallet, SavingsLock, SavingsGoal } from '@/lib/types'
 import { useConfirm } from '@/components/confirm-dialog'
@@ -28,6 +29,9 @@ const LOCK_DURATIONS = [
 const FREQ = ['daily', 'weekly', 'monthly'] as const
 const FREQ_LABELS: Record<string, string> = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' }
 
+const fmtDate = (d: string | number | Date) =>
+  new Date(d).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })
+
 const IconLock = () => <Lock />
 const IconPlus = () => <Plus />
 const Chevron = () => <CaretRight />
@@ -42,13 +46,25 @@ export default function SaveView({ wallet, refresh }: Props) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [apy, setApy] = useState<ApySettings | null>(null)
-  useEffect(() => { getApySettings().then(setApy) }, [])
-  const FIXED_LIVE = !!apy?.fixedEnabled
+  const [offer, setOffer] = useState<FixedOffer | null>(null)
+  useEffect(() => {
+    getApySettings().then(setApy)
+    getFixedOffer().then((o) => {
+      setOffer(o)
+      // Start on an offered term (the default 90 may not be one).
+      if (o?.enabled && o.terms.length && !o.terms.some((t) => t.days === 90)) setLockDays(o.terms[0].days)
+    })
+  }, [])
+  // Fixed Savings v2 replaces v1 once switched on: no early exit, paid out automatically.
+  const V2 = !!offer?.enabled
+  const FIXED_LIVE = V2 ? !!offer?.open : !!apy?.fixedEnabled
+  const fixedRate = V2 ? offer!.ratePercent : (apy?.fixed ?? 20)
 
   // lock form
   const [lockAmt, setLockAmt] = useState('')
   const [lockDays, setLockDays] = useState(90)
   const [lockAgree, setLockAgree] = useState(false)
+  const [lockPin, setLockPin] = useState('')
 
   // goal form
   const [gTitle, setGTitle] = useState('')
@@ -86,7 +102,27 @@ export default function SaveView({ wallet, refresh }: Props) {
     } catch (e: any) { flash(e.message || 'Failed to lock') } finally { setBusy(false) }
   }
 
+  const submitFixedV2 = async () => {
+    const naira = parseFloat(lockAmt)
+    const minNaira = (offer?.minAmountMicro ?? 1e9) / 1e6
+    if (!naira || naira < minNaira) { flash(`Minimum ${formatNaira(Math.round(minNaira * 100))}`); return }
+    if (!lockAgree) { flash('Please confirm you understand you cannot withdraw before the payout date'); return }
+    if (!/^\d{4}$/.test(lockPin)) { flash('Enter your 4-digit transaction PIN'); return }
+    setBusy(true)
+    try {
+      const l = await openFixedSavings({ amountMicro: Math.round(naira * 1e6), durationDays: lockDays, consent: true, pin: lockPin })
+      flash(`Saved ${formatNaira(Math.round(naira * 100))}. ${formatCngn(l.amount_usdc_micro + l.projected_interest_micro)} pays out on ${fmtDate(l.unlocks_at)}`)
+      setLockAmt(''); setLockAgree(false); setLockPin('')
+      refreshLocks(); refresh()
+      setScreen('main')
+    } catch (e: any) { flash(e.message || 'Could not open fixed savings') } finally { setBusy(false) }
+  }
+
   const doWithdrawLock = async (lock: SavingsLock) => {
+    if (lock.breakable === false) {
+      flash(`Locked until ${fmtDate(lock.unlocks_at)}. It pays out to your balance automatically on that day.`)
+      return
+    }
     const matured = new Date(lock.unlocks_at) <= new Date()
     if (!matured && !(await confirm({ title: 'Early withdrawal', message: 'Early withdrawal forfeits all interest and incurs a 0.5% penalty on principal.', confirmText: 'Withdraw anyway', danger: true }))) return
     setBusy(true)
@@ -146,6 +182,66 @@ export default function SaveView({ wallet, refresh }: Props) {
       flash('Goal broken. Principal returned.')
       refreshGoals(); refresh(); setScreen('main')
     } catch (e: any) { flash(e.message || 'Could not break') } finally { setBusy(false) }
+  }
+
+  // ══ FIXED SAVINGS v2 FORM ══
+  if (screen === 'lock' && V2 && offer) {
+    const naira = parseFloat(lockAmt) || 0
+    const principal = Math.round(naira * 1e6)
+    const days = lockDays
+    const payoutDate = offer.terms.find((t) => t.days === days)?.payoutDate
+    const interest = Math.floor(principal * (offer.ratePercent / 100) * (days / 365))
+    const minNaira = offer.minAmountMicro / 1e6
+    const label = (d: number) => d % 365 === 0 ? `${d / 365} year${d > 365 ? 's' : ''}` : d % 30 === 0 ? `${d / 30} months` : `${d} days`
+    return (
+      <div className="b">
+        <button className="back" onClick={() => setScreen('main')}>← Back</button>
+        <div className="h2">Start a fixed savings</div>
+        <p className="p">Earn {offer.ratePercent}% a year. Your money stays locked until the payout date, then lands in your balance automatically.</p>
+
+        <label className="lab">Amount (₦)</label>
+        <input className="field" type="number" inputMode="numeric" value={lockAmt} onChange={(e) => setLockAmt(e.target.value)} placeholder={`From ${formatNaira(Math.round(minNaira * 100))}`} autoFocus />
+        <p className="p" style={{ margin: '6px 3px 0' }}>Available in savings: {formatNaira(poolKobo)}</p>
+
+        <label className="lab" style={{ marginTop: 16 }}>Term</label>
+        <div className="terms" style={{ gridTemplateColumns: `repeat(${Math.min(3, offer.terms.length || 1)},1fr)` }}>
+          {offer.terms.map((t) => (
+            <button key={t.days} className={`term${days === t.days ? ' on' : ''}`} onClick={() => setLockDays(t.days)}>{label(t.days)}</button>
+          ))}
+        </div>
+
+        {naira >= minNaira && payoutDate && (
+          <div className="info" style={{ marginTop: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span className="l">You get</span>
+              <span className="code">{formatCngn(principal + interest)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+              <span className="l">Interest ({offer.ratePercent}% a year)</span>
+              <span className="code" style={{ color: 'var(--green)' }}>+{formatCngn(interest)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+              <span className="l">Paid to your balance on</span>
+              <span className="code">{fmtDate(payoutDate)}</span>
+            </div>
+          </div>
+        )}
+        <p className="p" style={{ margin: '10px 3px 0', fontSize: 12 }}>Backed by {offer.backingName}.</p>
+
+        <label style={{ display: 'flex', gap: 9, marginTop: 14, fontSize: 12, color: 'var(--muted)' }}>
+          <input type="checkbox" checked={lockAgree} onChange={(e) => setLockAgree(e.target.checked)} style={{ marginTop: 2 }} />
+          <span>I understand I <b>cannot withdraw this money before {payoutDate ? fmtDate(payoutDate) : 'the payout date'}</b>, for any reason. On that day it is paid to my PawaSave balance automatically.</span>
+        </label>
+
+        <label className="lab" style={{ marginTop: 14 }}>Transaction PIN</label>
+        <input className="field" type="password" inputMode="numeric" maxLength={4} value={lockPin} onChange={(e) => setLockPin(e.target.value.replace(/\D/g, ''))} placeholder="••••" />
+
+        {msg && <div className={`flash ${isErr(msg) ? 'err' : 'ok'}`}>{msg}</div>}
+        <button className="cta" onClick={submitFixedV2} disabled={busy || !lockAmt || !lockAgree || lockPin.length !== 4}>
+          Save {lockAmt ? formatNaira(Math.round(naira * 100)) : ''}
+        </button>
+      </div>
+    )
   }
 
   // ══ LOCK FORM ══
@@ -298,20 +394,24 @@ export default function SaveView({ wallet, refresh }: Props) {
         {activeLocks.map((l) => {
           const days = Math.max(0, Math.ceil((new Date(l.unlocks_at).getTime() - Date.now()) / 86400000))
           const matured = days === 0
+          const auto = l.breakable === false
+          const sub = auto
+            ? `${l.apy_percent}% · ${formatCngn(l.amount_usdc_micro + l.projected_interest_micro)} pays out ${matured ? 'within the hour' : `on ${fmtDate(l.unlocks_at)}`}`
+            : `${l.apy_percent}% · ${matured ? 'matured — tap to withdraw' : `matures in ${days} days`}`
           return (
             <button key={l.id} className="opt" onClick={() => doWithdrawLock(l)} disabled={busy}>
               <span className="ic"><IconLock /></span>
               <div className="mid">
                 <div className="nm">{formatNaira(l.amount_kobo)} locked</div>
-                <div className="sub">{l.apy_percent}% · {matured ? 'matured — tap to withdraw' : `matures in ${days} days`}</div>
+                <div className="sub">{sub}</div>
               </div>
-              <span className="chev"><Chevron /></span>
+              {!auto && <span className="chev"><Chevron /></span>}
             </button>
           )
         })}
         <button className="opt" onClick={() => FIXED_LIVE && setScreen('lock')} disabled={!FIXED_LIVE}>
           <span className="ic"><IconPlus /></span>
-          <div className="mid"><div className="nm">Start a fixed deposit</div><div className="sub">{FIXED_LIVE ? `Lock in for ${apy?.fixed ?? 20}% a year` : `Coming soon · ${apy?.fixed ?? 20}% a year`}</div></div>
+          <div className="mid"><div className="nm">Start a fixed deposit</div><div className="sub">{FIXED_LIVE ? `Lock in for ${fixedRate}% a year${V2 ? ', paid out automatically' : ''}` : `Coming soon · ${fixedRate}% a year`}</div></div>
           {FIXED_LIVE && <span className="chev"><Chevron /></span>}
         </button>
       </div>

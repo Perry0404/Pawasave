@@ -149,10 +149,14 @@ export interface SavingsLock {
   projected_interest_micro: number
   locked_at: string
   unlocks_at: string
-  status: 'active' | 'matured' | 'withdrawn' | 'early_withdrawn'
+  status: 'active' | 'matured' | 'withdrawn' | 'early_withdrawn' | 'liquidated'
   matured_at: string | null
   withdrawn_at: string | null
   created_at: string
+  /** Fixed Savings v2 (migration 120): version 2, not breakable, paid out automatically. */
+  version?: number
+  breakable?: boolean
+  paid_out_at?: string | null
 }
 
 export interface PlatformFee {

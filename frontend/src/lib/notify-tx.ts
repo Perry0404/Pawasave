@@ -455,6 +455,31 @@ export async function sendBvnFailedEmail(userId: string, reason?: string | null)
   })
 }
 
+/** Tell a user support reset their transaction PIN, so they set a new one at next sign-in. */
+export async function sendPinResetEmail(userId: string): Promise<void> {
+  if (!mailerConfigured()) return
+  const r = await recipient(userId)
+  if (!r) return
+  const url = siteBaseUrl()
+  const html = shell({
+    heading: 'Your transaction PIN was reset',
+    sub: `Hi ${r.name}, at your request our support team reset your PawaSave transaction PIN.`,
+    amount: 'Set a new PIN',
+    amountColor: '#0B6B3A',
+    rows: [
+      ['What to do', 'Sign in and create a new 4-digit PIN'],
+      ['Your money', 'Unchanged and safe'],
+    ],
+    note: `Sign in at ${url} and you'll be asked to create a new PIN straight away. If you didn't ask for this, reply to this email immediately.`,
+  })
+  await sendMail({
+    to: r.email,
+    subject: 'Your PawaSave transaction PIN was reset',
+    html,
+    text: `Hi ${r.name}, our support team reset your PawaSave transaction PIN. Sign in at ${url} to create a new one. If you didn't ask for this, reply to this email immediately.`,
+  })
+}
+
 /** Tell a user their permanent deposit account number has changed (Strails re-issue, Oct 2026). */
 export async function sendAccountChangedEmail(
   userId: string,

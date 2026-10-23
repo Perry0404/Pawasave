@@ -61,3 +61,6 @@ CRON_TZ=UTC
 0 0 * * *     . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/accrue-yield     "$HC_ACCRUE_YIELD"
 0 1 * * *     . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/auto-contribute  "$HC_AUTO_CONTRIBUTE"
 0 2 * * *     . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/harvest-vault    "$HC_HARVEST_VAULT"
+
+# Transaction monitoring (migration 119): opens compliance flags, holds high-risk accounts.
+45 * * * *    . /opt/pawasave/cron.env && /opt/pawasave/pawasave-cron.sh /api/cron/compliance-scan   "$HC_COMPLIANCE_SCAN"

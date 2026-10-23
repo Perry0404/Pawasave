@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { isEquityBrokerLive, equityProvider, sellEquity, EquitySellCngnPending } from '@/lib/equity-broker'
 import { sendEquitySellEmail } from '@/lib/notify-tx'
+import { complianceBlock } from '@/lib/compliance'
 
 /**
  * POST /api/invest/equity/sell   { symbol, shares }
@@ -42,6 +43,8 @@ export async function POST(request: NextRequest) {
   try {
     const { user, supabase } = await getUser()
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    const held = await complianceBlock(user.id, 'invest')
+    if (held) return held
 
     const body = await request.json().catch(() => ({}))
     const symbol = String(body.symbol || '').trim().toUpperCase()

@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { sendP2pSentEmail, sendP2pReceivedEmail, sendP2pClaimInviteEmail } from '@/lib/notify-tx'
+import { complianceBlock } from '@/lib/compliance'
 
 /**
  * POST /api/p2p/send  { to, amountNgn, note? }   (`to` = a @tag or an email; `email` still accepted)
@@ -55,6 +56,8 @@ export async function POST(request: NextRequest) {
   try {
     const user = await sessionUser()
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    const held = await complianceBlock(user.id, 'exit')
+    if (held) return held
 
     const body = await request.json().catch(() => ({}))
     const raw = String(body?.to ?? body?.email ?? '').trim()

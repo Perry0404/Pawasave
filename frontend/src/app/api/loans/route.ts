@@ -8,6 +8,7 @@ import { refreshEquityPrices, heldSymbols } from '@/lib/equity-prices'
 import { refreshRwaPrices } from '@/lib/getequity'
 import { isMorphoLive } from '@/lib/morpho'
 import { fundLoanFromMorpho, unwindLoanFromMorpho } from '@/lib/morpho-treasury'
+import { complianceBlock } from '@/lib/compliance'
 
 /**
  * /api/loans — custodial, in-app asset-backed lending.
@@ -118,6 +119,8 @@ export async function POST(request: NextRequest) {
   const action = body.action as string
 
   if (action === 'borrow') {
+    const held = await complianceBlock(user.id, 'exit')
+    if (held) return held
     if (body.agreementAccepted !== true) {
       return NextResponse.json({ error: 'You must accept the loan agreement to continue' }, { status: 400 })
     }

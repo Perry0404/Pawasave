@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import AdminCompliance from './admin-compliance'
 import { formatNaira, formatCngn } from '@/lib/format'
 import type { AdminFeeSummary, AdminUserStats, AdminTxVolume, PlatformFee } from '@/lib/types'
 import {
@@ -19,7 +20,7 @@ interface AdminInvestment {
   reference: string | null; created_at: string
 }
 
-type Tab = 'overview' | 'revenue' | 'activity'
+type Tab = 'overview' | 'revenue' | 'activity' | 'compliance'
 
 // ── small presentational helpers ────────────────────────────────────────────
 
@@ -246,6 +247,7 @@ export default function AdminView() {
     { id: 'overview', label: 'Overview' },
     { id: 'revenue', label: 'Revenue' },
     { id: 'activity', label: 'Activity' },
+    { id: 'compliance', label: 'Compliance' },
   ]
 
   return (
@@ -517,6 +519,9 @@ export default function AdminView() {
           </SectionCard>
         </>
       )}
+
+      {/* ── COMPLIANCE ───────────────────────────────────────────── */}
+      {tab === 'compliance' && <AdminCompliance />}
     </div>
   )
 }

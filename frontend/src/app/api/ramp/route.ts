@@ -20,6 +20,7 @@ import { verifyPin } from '@/lib/pin-hash'
 import { pinLockGuard, recordPinResult } from '@/lib/pin-lockout'
 import { sendWithdrawalEmail } from '@/lib/notify-tx'
 import { custodyLendShares } from '@/lib/custody'
+import { complianceBlock } from '@/lib/compliance'
 
 // Off-ramp does a Flipeet API call + TWO sequential Base txs (redeem from the
 // pool, then send cNGN to Flipeet), each awaiting confirmation. That can exceed
@@ -1234,6 +1235,10 @@ export async function POST(request: NextRequest) {
     const transactionPin = body.transactionPin as string | undefined
     const holderName = body.holderName as string | undefined
     const depositCurrency = (body.currency === 'USD' ? 'USD' : 'NGN') as 'NGN' | 'USD'
+    if (type === 'off') {
+      const held = await complianceBlock(user.id, 'exit')
+      if (held) return held
+    }
 
     // USD on-ramp: min $1. NGN on-ramp: Flint's ₦2,000 floor. NGN off-ramp: ₦100.
     const minAmount = depositCurrency === 'USD' ? 1 : (type === 'on' ? FLINT_MIN_ONRAMP_NGN : 100)

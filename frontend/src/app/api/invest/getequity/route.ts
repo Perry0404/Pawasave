@@ -62,7 +62,8 @@ const PRODUCT_META: Record<string, { name: string; kind: 'term' | 'fund' | 'equi
 function marketplaceAllowlist(): Set<string> | null {
   const raw = (process.env.GETEQUITY_MARKETPLACE_SYMBOLS || '').trim()
   if (!raw) return null
-  return new Set(raw.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean))
+  // Tolerate separators other than a comma (a full stop, space or semicolon typed in Coolify).
+  return new Set(raw.split(/[\s,.;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean))
 }
 function isAllowed(symbol: string, allow: Set<string> | null): boolean {
   return !allow || allow.has(symbol.toUpperCase())
@@ -96,7 +97,8 @@ function previewCards(): ProductCard[] {
 }
 
 function toCard(a: GetEquityAsset): ProductCard {
-  const meta = PRODUCT_META[a.symbol]
+  const sym = a.symbol.toUpperCase() // on-chain symbols can be mixed case (gNTB)
+  const meta = PRODUCT_META[sym]
   const kind: ProductCard['kind'] = a.hasMaturity
     ? 'term'
     : a.hasPeriodicPayouts
@@ -104,7 +106,7 @@ function toCard(a: GetEquityAsset): ProductCard {
     : (meta?.kind ?? 'equity')
   return {
     token: a.token,
-    symbol: a.symbol,
+    symbol: sym,
     name: meta?.name ?? a.name,
     kind,
     blurb: meta?.blurb ?? (kind === 'term' ? 'Fixed term' : kind === 'fund' ? 'Withdraw anytime' : 'Equity'),

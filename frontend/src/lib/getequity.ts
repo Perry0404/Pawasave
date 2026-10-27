@@ -410,6 +410,13 @@ export async function sellAsset(
   const { netPayout } = await quoteSell(token, amount)
   const minPayout = netPayout - (netPayout * BigInt(slippageBps)) / 10_000n
 
+  // The Market pulls the RWA tokens with transferFrom, so it needs an allowance on the
+  // token itself (without it the sale reverts "ERC20: insufficient allowance"). Approve once (MAX).
+  const rwa = new ethers.Contract(token, ERC20_ABI, signer)
+  if (b(await rwa.allowance(owner, MARKET_ADDRESS)) < amount) {
+    await (await rwa.approve(MARKET_ADDRESS, MAX_UINT256, { gasLimit: GAS.approve })).wait(1)
+  }
+
   // Measure what actually arrived (payout-token balance before vs after), so the ledger
   // credits the real proceeds rather than the quote.
   const payToken: string = await new ethers.Contract(token, RWA_ABI, signer).payoutToken()

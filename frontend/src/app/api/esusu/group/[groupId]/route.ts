@@ -35,5 +35,8 @@ export async function GET(
     .select('*', { count: 'exact', head: true })
     .eq('group_id', groupId)
 
-  return NextResponse.json({ ...group, member_count: count ?? 0 })
+  // The circle's rules in plain words (migration 123), shown before anyone joins.
+  const { data: rules } = await supabase.rpc('circle_rules_text', { p_group: groupId })
+
+  return NextResponse.json({ ...group, member_count: count ?? 0, rules: typeof rules === 'string' ? rules : null })
 }

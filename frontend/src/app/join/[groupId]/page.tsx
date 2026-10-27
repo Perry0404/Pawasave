@@ -18,6 +18,7 @@ interface GroupInfo {
   status: 'forming' | 'active' | 'completed'
   current_cycle: number
   member_count: number
+  rules?: string | null
 }
 
 export default function JoinPage({ params }: { params: { groupId: string } }) {
@@ -30,6 +31,7 @@ export default function JoinPage({ params }: { params: { groupId: string } }) {
   const [busy, setBusy]       = useState(false)
   const [joined, setJoined]   = useState(false)
   const [feedback, setFeedback] = useState('')
+  const [agreed, setAgreed]   = useState(false)
 
   // Fetch group info (unauthenticated API route)
   useEffect(() => {
@@ -60,6 +62,7 @@ export default function JoinPage({ params }: { params: { groupId: string } }) {
       return
     }
     if (!group) return
+    if (group.rules && !agreed) { setFeedback('Please read and agree to the circle rules first.'); return }
     setBusy(true)
     const { data, error } = await supabase.rpc('join_esusu_group', {
       p_group_id: groupId,
@@ -162,6 +165,19 @@ export default function JoinPage({ params }: { params: { groupId: string } }) {
                   </p>
                 )}
 
+                {/* Rules: shown before joining, must be accepted */}
+                {group.rules && group.status !== 'completed' && (
+                  <div className="bg-slate-50 rounded-xl p-4 text-[13px] text-slate-700 leading-relaxed whitespace-pre-line">
+                    {group.rules}
+                    {user && (
+                      <label className="flex gap-2 items-start mt-3 text-slate-800 font-medium">
+                        <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-1" />
+                        <span>I have read and agree to these rules</span>
+                      </label>
+                    )}
+                  </div>
+                )}
+
                 {/* Feedback */}
                 {feedback && (
                   <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2.5">{feedback}</p>
@@ -171,7 +187,7 @@ export default function JoinPage({ params }: { params: { groupId: string } }) {
                 {group.status !== 'completed' && !isFull && (
                   <button
                     onClick={handleJoin}
-                    disabled={busy}
+                    disabled={busy || (!!user && !!group.rules && !agreed)}
                     className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3.5 rounded-xl transition flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-60"
                   >
                     {busy ? (

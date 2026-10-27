@@ -60,13 +60,28 @@ export async function GET(_request: NextRequest, { params }: { params: { groupId
     for (const p of profs || []) nameById[p.id] = p.display_name || (p.tag ? `@${p.tag}` : 'Member')
   }
 
-  const messages = (rows || []).reverse().map((r: any) => ({
-    id: r.id,
-    body: r.body,
-    createdAt: r.created_at,
-    author: nameById[r.user_id] || 'Member',
-    mine: r.user_id === user.id,
-  }))
+  const messages: { id: string | number; body: string; createdAt: string; author: string; mine: boolean; system?: boolean }[] =
+    (rows || []).reverse().map((r: any) => ({
+      id: r.id,
+      body: r.body,
+      createdAt: r.created_at,
+      author: nameById[r.user_id] || 'Member',
+      mine: r.user_id === user.id,
+    }))
+
+  // PawaSave's own notices for this circle (rules on create/join, strikes, removals, debt
+  // recovered, completion: migration 123) live as system rows in the circle's chat room.
+  try {
+    const { data: room } = await admin.from('chat_rooms').select('id').eq('circle_id', groupId).maybeSingle()
+    if (room?.id) {
+      const { data: sys } = await admin.from('chat_messages').select('id, body, created_at')
+        .eq('room_id', room.id).eq('kind', 'system').order('seq', { ascending: false }).limit(50)
+      for (const s of sys || []) {
+        if (s.body) messages.push({ id: `sys-${s.id}`, body: s.body, createdAt: s.created_at, author: 'PawaSave', mine: false, system: true })
+      }
+      messages.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    }
+  } catch { /* chat rooms not set up: user messages only */ }
   return NextResponse.json({ messages })
 }
 

@@ -486,6 +486,19 @@ export async function sendPinResetEmail(userId: string): Promise<void> {
   })
 }
 
+/** A product announcement to one user (admin broadcast, /api/admin/announce). Returns sent or not. */
+export async function sendAnnouncementEmail(
+  userId: string,
+  a: { subject: string; heading: string; sub: string; amount: string; rows: [string, string][]; note?: string; text: string },
+): Promise<boolean> {
+  if (!mailerConfigured()) return false
+  const r = await recipient(userId)
+  if (!r || /@deleted\.pawasave\.xyz$/i.test(r.email)) return false
+  const hi = (s: string) => s.replace(/\{name\}/g, r.name)
+  const html = shell({ heading: a.heading, sub: hi(a.sub), amount: a.amount, amountColor: '#0B6B3A', rows: a.rows, note: a.note })
+  return sendMail({ to: r.email, subject: a.subject, html, text: hi(a.text) })
+}
+
 /** A Fixed Savings v2 lock matured and paid itself out into the spendable balance (migration 120). */
 export async function sendLockMaturedEmail(
   userId: string,

@@ -36,10 +36,35 @@ export async function complianceStatus(userId: string): Promise<'clear' | 'revie
   }
 }
 
+/** Unpaid Ajo debt in kobo (migration 123): a member removed from a circle after collecting,
+ *  who still owes it. 0 if none, or if the function isn't there yet (fails open). */
+export async function ajoDebtKobo(userId: string): Promise<number> {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return 0
+  try {
+    const { data, error } = await admin().rpc('ajo_debt_owed_kobo', { p_user: userId })
+    return error ? 0 : Number(data) || 0
+  } catch {
+    return 0
+  }
+}
+
 /** Returns a 423 response if this account may not do `kind` right now, else null. */
 export async function complianceBlock(userId: string, kind: ComplianceKind): Promise<NextResponse | null> {
   const s = await complianceStatus(userId)
   const blocked = s === 'frozen' || (s === 'review' && kind === 'exit')
-  if (!blocked) return null
-  return NextResponse.json({ error: COMPLIANCE_HOLD_MESSAGE, code: 'compliance_hold' }, { status: 423 })
+  if (blocked) return NextResponse.json({ error: COMPLIANCE_HOLD_MESSAGE, code: 'compliance_hold' }, { status: 423 })
+
+  // Money owed to an Ajo circle: no withdrawing, sending, paying or borrowing until it's settled.
+  // Anything that comes in pays the circle first (123), so this keeps the debt collectable.
+  if (kind === 'exit') {
+    const owed = await ajoDebtKobo(userId)
+    if (owed > 0) {
+      const naira = `₦${(owed / 100).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      return NextResponse.json({
+        error: `You owe ${naira} to an Ajo circle you left after collecting. Withdrawals, transfers and loans are paused until it's paid. Money you add pays it automatically.`,
+        code: 'ajo_debt', owedKobo: owed,
+      }, { status: 423 })
+    }
+  }
+  return null
 }

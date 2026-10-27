@@ -77,7 +77,7 @@ export default function GroupsView({ user, wallet }: Props) {
   const [contribAmount, setContribAmount] = useState('')
 
   // Circle chat (§3.3 chat thread)
-  const [chat, setChat] = useState<{ id: number; body: string; author: string; mine: boolean; createdAt: string }[]>([])
+  const [chat, setChat] = useState<{ id: number | string; body: string; author: string; mine: boolean; createdAt: string; system?: boolean }[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatBusy, setChatBusy] = useState(false)
 
@@ -337,7 +337,7 @@ export default function GroupsView({ user, wallet }: Props) {
         ) : chat.map((m) => (
           <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: m.mine ? 'flex-end' : 'flex-start', padding: '4px 10px' }}>
             {!m.mine && <span style={{ fontSize: 11, color: 'var(--faint)', fontWeight: 600, margin: '0 4px 2px' }}>{m.author}</span>}
-            <span style={{ maxWidth: '80%', background: m.mine ? 'var(--green)' : 'var(--green-soft)', color: m.mine ? '#fff' : 'var(--ink)', padding: '7px 11px', borderRadius: 14, fontSize: 13, lineHeight: 1.35, wordBreak: 'break-word' }}>{m.body}</span>
+            <span style={{ maxWidth: m.system ? '92%' : '80%', background: m.mine ? 'var(--green)' : m.system ? 'var(--surface-2)' : 'var(--green-soft)', color: m.mine ? '#fff' : 'var(--ink)', border: m.system ? '1px solid var(--line)' : undefined, padding: '7px 11px', borderRadius: 14, fontSize: 13, lineHeight: 1.35, wordBreak: 'break-word', whiteSpace: 'pre-line' }}>{m.body}</span>
             <span style={{ fontSize: 10, color: 'var(--faint)', margin: '2px 4px 0' }}>{timeAgo(m.createdAt)}</span>
           </div>
         ))}

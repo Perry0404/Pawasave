@@ -115,7 +115,7 @@ function toCard(a: GetEquityAsset): ProductCard {
     rateBps: a.interestRateBps,
     tenorDays: a.tenorDays,
     feeBps: feeBpsFor(a.symbol),
-    netRateBps: Math.floor((a.interestRateBps * (10_000 - SELL_GAIN_FEE_BPS)) / 10_000),
+    netRateBps: a.interestRateBps > YIELD_SPREAD_BPS ? a.interestRateBps - YIELD_SPREAD_BPS : 0,
   }
 }
 
@@ -171,8 +171,9 @@ const FEE_BPS = (() => {
  *  PawaSave earns only its share of the gain on sale (see /api/invest/getequity/sell). */
 const ZERO_FEE = new Set((process.env.GETEQUITY_ZERO_FEE_SYMBOLS ?? 'GNTB').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean))
 function feeBpsFor(symbol: string): number { return ZERO_FEE.has(symbol.toUpperCase()) ? 0 : FEE_BPS }
-/** Must match GETEQUITY_SELL_GAIN_FEE_BPS in the sell route (default 345 = 0.5 of a 14.5% yield). */
-const SELL_GAIN_FEE_BPS = (() => { const n = Number(process.env.GETEQUITY_SELL_GAIN_FEE_BPS); return Number.isFinite(n) && n >= 0 && n <= 5000 ? Math.floor(n) : 345 })()
+/** PawaSave's yearly spread on yield assets (bps). Must match the sell route. 50 = the customer
+ *  keeps 14% of a 14.5% fund. */
+const YIELD_SPREAD_BPS = (() => { const n = Number(process.env.GETEQUITY_YIELD_SPREAD_BPS); return Number.isFinite(n) && n >= 0 && n <= 1000 ? Math.floor(n) : 50 })()
 function splitFee(gross: bigint, symbol: string): { fee: bigint; net: bigint } {
   const fee = (gross * BigInt(feeBpsFor(symbol))) / 10_000n
   return { fee, net: gross - fee }

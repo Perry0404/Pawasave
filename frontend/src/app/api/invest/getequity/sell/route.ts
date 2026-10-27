@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
-import { GETEQUITY_ENABLED, GETEQUITY_MIN_UNITS, quoteSell, sellAsset } from '@/lib/getequity'
+import { GETEQUITY_ENABLED, GETEQUITY_MIN_UNITS, quoteSell, sellAsset, assetRateBps } from '@/lib/getequity'
 import { withLease } from '@/lib/custody-lease'
 import { complianceBlock } from '@/lib/compliance'
 
@@ -14,14 +14,19 @@ import { complianceBlock } from '@/lib/compliance'
  *   reserve units (place_getequity_sell) → Market.sell under the custody lease →
  *   settle_getequity_sell (credit proceeds net of fee, or return the units on failure).
  *
- * PawaSave's fee is a share of the GAIN only (GETEQUITY_SELL_GAIN_FEE_BPS, default 345 =
- * 3.45% of the gain, i.e. 0.5 of a 14.5% yield, so a Treasury Bills holder nets 14% a year).
- * No fee when the sale is at or below cost.
+ * PawaSave's fee is a share of the GAIN only, never of principal, and nothing at or below cost:
+ *   yield assets (rate > spread): spread / rate of the gain, so with GETEQUITY_YIELD_SPREAD_BPS = 50
+ *     on the 14.5% Treasury Bills fund the customer keeps exactly 14% a year and PawaSave 0.5%;
+ *   other assets (e.g. the Dangote IPO): GETEQUITY_SELL_GAIN_FEE_BPS of the gain (default 345).
  */
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
 
 const ONE = 10n ** 18n
+const YIELD_SPREAD_BPS = (() => {
+  const n = Number(process.env.GETEQUITY_YIELD_SPREAD_BPS)
+  return Number.isFinite(n) && n >= 0 && n <= 1000 ? Math.floor(n) : 50
+})()
 const GAIN_FEE_BPS = (() => {
   const n = Number(process.env.GETEQUITY_SELL_GAIN_FEE_BPS)
   return Number.isFinite(n) && n >= 0 && n <= 5000 ? Math.floor(n) : 345
@@ -97,7 +102,10 @@ export async function POST(request: NextRequest) {
       const { data: order } = await admin.from('getequity_orders').select('cost_basis_micro').eq('id', orderId).maybeSingle()
       const cost = BigInt(Math.floor(Number(order?.cost_basis_micro || 0)))
       const gain = payoutMicro - cost
-      const fee = gain > 0n ? (gain * BigInt(GAIN_FEE_BPS)) / 10_000n : 0n
+      // Share of the gain PawaSave keeps, in bps of the gain.
+      const rate = await assetRateBps(token).catch(() => 0)
+      const shareBps = rate > YIELD_SPREAD_BPS ? Math.round((YIELD_SPREAD_BPS * 10_000) / rate) : GAIN_FEE_BPS
+      const fee = gain > 0n ? (gain * BigInt(shareBps)) / 10_000n : 0n
       const { error: settleErr } = await admin.rpc('settle_getequity_sell', {
         p_order_id: orderId, p_status: 'filled', p_payout_micro: payoutMicro.toString(), p_fee_micro: fee.toString(), p_tx_hash: txHash,
       })

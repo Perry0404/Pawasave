@@ -121,6 +121,8 @@ export async function GET(request: NextRequest) {
         cycle: ev.cycle ?? null,
         amountNgn: ev.amount_kobo != null ? Number(ev.amount_kobo) / 100 : undefined,
         strikes: ev.strikes ?? undefined,
+        limit: ev.limit ?? undefined,
+        owedNgn: ev.owed_kobo != null ? Number(ev.owed_kobo) / 100 : undefined,
       }).catch(() => {})
     }
   } catch (e: unknown) {

@@ -141,6 +141,8 @@ export interface AjoDefaulterNotice {
   cycle?: number | null
   amountNgn?: number
   strikes?: number
+  limit?: number      // strikes before removal (platform setting, default 4)
+  owedNgn?: number    // removed after collecting: what they still owe the circle
 }
 
 export async function sendAjoDefaulterEmail(userId: string, d: AjoDefaulterNotice): Promise<void> {
@@ -148,28 +150,32 @@ export async function sendAjoDefaulterEmail(userId: string, d: AjoDefaulterNotic
   const r = await recipient(userId)
   if (!r) return
   let heading: string, sub: string, subject: string, amount = '', amountColor = '#131A15'
+  const limit = d.limit && d.limit > 0 ? d.limit : 4
   if (d.action === 'debited') {
     heading = 'Ajo auto-contribution 🔄'
     sub = `Hi ${r.name}, we auto-collected your Ajo contribution to "${d.groupName}" so you don't miss your cycle.`
     amount = '−' + naira(d.amountNgn || 0)
     subject = `Auto-contributed ${naira(d.amountNgn || 0)} to "${d.groupName}"`
   } else if (d.action === 'strike') {
-    heading = `Missed Ajo contribution ⚠️ (strike ${d.strikes}/3)`
-    sub = `Hi ${r.name}, we couldn't collect your ${naira(d.amountNgn || 0)} contribution to "${d.groupName}" — not enough balance. Fund your wallet before the next cycle. After 3 misses you'll be removed from the circle.`
+    heading = `Missed Ajo contribution ⚠️ (strike ${d.strikes}/${limit})`
+    sub = `Hi ${r.name}, we couldn't collect your ${naira(d.amountNgn || 0)} contribution to "${d.groupName}" — not enough balance. Fund your wallet before the next cycle. After ${limit} missed cycles you'll be removed from the circle.`
     amountColor = '#B45309'
-    subject = `Ajo contribution missed — strike ${d.strikes}/3 ("${d.groupName}")`
+    subject = `Ajo contribution missed — strike ${d.strikes}/${limit} ("${d.groupName}")`
   } else {
     heading = 'Removed from Ajo circle'
-    sub = `Hi ${r.name}, you've been removed from "${d.groupName}" after 3 missed contributions. The circle creator can add you back — reach out to them.`
+    sub = d.owedNgn && d.owedNgn > 0
+      ? `Hi ${r.name}, you've been removed from "${d.groupName}" after ${d.strikes ?? limit} missed contributions. You had already received your payout, so you still owe the circle ${naira(d.owedNgn)}. Please contact support@pawasave.xyz to settle it.`
+      : `Hi ${r.name}, you've been removed from "${d.groupName}" after ${d.strikes ?? limit} missed contributions. The circle creator can add you back — reach out to them.`
+    if (d.owedNgn && d.owedNgn > 0) amount = naira(d.owedNgn) + ' owed'
     amountColor = '#B42318'
-    subject = `Removed from "${d.groupName}" after 3 missed contributions`
+    subject = `Removed from "${d.groupName}" after ${d.strikes ?? limit} missed contributions`
   }
   const html = shell({
     heading, sub, amount, amountColor,
     rows: [
       ['Circle', d.groupName],
       ['Cycle', d.cycle != null ? String(d.cycle) : ''],
-      ...(d.strikes ? [['Strikes', `${d.strikes}/3`] as [string, string]] : []),
+      ...(d.strikes ? [['Strikes', `${d.strikes}/${limit}`] as [string, string]] : []),
     ],
   })
   await sendMail({ to: r.email, subject, html, text: sub })

@@ -18,6 +18,8 @@ type Asset = {
   // Naira/GetEquity assets carry these instead of a TradingView chart:
   blurb?: string; kind?: 'term' | 'fund' | 'equity'; token?: string | null; naira?: boolean
   minCngn?: number // real minimum buy in ₦ (naira/GetEquity assets), from the live quote
+  feeBps?: number   // PawaSave buy fee for this asset (0 for Treasury Bills)
+  netRateBps?: number // yield the customer keeps a year, after PawaSave's share of the gain
 }
 // Buyable today (verified on-chain route) listed first; the rest launched on Base but have
 // no DEX liquidity yet, so they render as "Soon — verification pending" until we add a route.
@@ -125,6 +127,8 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
         setNairaAssets((d.assets || []).map((a: any) => ({
           symbol: a.symbol, name: a.name, blurb: a.blurb, kind: a.kind, token: a.token, naira: true,
           minCngn: a.minCngnMicro ? Number(a.minCngnMicro) / 1e6 : undefined,
+          feeBps: Number.isFinite(Number(a.feeBps)) ? Number(a.feeBps) : undefined,
+          netRateBps: Number(a.netRateBps) > 0 ? Number(a.netRateBps) : undefined,
         })))
         setNairaLive(!!d.live)
         if (Number.isFinite(Number(d.feeBps))) setNairaFeeBps(Number(d.feeBps))
@@ -306,6 +310,28 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
     }
   }
 
+  // GetEquity holdings (Treasury Bills fund, Dangote IPO) sell back to GetEquity's Market.
+  // sellAmount holds a unit count here; empty = sell everything.
+  async function sellRwa(h: Holding) {
+    const units = parseFloat(sellAmount)
+    setSellBusy(true)
+    try {
+      const res = await fetch('/api/invest/getequity/sell', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: h.symbol, units: units > 0 && units < Number(h.shares) ? units : null }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { flash(data.error || 'Could not sell'); return }
+      if (data.status === 'processing') flash('Sale complete. Your money is being credited.')
+      else flash(`Sold ${h.symbol}: ₦${(Number(data.proceedsMicro || 0) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })} added to your balance`)
+      setSelectedHolding(null); setSellAmount(''); refresh(); loadHoldings()
+    } catch {
+      flash('Something went wrong. Try again.')
+    } finally {
+      setSellBusy(false)
+    }
+  }
+
   // ── Sell sheet ──
   if (selectedHolding) {
     const h = selectedHolding
@@ -372,6 +398,24 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
             {msg && <div className={`flash ${isErr(msg) ? 'err' : 'ok'}`}>{msg}</div>}
             <button className="cta" onClick={() => sell(h)} disabled={sellBusy}>{sellBusy ? 'Selling…' : `Sell ${h.symbol}`}</button>
           </>
+        ) : h.asset_type === 'rwa' && h.provider === 'getequity' ? (
+          <>
+            <label className="lab" style={{ marginTop: 14 }}>Units to sell</label>
+            <div style={{ position: 'relative' }}>
+              <input className="field" type="number" inputMode="decimal" value={sellAmount}
+                onChange={e => setSellAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                placeholder={`All ${Number(h.shares).toLocaleString(undefined, { maximumFractionDigits: 4 })}`} autoFocus />
+              <button type="button" onClick={() => setSellAmount('')}
+                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 0, background: 'var(--surface-2)', color: 'var(--green)', fontWeight: 700, fontSize: 12, padding: '4px 10px', borderRadius: 999, cursor: 'pointer' }}>
+                All
+              </button>
+            </div>
+            <div className="note" style={{ marginTop: 12 }}>
+              Sold back to GetEquity at today&apos;s price and paid to your balance straight away. No exit charge: PawaSave only keeps a small share of any gain, and nothing if you sell at or below what you paid. Leave empty to sell everything{nairaMinUnits ? `; a part-sale must be at least ${nairaMinUnits} units` : ''}.
+            </div>
+            {msg && <div className={`flash ${isErr(msg) ? 'err' : 'ok'}`}>{msg}</div>}
+            <button className="cta" onClick={() => sellRwa(h)} disabled={sellBusy}>{sellBusy ? 'Selling…' : `Sell ${h.symbol}`}</button>
+          </>
         ) : (
           <div className="note" style={{ marginTop: 14 }}>Selling this asset from the app is coming soon.</div>
         )}
@@ -418,13 +462,14 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
         {/* Fee breakdown — the user sees exactly what PawaSave keeps and what gets invested. */}
         {selected.naira && live && parseFloat(amount) > 0 && (() => {
           const gross = parseFloat(amount)
-          const fee = Math.floor(gross * nairaFeeBps) / 10000
+          const feeBps = selected.feeBps ?? nairaFeeBps
+          const fee = Math.floor(gross * feeBps) / 10000
           const net = gross - fee
           const money = (n: number) => `₦${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
           return (
             <div className="note" style={{ marginTop: 12, display: 'grid', gap: 6 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>You pay</span><b>{money(gross)}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)' }}><span>PawaSave fee ({(nairaFeeBps / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%)</span><span>−{money(fee)}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)' }}><span>PawaSave fee ({(feeBps / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%)</span><span>{fee > 0 ? `−${money(fee)}` : 'Free'}</span></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Invested in {selected.symbol}</span><b>{money(net)}</b></div>
               <div style={{ color: 'var(--muted)', fontSize: 12 }}>A small GetEquity network fee (~0.5–1%) also applies on-chain.</div>
             </div>
@@ -502,7 +547,7 @@ export default function InvestView({ wallet, profile, refresh, onStartKyc }: Pro
           return (
             <button key={a.symbol} className="coll" style={{ width: '100%', background: 'none', border: 0, borderTop: '1px solid var(--line)', cursor: 'pointer', textAlign: 'left', opacity: soon ? 0.72 : 1 }} onClick={() => { setSelected(a); setAmount(''); setMsg('') }}>
               <StockLogo symbol={a.symbol} />
-              <div className="mid"><div className="nm">{a.name}</div><div className="sub">{a.blurb || a.symbol}</div></div>
+              <div className="mid"><div className="nm">{a.name}</div><div className="sub">{a.netRateBps ? `${(a.netRateBps / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}% a year · ` : ''}{a.blurb || a.symbol}</div></div>
               {q && <div style={{ width: 48, height: 28, flex: 'none' }}><Sparkline data={q.spark} up={up} height={28} /></div>}
               {soon ? (
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', background: 'var(--surface-2)', padding: '3px 8px', borderRadius: 999, flex: 'none' }}>Soon</span>

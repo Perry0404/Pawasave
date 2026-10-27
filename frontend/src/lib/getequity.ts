@@ -400,18 +400,31 @@ export async function sellAsset(
   token: string,
   amount: bigint,
   slippageBps = 100,
-): Promise<{ txHash: string }> {
+): Promise<{ txHash: string; payoutMicro: bigint }> {
   ensureEnabled()
   if (amount <= 0n) throw new Error('Zero amount')
   const signer = await getSigner()
+  const owner = await signer.getAddress()
   const market = new ethers.Contract(MARKET_ADDRESS, MARKET_ABI, signer)
 
   const { netPayout } = await quoteSell(token, amount)
   const minPayout = netPayout - (netPayout * BigInt(slippageBps)) / 10_000n
 
+  // Measure what actually arrived (payout-token balance before vs after), so the ledger
+  // credits the real proceeds rather than the quote.
+  const payToken: string = await new ethers.Contract(token, RWA_ABI, signer).payoutToken()
+  const pay = new ethers.Contract(payToken, ERC20_ABI, signer)
+  const before = b(await pay.balanceOf(owner))
   const tx = await market.sell(token, amount, minPayout, { gasLimit: GAS.sell })
   const receipt = await tx.wait()
-  return { txHash: receipt.hash }
+  // Once the sale has mined, nothing below may throw: a caller would treat it as failed and
+  // hand the units back even though they were sold.
+  let received = 0n
+  try { received = b(await pay.balanceOf(owner, { blockTag: receipt.blockNumber })) - before } catch { /* use the quote */ }
+  // An unrelated inflow to custody in the same window would inflate the delta; anything
+  // outside [minPayout, quote + 1%] falls back to the quote.
+  const plausible = received >= minPayout && received <= netPayout + netPayout / 100n
+  return { txHash: receipt.hash, payoutMicro: plausible ? received : netPayout }
 }
 
 // NOTE: `claimPayout()`/`pendingPayout()` were removed — GetEquity's model has no

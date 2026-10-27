@@ -45,6 +45,7 @@ async function getUser() {
 // Symbols verified on-chain against GetEquity's live Base MAINNET contracts (2026-09-15).
 const PRODUCT_META: Record<string, { name: string; kind: 'term' | 'fund' | 'equity'; blurb: string }> = {
   DPRI:  { name: 'Dangote Refinery IPO',         kind: 'equity', blurb: 'Pre-IPO equity' },
+  GNTB:  { name: 'Treasury Bills',               kind: 'fund',   blurb: 'Nigerian Treasury Bills via GetEquity · withdraw any day' },
   NTBS5: { name: 'Nigerian Treasury Bill Series 5', kind: 'term', blurb: 'Government-backed · fixed income' },
   NTBL:  { name: 'Nigerian Treasury Bill',       kind: 'term', blurb: 'Government-backed · fixed income' },
   NTBS8: { name: 'Nigerian Treasury Bill Series 8', kind: 'term', blurb: 'Government-backed · fixed income' },
@@ -78,6 +79,8 @@ type ProductCard = {
   rateBps: number         // annual yield in bps (1620 = 16.20% p.a.); 0 for equity/REIT
   tenorDays: number       // term in days (0 if none)
   minCngnMicro?: string   // real minimum buy (10 units at live price, grossed up for our fee)
+  feeBps?: number         // PawaSave buy fee for this asset (0 for zero-fee symbols)
+  netRateBps?: number     // yield the customer keeps after PawaSave's share of the gain
 }
 
 /** Static preview shown before the integration is switched on, so the tab is
@@ -109,6 +112,8 @@ function toCard(a: GetEquityAsset): ProductCard {
     maturityDate: a.maturityDate,
     rateBps: a.interestRateBps,
     tenorDays: a.tenorDays,
+    feeBps: feeBpsFor(a.symbol),
+    netRateBps: Math.floor((a.interestRateBps * (10_000 - SELL_GAIN_FEE_BPS)) / 10_000),
   }
 }
 
@@ -130,7 +135,7 @@ export async function GET() {
       if (!c.token || !c.tradeable) return c
       try {
         const minCost = (await quoteBuy(c.token, GETEQUITY_MIN_UNITS * 10n ** 18n)).totalCost
-        const minGross = (minCost * 10_000n) / BigInt(10_000 - FEE_BPS)
+        const minGross = (minCost * 10_000n) / BigInt(10_000 - feeBpsFor(c.symbol))
         return { ...c, minCngnMicro: minGross.toString() }
       } catch { return c }
     }))
@@ -160,8 +165,14 @@ const FEE_BPS = (() => {
   const n = Number(process.env.GETEQUITY_FEE_BPS)
   return Number.isFinite(n) && n >= 0 && n <= 1000 ? Math.floor(n) : 100
 })()
-function splitFee(gross: bigint): { fee: bigint; net: bigint } {
-  const fee = (gross * BigInt(FEE_BPS)) / 10_000n
+/** Symbols bought with no PawaSave buy fee (default the Treasury Bills fund, GNTB): there
+ *  PawaSave earns only its share of the gain on sale (see /api/invest/getequity/sell). */
+const ZERO_FEE = new Set((process.env.GETEQUITY_ZERO_FEE_SYMBOLS ?? 'GNTB').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean))
+function feeBpsFor(symbol: string): number { return ZERO_FEE.has(symbol.toUpperCase()) ? 0 : FEE_BPS }
+/** Must match GETEQUITY_SELL_GAIN_FEE_BPS in the sell route (default 345 = 0.5 of a 14.5% yield). */
+const SELL_GAIN_FEE_BPS = (() => { const n = Number(process.env.GETEQUITY_SELL_GAIN_FEE_BPS); return Number.isFinite(n) && n >= 0 && n <= 5000 ? Math.floor(n) : 345 })()
+function splitFee(gross: bigint, symbol: string): { fee: bigint; net: bigint } {
+  const fee = (gross * BigInt(feeBpsFor(symbol))) / 10_000n
   return { fee, net: gross - fee }
 }
 
@@ -215,7 +226,7 @@ export async function POST(request: NextRequest) {
     // Split the committed amount into PawaSave's fee (revenue) and the net that buys
     // the asset on-chain. The wallet is debited net+fee; the fee is booked to revenue
     // only when the buy fills, and fully refunded with the net if it fails.
-    const { fee, net } = splitFee(amount)
+    const { fee, net } = splitFee(amount, symbol)
 
     // Enforce GetEquity's minimum lot (default 10 units) BEFORE any debit — the NET
     // (what actually buys) must cover the cost of the minimum units at the live price.
@@ -224,7 +235,7 @@ export async function POST(request: NextRequest) {
       const minCost = (await quoteBuy(token, GETEQUITY_MIN_UNITS * 10n ** 18n)).totalCost
       if (net < minCost) {
         // Gross the user must commit so NET (= gross − our fee) still covers the minimum.
-        const minGross = (minCost * 10_000n) / BigInt(10_000 - FEE_BPS)
+        const minGross = (minCost * 10_000n) / BigInt(10_000 - feeBpsFor(symbol))
         const minNaira = Math.ceil(Number(minGross) / 1e6)
         return NextResponse.json(
           { error: `Minimum purchase is ${GETEQUITY_MIN_UNITS} units — about ₦${minNaira.toLocaleString('en-NG')}.` },

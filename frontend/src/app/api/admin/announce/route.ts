@@ -49,16 +49,31 @@ export async function POST(request: NextRequest) {
     for (const u of data.users) if (u.email && !/@deleted\.pawasave\.xyz$/i.test(u.email)) ids.push(u.id)
     if (data.users.length < 1000) break
   }
-  if (body?.dryRun !== false) return NextResponse.json({ dryRun: true, recipients: ids.length, subject: c.subject })
+  // Who already received this campaign (kept in platform_settings, one row per campaign), so a
+  // re-run after the mail provider's daily limit only reaches the people who missed it.
+  // `resumeFrom` marks the first N (in this same order) as already sent — for the first run,
+  // which predates this log.
+  const logKey = `announce_sent:${body.campaign}`
+  const { data: logRow } = await admin.from('platform_settings').select('value').eq('key', logKey).maybeSingle()
+  const done = new Set<string>((() => { try { return JSON.parse(logRow?.value || '[]') } catch { return [] } })())
+  const resumeFrom = Math.max(0, Math.floor(Number(body?.resumeFrom) || 0))
+  ids.slice(0, resumeFrom).forEach((id) => done.add(id))
+  const todo = ids.filter((id) => !done.has(id))
+  const limit = Math.max(1, Math.min(Math.floor(Number(body?.limit) || 45), 500)) // stay under the SMTP daily cap
+  if (body?.dryRun !== false) {
+    return NextResponse.json({ dryRun: true, recipients: ids.length, alreadySent: ids.length - todo.length, wouldSendNow: Math.min(todo.length, limit), subject: c.subject })
+  }
 
   let sent = 0, failed = 0
-  for (const id of ids) {
+  for (const id of todo.slice(0, limit)) {
     const ok = await sendAnnouncementEmail(id, { subject: c.subject, heading: c.heading, sub: c.sub, amount: c.amount, rows: [...c.rows], note: c.note, text: c.text })
       .catch(() => false)
-    if (ok) sent++; else failed++
+    if (ok) { sent++; done.add(id) } else failed++
     sendPushToUser(id, { ...c.push }).catch(() => {})
     await new Promise((r) => setTimeout(r, 400))
+    if (failed >= 3 && sent === 0) break // provider refusing everything: stop, try again later
   }
+  await admin.from('platform_settings').upsert({ key: logKey, value: JSON.stringify([...done]) }, { onConflict: 'key' })
   console.info('[admin/announce]', body.campaign, { sent, failed })
-  return NextResponse.json({ ok: true, campaign: body.campaign, recipients: ids.length, sent, failed })
+  return NextResponse.json({ ok: true, campaign: body.campaign, recipients: ids.length, sent, failed, remaining: ids.filter((id) => !done.has(id)).length })
 }

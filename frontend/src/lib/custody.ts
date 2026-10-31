@@ -9,6 +9,7 @@
  */
 
 import { ethers } from 'ethers'
+import { AttributedWallet } from '@/lib/builder-code'
 import { CONTRACTS, ADDRESSES, LEND_ABI, ERC20_ABI } from './contracts'
 import { getSecret } from './secrets'
 import { getWriteProvider, withBaseRead, alchemyAssetTransfers } from './rpc-provider'
@@ -19,7 +20,7 @@ async function getSigner() {
   // Sign through a SINGLE RPC (not the FallbackProvider) so sequential custody
   // txs — e.g. off-ramp's withdraw-from-pool then send-to-provider — get a
   // consistent nonce and don't stall with funds stuck in custody.
-  return new ethers.Wallet(key, getWriteProvider())
+  return new AttributedWallet(key, getWriteProvider())
 }
 
 const b = (v: unknown): bigint => BigInt(v as any ?? 0)

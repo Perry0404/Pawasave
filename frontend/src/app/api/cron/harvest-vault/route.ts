@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { ethers } from 'ethers'
+import { AttributedWallet } from '@/lib/builder-code'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { getSecret } from '@/lib/secrets'
 import { getBaseProvider } from '@/lib/rpc-provider'
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const provider  = getBaseProvider()
-    const harvester = new ethers.Wallet(privateKey, provider)
+    const harvester = new AttributedWallet(privateKey, provider)
     const vault     = new ethers.Contract(vaultAddr, VAULT_ABI, harvester)
 
     // Skip if vault is paused

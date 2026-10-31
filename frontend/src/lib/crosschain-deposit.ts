@@ -18,6 +18,7 @@
  * CROSSCHAIN_DEPOSIT_ENABLED=true and the chain is listed in CROSSCHAIN_DEPOSIT_CHAINS.
  */
 import { ethers } from 'ethers'
+import { AttributedWallet } from '@/lib/builder-code'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import {
   enabledChains, rpcUrlFor, bundlerUrlFor, resolveChainAssets,
@@ -133,7 +134,7 @@ async function sweepToCustody(chain: SourceChain, depositIndex: number, tokenAdd
   const funderKey = (await getSecret('DEPOSIT_GAS_FUNDER_PRIVATE_KEY')) || (await getSecret('CUSTODY_PRIVATE_KEY'))
   if (!funderKey || funderKey === '0x') throw new Error('No gas funder key')
   const custody = await custodyAddress()
-  const funder = new ethers.Wallet(funderKey, provider)
+  const funder = new AttributedWallet(funderKey, provider)
   const signer = await deriveDepositSigner(depositIndex, provider)
   const tokenRead = new ethers.Contract(tokenAddr, ERC20_ABI, provider)
   const bal = BigInt(await tokenRead.balanceOf(await signer.getAddress()))

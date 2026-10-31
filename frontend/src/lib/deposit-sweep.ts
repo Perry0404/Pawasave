@@ -27,6 +27,7 @@
  *   DEPOSIT_SWEEP_MAX               — max addresses swept per run (default 10)
  */
 import { ethers } from "ethers"
+import { AttributedWallet } from '@/lib/builder-code'
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { CONTRACTS } from "./contracts"
 import { deriveDepositSigner, depositWalletConfigured } from "./deposit-wallet"
@@ -88,7 +89,7 @@ export async function sweepDeposits(): Promise<{
   // hasn't seen the top-up yet and reverts with "insufficient funds for gas" (the
   // same public-RPC read-after-write race that broke custody txs — see custody.ts).
   const provider = getWriteProvider()
-  const funder   = new ethers.Wallet(funderKey, provider)
+  const funder   = new AttributedWallet(funderKey, provider)
   const cngnRead = new ethers.Contract(CONTRACTS.CNGN, ERC20_ABI, provider)
 
   const { data, error } = await supabase

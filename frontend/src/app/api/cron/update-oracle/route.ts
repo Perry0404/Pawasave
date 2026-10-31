@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ethers } from 'ethers'
+import { AttributedWallet } from '@/lib/builder-code'
 import { getNgnUsdRateFromFlint } from '@/lib/ramp-rate'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { getSecret } from '@/lib/secrets'
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest) {
     // 2nd/3rd would reuse the 1st's nonce and silently drop, leaving tokens unpriced
     // until the oracle went stale. Same fix already applied to custody/sweep/off-ramp.
     const provider = getWriteProvider()
-    const keeper   = new ethers.Wallet(keeperKey, provider)
+    const keeper   = new AttributedWallet(keeperKey, provider)
     const oracle   = new ethers.Contract(oracleAddr, ORACLE_ABI, keeper)
 
     // USDC/USDT track the live USD rate; cNGN is the peg (1 cNGN = 1 cNGN).

@@ -33,6 +33,7 @@
  */
 
 import { ethers } from 'ethers'
+import { AttributedWallet } from '@/lib/builder-code'
 import { CONTRACTS, ERC20_ABI } from './contracts'
 import { getSecret } from './secrets'
 import { getWriteProvider, withBaseRead } from './rpc-provider'
@@ -245,7 +246,7 @@ export function supportedEquitySymbols(): string[] {
 async function getSigner(): Promise<ethers.Wallet> {
   const key = await getSecret('CUSTODY_PRIVATE_KEY')
   if (!key) throw new Error('CUSTODY_PRIVATE_KEY not configured')
-  return new ethers.Wallet(key, getWriteProvider())
+  return new AttributedWallet(key, getWriteProvider())
 }
 
 const QUOTER_ABI = ['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96)) returns (uint256 amountOut,uint160,uint32,uint256)']

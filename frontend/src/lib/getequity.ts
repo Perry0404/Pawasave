@@ -43,6 +43,7 @@
  */
 
 import { ethers } from 'ethers'
+import { AttributedWallet } from '@/lib/builder-code'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSecret } from './secrets'
 import {
@@ -73,7 +74,7 @@ function getProvider(): ethers.JsonRpcProvider {
 async function getSigner(): Promise<ethers.Wallet> {
   const key = await getSecret('CUSTODY_PRIVATE_KEY')
   if (!key) throw new Error('CUSTODY_PRIVATE_KEY not configured')
-  return new ethers.Wallet(key, getProvider())
+  return new AttributedWallet(key, getProvider())
 }
 
 const b = (v: unknown): bigint => BigInt((v as any) ?? 0)

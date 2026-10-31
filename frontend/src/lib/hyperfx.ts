@@ -36,6 +36,13 @@ import { ethers } from 'ethers'
 import { CONTRACTS } from './contracts'
 import { getSecret } from './secrets'
 import { cngnBalanceOf } from './custody'
+import { builderCodeSuffix } from './builder-code'
+
+/** Base Builder Code (ERC-8021) suffix for viem wallet clients on Base; empty when not configured. */
+function attribution(): { dataSuffix?: `0x${string}` } {
+  const suffix = builderCodeSuffix()
+  return suffix ? { dataSuffix: suffix as `0x${string}` } : {}
+}
 
 export const HYPERFX_ENABLED = process.env.HYPERFX_ENABLED === 'true'
 
@@ -133,7 +140,7 @@ async function convert(direction: Direction, amountInMicro: bigint): Promise<big
 
   const account = await custodyAccount(viemAccounts)
   // `chain` is required so viem can fill chainId/gas/nonce when signing locally.
-  const walletClient = viem.createWalletClient({ account, chain: baseChain, transport: viem.http(RPC) })
+  const walletClient = viem.createWalletClient({ account, chain: baseChain, transport: viem.http(RPC), ...attribution() })
 
   const id = chain.config.stateMachineId
   const usdc = chain.configService.getUsdcAsset(id)

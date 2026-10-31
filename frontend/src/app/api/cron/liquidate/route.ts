@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ethers } from 'ethers'
+import { AttributedWallet } from '@/lib/builder-code'
 import { checkCronAuth } from '@/lib/cron-auth'
 import { getSecret } from '@/lib/secrets'
 import { getWriteProvider } from '@/lib/rpc-provider'
@@ -67,7 +68,7 @@ export async function GET(request: NextRequest) {
     // FallbackProvider races nonces across endpoints, so the 2nd+ tx would reuse a
     // stale nonce and silently drop. Same fix already applied to oracle/custody/off-ramp.
     const provider = getWriteProvider()
-    const keeper   = new ethers.Wallet(keeperKey, provider)
+    const keeper   = new AttributedWallet(keeperKey, provider)
     const lend     = new ethers.Contract(lendAddr, LEND_ABI, keeper)
     const cngn     = new ethers.Contract(CNGN, ERC20_ABI, keeper)
 

@@ -33,6 +33,7 @@
  */
 
 import { ethers } from 'ethers'
+import { AttributedWallet } from '@/lib/builder-code'
 import { CONTRACTS, ERC20_ABI } from './contracts'
 import { getSecret } from './secrets'
 import { getWriteProvider, withBaseRead } from './rpc-provider'
@@ -132,7 +133,7 @@ const MORPHO_ABI = [
 async function getSigner(): Promise<ethers.Wallet> {
   const key = await getSecret('CUSTODY_PRIVATE_KEY')
   if (!key) throw new Error('CUSTODY_PRIVATE_KEY not configured')
-  return new ethers.Wallet(key, getWriteProvider())
+  return new AttributedWallet(key, getWriteProvider())
 }
 
 async function ensureApproval(token: string, owner: string, spender: string, need: bigint, signer: ethers.Wallet): Promise<void> {
